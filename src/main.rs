@@ -31,7 +31,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(5.0, 5.0, 7.5).looking_at(Vec3::new(0.0, 1., 0.), Vec3::Y),
+        transform: Transform::from_xyz(2.0, 2.0, 3.0).looking_at(Vec3::new(0.0, 0.4, 0.), Vec3::Y),
         ..default()
     });
 
