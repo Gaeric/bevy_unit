@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use bevy::{animation::animate_targets, prelude::*};
+use blenvy::*;
 
 mod dev;
 
@@ -12,6 +13,10 @@ fn main() {
         })
         .insert_resource(ClearColor(Color::srgb_u8(70, 112, 216)))
         .add_plugins(DefaultPlugins)
+        .add_plugins(BlenvyPlugin {
+            export_registry: false,
+            ..default()
+        })
         .add_plugins(dev::plugin)
         .add_systems(Startup, setup)
         .add_systems(Startup, assets_setup)

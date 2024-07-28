@@ -1269,6 +1269,7 @@ dependencies = [
  "bevy_editor_pls",
  "bevy_egui",
  "bevy_reflect_derive",
+ "blenvy",
  "serde",
 ]
 
@@ -1333,6 +1334,18 @@ dependencies = [
  "cc",
  "cfg-if",
  "constant_time_eq",
+]
+
+[[package]]
+name = "blenvy"
+version = "0.1.0-alpha.1"
+source = "git+https://github.com/kaosat-dev/Blenvy.git?branch=blenvy#17b31daa30e2b85d91a6f9b13d36de3a50c4366d"
+dependencies = [
+ "bevy",
+ "gltf",
+ "ron",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
