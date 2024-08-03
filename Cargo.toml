@@ -10,4 +10,5 @@ bevy_editor_pls = { git = "https://github.com/zhaop/bevy_editor_pls.git", branch
 blenvy = { git = "https://github.com/kaosat-dev/Blenvy.git", branch = "blenvy" }
 bevy_reflect_derive = "0.14.0"
 serde = { version = "1", features = ["derive"] }
+avian3d = "0.1.1"
 

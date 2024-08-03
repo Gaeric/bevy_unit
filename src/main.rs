@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use blenvy::*;
+use avian3d::prelude::*;
 
 mod animation_demo;
 mod dev;
@@ -11,6 +12,7 @@ fn main() -> AppExit {
         // .add_plugins(dev::plugin)
         .add_plugins(BlenvyPlugin::default())
         .register_type::<Player>()
+        .add_plugins(PhysicsPlugins::default())
         .add_systems(Startup, setup)
         .run()
 }
