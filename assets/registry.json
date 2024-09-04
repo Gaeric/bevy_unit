@@ -516,6 +516,22 @@
       "type": "array",
       "typeInfo": "TupleStruct"
     },
+    "avian3d::collision::collider::PreviousColliderTransform": {
+      "isComponent": true,
+      "isResource": false,
+      "items": false,
+      "long_name": "avian3d::collision::collider::PreviousColliderTransform",
+      "prefixItems": [
+        {
+          "type": {
+            "$ref": "#/$defs/avian3d::collision::collider::ColliderTransform"
+          }
+        }
+      ],
+      "short_name": "PreviousColliderTransform",
+      "type": "array",
+      "typeInfo": "TupleStruct"
+    },
     "avian3d::collision::collider::Sensor": {
       "additionalProperties": false,
       "isComponent": true,
@@ -1088,22 +1104,6 @@
       "short_name": "ColliderConstructorHierarchyConfig",
       "type": "object",
       "typeInfo": "Struct"
-    },
-    "avian3d::collision::collider::hierarchy::PreviousColliderTransform": {
-      "isComponent": true,
-      "isResource": false,
-      "items": false,
-      "long_name": "avian3d::collision::collider::hierarchy::PreviousColliderTransform",
-      "prefixItems": [
-        {
-          "type": {
-            "$ref": "#/$defs/avian3d::collision::collider::ColliderTransform"
-          }
-        }
-      ],
-      "short_name": "PreviousColliderTransform",
-      "type": "array",
-      "typeInfo": "TupleStruct"
     },
     "avian3d::collision::collider::parry::FillMode": {
       "isComponent": false,
@@ -2947,6 +2947,28 @@
       "type": "object",
       "typeInfo": "Struct"
     },
+    "avian3d::sync::ancestor_marker::AncestorMarker<avian3d::collision::collider::backend::ColliderMarker>": {
+      "additionalProperties": false,
+      "isComponent": true,
+      "isResource": false,
+      "long_name": "avian3d::sync::ancestor_marker::AncestorMarker<avian3d::collision::collider::backend::ColliderMarker>",
+      "properties": {},
+      "required": [],
+      "short_name": "AncestorMarker<ColliderMarker>",
+      "type": "object",
+      "typeInfo": "Struct"
+    },
+    "avian3d::sync::ancestor_marker::AncestorMarker<avian3d::dynamics::rigid_body::RigidBody>": {
+      "additionalProperties": false,
+      "isComponent": true,
+      "isResource": false,
+      "long_name": "avian3d::sync::ancestor_marker::AncestorMarker<avian3d::dynamics::rigid_body::RigidBody>",
+      "properties": {},
+      "required": [],
+      "short_name": "AncestorMarker<RigidBody>",
+      "type": "object",
+      "typeInfo": "Struct"
+    },
     "bevy_animation::AnimationClip": {
       "additionalProperties": false,
       "isComponent": false,
@@ -3206,7 +3228,7 @@
     },
     "bevy_animation::transition::AnimationTransitions": {
       "additionalProperties": false,
-      "isComponent": false,
+      "isComponent": true,
       "isResource": false,
       "long_name": "bevy_animation::transition::AnimationTransitions",
       "properties": {
@@ -4089,10 +4111,10 @@
       "type": "object",
       "typeInfo": "Enum"
     },
-    "bevy_asset::handle::Handle<blenvy::blueprints::spawn_from_blueprints::RawGltfAsset>": {
+    "bevy_asset::handle::Handle<blenvy::blueprints::assets::BlueprintPreloadAssets>": {
       "isComponent": true,
       "isResource": false,
-      "long_name": "bevy_asset::handle::Handle<blenvy::blueprints::spawn_from_blueprints::RawGltfAsset>",
+      "long_name": "bevy_asset::handle::Handle<blenvy::blueprints::assets::BlueprintPreloadAssets>",
       "oneOf": [
         {
           "items": false,
@@ -4114,7 +4136,7 @@
           "prefixItems": [
             {
               "type": {
-                "$ref": "#/$defs/bevy_asset::id::AssetId<blenvy::blueprints::spawn_from_blueprints::RawGltfAsset>"
+                "$ref": "#/$defs/bevy_asset::id::AssetId<blenvy::blueprints::assets::BlueprintPreloadAssets>"
               }
             }
           ],
@@ -4123,7 +4145,7 @@
           "typeInfo": "Tuple"
         }
       ],
-      "short_name": "Handle<RawGltfAsset>",
+      "short_name": "Handle<BlueprintPreloadAssets>",
       "type": "object",
       "typeInfo": "Enum"
     },
@@ -5139,10 +5161,10 @@
       "type": "object",
       "typeInfo": "Enum"
     },
-    "bevy_asset::id::AssetId<blenvy::blueprints::spawn_from_blueprints::RawGltfAsset>": {
+    "bevy_asset::id::AssetId<blenvy::blueprints::assets::BlueprintPreloadAssets>": {
       "isComponent": false,
       "isResource": false,
-      "long_name": "bevy_asset::id::AssetId<blenvy::blueprints::spawn_from_blueprints::RawGltfAsset>",
+      "long_name": "bevy_asset::id::AssetId<blenvy::blueprints::assets::BlueprintPreloadAssets>",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -5181,7 +5203,7 @@
           "typeInfo": "Struct"
         }
       ],
-      "short_name": "AssetId<RawGltfAsset>",
+      "short_name": "AssetId<BlueprintPreloadAssets>",
       "type": "object",
       "typeInfo": "Enum"
     },
@@ -13023,7 +13045,7 @@
     },
     "bevy_ui::ui_node::BorderRadius": {
       "additionalProperties": false,
-      "isComponent": false,
+      "isComponent": true,
       "isResource": false,
       "long_name": "bevy_ui::ui_node::BorderRadius",
       "properties": {
@@ -15585,6 +15607,28 @@
       "short_name": "BlenderToneMapping",
       "type": "string",
       "typeInfo": "Enum"
+    },
+    "blenvy::save_load::Dynamic": {
+      "additionalProperties": false,
+      "isComponent": true,
+      "isResource": false,
+      "long_name": "blenvy::save_load::Dynamic",
+      "properties": {},
+      "required": [],
+      "short_name": "Dynamic",
+      "type": "object",
+      "typeInfo": "Struct"
+    },
+    "blenvy::save_load::StaticEntitiesRoot": {
+      "additionalProperties": false,
+      "isComponent": true,
+      "isResource": false,
+      "long_name": "blenvy::save_load::StaticEntitiesRoot",
+      "properties": {},
+      "required": [],
+      "short_name": "StaticEntitiesRoot",
+      "type": "object",
+      "typeInfo": "Struct"
     },
     "bool": {
       "isComponent": false,

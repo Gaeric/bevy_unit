@@ -1,12 +1,13 @@
 use std::time::Duration;
 
+use avian3d::prelude::{Collider, RigidBody};
 use bevy::{animation::animate_targets, prelude::*};
 
 #[allow(dead_code)]
 pub(crate) fn plugin(app: &mut App) {
     app.insert_resource(AmbientLight {
         color: Color::WHITE,
-        brightness: 200.,
+        brightness: 5000.,
     })
     .insert_resource(ClearColor(Color::srgb_u8(70, 112, 216)))
     .add_systems(Startup, setup)
@@ -15,14 +16,14 @@ pub(crate) fn plugin(app: &mut App) {
     .add_systems(Update, keyboard_animation_control);
 }
 
-
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(2.0, 2.0, 3.0).looking_at(Vec3::new(0.0, 0.4, 0.), Vec3::Y),
+        transform: Transform::from_xyz(10.0, 10.0, 10.0)
+            .looking_at(Vec3::new(0.0, 0.0, 0.), Vec3::Y),
         ..default()
     });
 
@@ -49,11 +50,12 @@ fn assets_setup(
     let animations: Vec<AnimationNodeIndex> = graph
         .add_clips(
             [
-                GltfAssetLabel::Animation(4).from_asset("female_base/ani-model4.gltf"),
-                GltfAssetLabel::Animation(3).from_asset("female_base/ani-model4.gltf"),
-                GltfAssetLabel::Animation(2).from_asset("female_base/ani-model4.gltf"),
-                GltfAssetLabel::Animation(1).from_asset("female_base/ani-model4.gltf"),
-                GltfAssetLabel::Animation(0).from_asset("female_base/ani-model4.gltf"),
+                // GltfAssetLabel::Animation(4).from_asset("female_base/ani-model4.gltf"),
+                // GltfAssetLabel::Animation(3).from_asset("female_base/ani-model4.gltf"),
+                // GltfAssetLabel::Animation(2).from_asset("female_base/ani-model4.gltf"),
+                // GltfAssetLabel::Animation(1).from_asset("female_base/ani-model4.gltf"),
+                // GltfAssetLabel::Animation(0).from_asset("female_base/ani-model4.gltf"),
+                GltfAssetLabel::Animation(0).from_asset("female_base/untitled.glb"),
             ]
             .into_iter()
             .map(|path| asset_server.load(path)),
@@ -68,11 +70,15 @@ fn assets_setup(
         graph: graph.clone(),
     });
 
-    commands.spawn(SceneBundle {
-        scene: asset_server
-            .load(GltfAssetLabel::Scene(0).from_asset("female_base/ani-model4.gltf")),
-        ..default()
-    });
+    commands.spawn((
+        SceneBundle {
+            scene: asset_server
+                .load(GltfAssetLabel::Scene(0).from_asset("female_base/untitled.glb")),
+            ..default()
+        },
+        // Collider::cuboid(2.0, 2.0, 2.0),
+        // RigidBody::Static,
+    ));
 }
 
 fn setup_scene_once_loaded(
