@@ -1,9 +1,10 @@
-use bevy::prelude::*;
-use blenvy::*;
 use avian3d::prelude::*;
+use bevy::prelude::*;
 use bevy_silk::prelude::*;
+use blenvy::*;
 
 mod animation_demo;
+mod bone_demo;
 mod cloth_demo;
 mod dev;
 
@@ -11,9 +12,9 @@ fn main() -> AppExit {
     App::new()
         .add_plugins(DefaultPlugins)
         // .add_plugins(animation_demo::plugin)
+        .add_plugins(bone_demo::plugin)
         .add_plugins(dev::plugin)
         // .add_plugins(cloth_demo::plugin)
-
         // .add_plugins(BlenvyPlugin::default())
         // .register_type::<Player>()
         // .add_plugins(PhysicsPlugins::default())
