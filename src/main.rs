@@ -7,13 +7,15 @@ mod animation_demo;
 mod bone_demo;
 mod cloth_demo;
 mod dev;
+mod ui;
 
 fn main() -> AppExit {
     App::new()
         .add_plugins(DefaultPlugins)
         // .add_plugins(animation_demo::plugin)
-        .add_plugins(bone_demo::plugin)
-        .add_plugins(dev::plugin)
+        // .add_plugins(bone_demo::plugin)
+        .add_plugins(ui::plugin)
+        // .add_plugins(dev::plugin)
         // .add_plugins(cloth_demo::plugin)
         // .add_plugins(BlenvyPlugin::default())
         // .register_type::<Player>()
