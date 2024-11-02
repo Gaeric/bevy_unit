@@ -3,6 +3,9 @@ name = "bevy_workflow"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = ["modular_character"]
+
 [dependencies]
 bevy = { version = "0.14.0", features = ["wayland", "dynamic_linking"] }
 bevy_egui = "0.28.0"
@@ -12,5 +15,5 @@ bevy_reflect_derive = "0.14.0"
 serde = { version = "1", features = ["derive"] }
 avian3d = "0.1.1"
 bevy_silk = {version = "0.9.0", features = ["avian_collisions"]}
-sickle_ui = "0.3.0"
+modular_character = {path = "modular_character"}
 

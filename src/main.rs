@@ -1,7 +1,7 @@
-use avian3d::prelude::*;
 use bevy::prelude::*;
-use bevy_silk::prelude::*;
 use blenvy::*;
+
+use modular_character::ModularCharacterPlugin;
 
 mod animation_demo;
 mod bone_demo;
