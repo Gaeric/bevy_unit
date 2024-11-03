@@ -6,3 +6,15 @@
 #+OPTIONS: ^:{}
 * Intro
   这个仓库用来记录我学习或拓展的bevy的某个示例
+** modular character
+   @see 
+   https://github.com/SnowdenWintermute/bevy-modular-characters-proof-of-concept
+
+   这个plugin是对原仓库链接的完全复制，试图弄明白模块化角色的生成方法，因为bevy 0.13到bevy 0.14版本动画系统进行了一些调整，目前在动画上存在一些问题尚未解决。
+
+   基于这个原型，我将使用一些其它素材，完成一个角色模块化拼接的demo，以完全理解如何实现模块化角色模型。
+   
+*** TODO animations
+    可以获取到正常的AnimationClip，但是不知道应该如何正常在拼接好的人物上播放动画，有待后续继续深入了解。
+
+
