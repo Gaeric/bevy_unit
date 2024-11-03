@@ -60,8 +60,8 @@ pub fn run_animations(
         Added<AnimationEntityLink>,
     >,
     scene_entities_by_name: Res<SceneEntitiesByName>,
-    graphs: Res<Assets<AnimationGraph>>,
-    animations_index: Res<AnimationsIndex>,
+    animations: Res<Animations>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
 ) {
     println!("run animations");
     let main_skeleton_scene_entity = scene_entities_by_name
@@ -69,7 +69,10 @@ pub fn run_animations(
         .get("modular_character/main_skeleton.glb")
         .expect("the scene to be registered");
 
-    println!("main skeleton scene entity: {:#?}", main_skeleton_scene_entity);
+    println!(
+        "main skeleton scene entity: {:#?}",
+        main_skeleton_scene_entity
+    );
 
     let (_, animation_player_entity_link) = scene_and_animation_player_link_query
         .get(*main_skeleton_scene_entity)
@@ -81,25 +84,15 @@ pub fn run_animations(
 
     println!("animation_player is {:#?}", animation_player_entity_link.0);
 
-    // let animation_clip = animations
-    //     .0
-    //     .get("Sword_Slash")
-    //     .expect("to have an animation by this name")
-    //     .clone_weak();
+    let animation_clip = animations
+        .0
+        .get("Sword_Slash")
+        .expect("to have sword_slash")
+        .clone_weak();
 
-    // println!("animation_clip: {animation_clip:#?}");
+    let mut graph = AnimationGraph::new();
+    let animate_index = graph.add_clip(animation_clip, 1.0, graph.root);
+    graphs.add(graph);
 
-    // animation_clip.id();
-    // println!("animation_clip id: {:#?}", animation_clip.id());
-
-    // let (_graph, node_index) = AnimationGraph::from_clip(animation_clip);
-    // println!("node_index: {node_index:#?}");
-
-    let graph = graphs.get(&animations_index.graph).unwrap();
-    let index = animations_index.animations.get("Sword_Slash").unwrap();
-    println!("sword slash i {index:#?}");
-
-    animation_player.play(12.into()).repeat().set_speed(0.5);
-
-    // animation_player.play(node_index).repeat().set_speed(0.5);
+    animation_player.play(animate_index).repeat();
 }
