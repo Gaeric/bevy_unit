@@ -11,6 +11,12 @@ pub struct SceneEntitiesByName(pub HashMap<String, Entity>);
 #[derive(Resource, Debug)]
 pub struct Animations(pub HashMap<String, Handle<AnimationClip>>);
 
+#[derive(Resource, Debug)]
+pub struct AnimationsIndex {
+    pub graph: Handle<AnimationGraph>,
+    pub animations: HashMap<String, AnimationNodeIndex>,
+}
+
 #[derive(States, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub enum SpawnScenesState {
     #[default]
@@ -34,7 +40,7 @@ pub fn spawn_scenes(
 
             let mut transform = Transform::from_xyz(0.0, 0.0, 0.0);
 
-            if name == "sword.glb" {
+            if name == "modular_character/sword.glb" {
                 transform.scale = Vec3::splat(0.1);
             }
 

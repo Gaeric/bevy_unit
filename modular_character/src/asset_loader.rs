@@ -33,4 +33,9 @@ pub struct MCAssets {
         collection(typed, mapped)
     )]
     pub gltf_files: HashMap<String, Handle<Gltf>>,
+    #[asset(
+        paths("modular_character/FiraSans-Regular.ttf"),
+        collection(typed, mapped)
+    )]
+    pub font_files: HashMap<String, Handle<Font>>,
 }
