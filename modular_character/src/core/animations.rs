@@ -54,13 +54,14 @@ pub fn link_animations(
 }
 
 pub fn run_animations(
+    mut commands: Commands,
     mut animation_players_query: Query<&mut AnimationPlayer>,
     scene_and_animation_player_link_query: Query<
         (&SceneName, &AnimationEntityLink),
         Added<AnimationEntityLink>,
     >,
-    scene_entities_by_name: Res<SceneEntitiesByName>,
     animations: Res<Animations>,
+    scene_entities_by_name: Res<SceneEntitiesByName>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
 ) {
     println!("run animations");
@@ -90,9 +91,15 @@ pub fn run_animations(
         .expect("to have sword_slash")
         .clone_weak();
 
-    let mut graph = AnimationGraph::new();
-    let animate_index = graph.add_clip(animation_clip, 1.0, graph.root);
-    graphs.add(graph);
+    // let mut graph = AnimationGraph::new();
+    // let animate_index = graph.add_clip(animation_clip, 1.0, graph.root);
 
-    animation_player.play(animate_index).repeat();
+    // animation_player.play(animate_index).repeat();
+
+    // Create a new `AnimationGraph` and add the animation handle to it.
+    let (graph, animation_index) = AnimationGraph::from_clip(animation_clip);
+
+    animation_player.play(animation_index);
+
+    commands.spawn((animation_player.clone(), graphs.add(graph)));
 }
