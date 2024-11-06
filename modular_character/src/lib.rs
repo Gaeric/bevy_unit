@@ -7,7 +7,7 @@ use asset_loader::AssetLoaderPlugin;
 mod core;
 use core::ModularCharacterCorePlugin;
 
-use bevy::{app::Plugin, color::Color, pbr::AmbientLight};
+use bevy::{app::Plugin, pbr::AmbientLight, prelude::Color};
 use bevy_mod_billboard::plugin::BillboardPlugin;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 

@@ -1,3 +1,4 @@
+use bevy::gltf::Gltf;
 use bevy::prelude::*;
 use bevy::utils::HashMap;
 use bevy_asset_loader::loading_state::{LoadingState, LoadingStateAppExt};

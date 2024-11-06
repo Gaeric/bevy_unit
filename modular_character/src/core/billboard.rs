@@ -14,7 +14,7 @@ pub fn paint_cubes_on_joints(
     asset_pack: Res<MCAssets>,
     names: Query<&Name>,
 ) {
-    let cube_color = Color::srgb(1.0, 0.0, 0.0);
+    let cube_color = Color::rgb(1.0, 0.0, 0.0);
     let cube_material_handle = materials.add(StandardMaterial {
         base_color: cube_color.clone(),
         ..Default::default()

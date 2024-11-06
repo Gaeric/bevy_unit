@@ -7,13 +7,6 @@ edition = "2021"
 members = ["modular_character"]
 
 [dependencies]
-bevy = { version = "0.14.2", features = ["wayland", "dynamic_linking"] }
-bevy_egui = "0.28.0"
-bevy_editor_pls = { git = "https://github.com/zhaop/bevy_editor_pls.git", branch = "bevy-0.14" }
-blenvy = { git = "https://github.com/kaosat-dev/Blenvy.git", branch = "blenvy" }
-bevy_reflect_derive = "0.14.0"
-serde = { version = "1", features = ["derive"] }
-avian3d = "0.1.1"
-bevy_silk = {version = "0.9.0", features = ["avian_collisions"]}
+bevy = { version = "0.13.0", features = ["wayland", "dynamic_linking"] }
 modular_character = {path = "modular_character"}
 

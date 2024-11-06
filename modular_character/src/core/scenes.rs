@@ -1,4 +1,4 @@
-use bevy::{prelude::*, scene::serde::SCENE_ENTITIES, utils::hashbrown::HashMap};
+use bevy::{gltf::Gltf, prelude::*, utils::hashbrown::HashMap};
 
 use crate::asset_loader::MCAssets;
 
@@ -10,12 +10,6 @@ pub struct SceneEntitiesByName(pub HashMap<String, Entity>);
 
 #[derive(Resource, Debug)]
 pub struct Animations(pub HashMap<String, Handle<AnimationClip>>);
-
-#[derive(Resource, Debug)]
-pub struct AnimationsIndex {
-    pub graph: Handle<AnimationGraph>,
-    pub animations: HashMap<String, AnimationNodeIndex>,
-}
 
 #[derive(States, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub enum SpawnScenesState {
