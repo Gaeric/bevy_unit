@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bevy::prelude::*;
 
 use super::scenes::{Animations, SceneEntitiesByName, SceneName, SpawnScenesState};
@@ -52,6 +54,7 @@ pub fn link_animations(
 }
 
 pub fn run_animations(
+    mut commands: Commands,
     mut animation_players_query: Query<&mut AnimationPlayer>,
     scene_and_animation_player_link_query: Query<
         (&SceneName, &AnimationEntityLink),
@@ -59,17 +62,12 @@ pub fn run_animations(
     >,
     animations: Res<Animations>,
     scene_entities_by_name: Res<SceneEntitiesByName>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
 ) {
-    println!("run animations");
     let main_skeleton_scene_entity = scene_entities_by_name
         .0
         .get("modular_character/main_skeleton.glb")
         .expect("the scene to be registered");
-
-    println!(
-        "main skeleton scene entity: {:#?}",
-        main_skeleton_scene_entity
-    );
 
     let (_, animation_player_entity_link) = scene_and_animation_player_link_query
         .get(*main_skeleton_scene_entity)
@@ -79,16 +77,24 @@ pub fn run_animations(
         .get_mut(animation_player_entity_link.0)
         .expect("to have an animation player on the main skelection");
 
-    println!("animation_player is {:#?}", animation_player_entity_link.0);
-
     let animation_clip = animations
         .0
         .get("Sword_Slash")
         .expect("to have sword_slash")
         .clone_weak();
 
-    animation_player
-        .play(animation_clip)
-        .repeat()
-        .set_speed(0.5);
+    let (graph, animation_index) = AnimationGraph::from_clip(animation_clip);
+
+    let graph_handle = graphs.add(graph);
+
+    let mut transitions = AnimationTransitions::new();
+
+    transitions
+        .play(&mut animation_player, animation_index, Duration::ZERO)
+        .repeat();
+
+    commands
+        .entity(animation_player_entity_link.0)
+        .insert(graph_handle)
+        .insert(transitions);
 }

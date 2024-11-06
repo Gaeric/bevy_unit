@@ -9,7 +9,7 @@ use modular_character::ModularCharacterPlugin;
 // mod dev;
 // mod ui;
 
-fn main() {
+fn main() -> AppExit {
     App::new()
         .add_plugins(DefaultPlugins)
         // .add_plugins(animation_demo::plugin)
