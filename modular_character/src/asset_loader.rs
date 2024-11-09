@@ -17,7 +17,8 @@ impl Plugin for AssetLoaderPlugin {
         app.init_state::<AssetLoaderState>().add_loading_state(
             LoadingState::new(AssetLoaderState::Loading)
                 .continue_to_state(AssetLoaderState::Done)
-                .load_collection::<MCAssets>(),
+                .load_collection::<MCAssets>()
+                .load_collection::<DemoAssets>(),
         );
     }
 }
@@ -30,6 +31,26 @@ pub struct MCAssets {
             "modular_character/scifi_torso.glb",
             "modular_character/witch_legs.glb",
             "modular_character/sword.glb",
+        ),
+        collection(typed, mapped)
+    )]
+    pub gltf_files: HashMap<String, Handle<Gltf>>,
+    #[asset(
+        paths("modular_character/FiraSans-Regular.ttf"),
+        collection(typed, mapped)
+    )]
+    pub font_files: HashMap<String, Handle<Font>>,
+}
+
+#[derive(AssetCollection, Resource)]
+pub struct DemoAssets {
+    #[asset(
+        paths(
+            "modular_character/female_body.glb",
+            "modular_character/female_top.glb",
+            "modular_character/female_bot.glb",
+            "modular_character/female_socks.glb",
+            "modular_character/female_shoes.glb",
         ),
         collection(typed, mapped)
     )]
