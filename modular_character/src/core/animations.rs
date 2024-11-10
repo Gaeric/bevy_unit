@@ -30,6 +30,7 @@ pub fn link_animations(
 ) {
     // Get all the Animation players which can be deep and hidden in the hdirachy
     for entity_with_animation_player in animation_players_query.iter() {
+        println!("link animations hahahahah {}", entity_with_animation_player);
         let top_entity: Entity = get_top_parent(
             entity_with_animation_player,
             &all_entities_with_parents_query,

@@ -7,16 +7,9 @@
 * Intro
   这个仓库用来记录我学习或拓展的bevy的某个示例
 ** modular character
-   @see 
-   https://github.com/SnowdenWintermute/bevy-modular-characters-proof-of-concept
+   这个示例展示了如何将多个使用相同骨骼或基于同一套骨骼拆分出的各个子模块拼接到一起，并播放完整动画的功能。
 
-   这个plugin是对原仓库链接的完全复制，试图弄明白模块化角色的生成方法，因为bevy 0.13到bevy 0.14版本动画系统进行了一些调整，目前在动画上存在一些问题尚未解决。
-
-   基于这个原型，我将使用一些其它素材，完成一个角色模块化拼接的demo，以完全理解如何实现模块化角色模型。
-*** summary
-    这个示例展示了如何将多个使用相同骨骼或基于同一套骨骼拆分出的各个子模块拼接到一起，并播放完整动画的功能。
-
-    其技术原理为：首先通过完整的骨骼文件，获取到人物的骨骼层次。然后依次扫描所有场景的骨骼结构，根据其名称，为其各个骨骼节点重新绑定父骨骼。
+   其技术原理为：根据文件的设置，获取完整的人物骨架，将各个子骨架按名称重新将从属关系绑定至完整骨架上。
 *** DONE animations
     :LOGBOOK:
     - State "DONE"       from "TODO"       [2024-11-10 Sun 20:35] \\
@@ -37,7 +30,7 @@
           scene_and_animation_player_link_query: Query<
               (&SceneName, &AnimationEntityLink),
               Added<AnimationEntityLink>,
-          >,
+              >,
           animations: Res<Animations>,
           scene_entities_by_name: Res<SceneEntitiesByName>,
           mut graphs: ResMut<Assets<AnimationGraph>>,
@@ -77,7 +70,9 @@
               .insert(transitions);
       }
     #+end_src
-
+*** reference
+    @see 
+    https://github.com/SnowdenWintermute/bevy-modular-characters-proof-of-concept
 ** fps ui
    一个提示帧数的UI库
 

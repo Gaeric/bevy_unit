@@ -1,6 +1,6 @@
 use bevy::{gltf::Gltf, prelude::*, utils::hashbrown::HashMap};
 
-use crate::asset_loader::MCAssets;
+use crate::asset_loader::{DemoAssets, MCAssets};
 
 #[derive(Component, Debug)]
 pub struct SceneName(pub String);
@@ -52,6 +52,46 @@ pub fn spawn_scenes(
 
             for named_animation in gltf.named_animations.iter() {
                 println!("inserting animation: {}", named_animation.0);
+                animations.insert(
+                    named_animation.0.to_string().clone(),
+                    gltf.named_animations[named_animation.0].clone(),
+                );
+            }
+        }
+    }
+
+    commands.insert_resource(Animations(animations));
+    commands.insert_resource(SceneEntitiesByName(scene_entities_by_name));
+
+    next_state.set(SpawnScenesState::Spawned);
+}
+
+pub fn spawn_demo_scenes(
+    mut commands: Commands,
+    asset_pack: Res<DemoAssets>,
+    assets_gltf: Res<Assets<Gltf>>,
+    mut next_state: ResMut<NextState<SpawnScenesState>>,
+) {
+    let mut animations = HashMap::new();
+    let mut scene_entities_by_name = HashMap::new();
+
+    for (name, gltf_handle) in &asset_pack.gltf_files {
+        if let Some(gltf) = assets_gltf.get(gltf_handle) {
+            println!("Demo Spawn {name}");
+
+            let entity_commands = commands.spawn((
+                SceneBundle {
+                    scene: gltf.named_scenes["Scene"].clone(),
+                    ..Default::default()
+                },
+                SceneName(name.clone()),
+            ));
+
+            let entity = entity_commands.id();
+            scene_entities_by_name.insert(name.clone(), entity);
+
+            for named_animation in gltf.named_animations.iter() {
+                println!("gltf animation: {}", named_animation.0);
                 animations.insert(
                     named_animation.0.to_string().clone(),
                     gltf.named_animations[named_animation.0].clone(),
