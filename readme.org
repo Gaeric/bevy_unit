@@ -14,7 +14,68 @@
 
    基于这个原型，我将使用一些其它素材，完成一个角色模块化拼接的demo，以完全理解如何实现模块化角色模型。
    
-*** TODO animations
+*** DONE animations
+    :LOGBOOK:
+    - State "DONE"       from "TODO"       [2024-11-10 Sun 20:35] \\
+      finish and close
+    :END:
     可以获取到正常的AnimationClip，但是不知道应该如何正常在拼接好的人物上播放动画，有待后续继续深入了解。
 
+    在discord上求助后，我发现存在原始代码可能存在的两个问题：
 
+    1. clip需要进行处理，生成AnimationGraph并插入到该实体中
+    2. 可能需要使用transitions来播放动画
+
+    经过上面两个小点的调整之后，我成功播放了动画，以下是动画播放部分的代码
+    #+begin_src rust-ts
+      pub fn run_animations(
+          mut commands: Commands,
+          mut animation_players_query: Query<&mut AnimationPlayer>,
+          scene_and_animation_player_link_query: Query<
+              (&SceneName, &AnimationEntityLink),
+              Added<AnimationEntityLink>,
+          >,
+          animations: Res<Animations>,
+          scene_entities_by_name: Res<SceneEntitiesByName>,
+          mut graphs: ResMut<Assets<AnimationGraph>>,
+      ) {
+          let main_skeleton_scene_entity = scene_entities_by_name
+              .0
+              .get("modular_character/main_skeleton.glb")
+              .expect("the scene to be registered");
+
+          let (_, animation_player_entity_link) = scene_and_animation_player_link_query
+              .get(*main_skeleton_scene_entity)
+              .expect("the scene to exist");
+
+          let mut animation_player = animation_players_query
+              .get_mut(animation_player_entity_link.0)
+              .expect("to have an animation player on the main skelection");
+
+          let animation_clip = animations
+              .0
+              .get("Sword_Slash")
+              .expect("to have sword_slash")
+              .clone_weak();
+
+          let (graph, animation_index) = AnimationGraph::from_clip(animation_clip);
+
+          let graph_handle = graphs.add(graph);
+
+          let mut transitions = AnimationTransitions::new();
+
+          transitions
+              .play(&mut animation_player, animation_index, Duration::ZERO)
+              .repeat();
+
+          commands
+              .entity(animation_player_entity_link.0)
+              .insert(graph_handle)
+              .insert(transitions);
+      }
+    #+end_src
+
+** fps ui
+   一个提示帧数的UI库
+
+   https://github.com/IyesGames/iyes_perf_ui
