@@ -73,7 +73,7 @@
    一个提示帧数的UI库
 
    https://github.com/IyesGames/iyes_perf_ui
-** lumen
+** bevy_lumen
    学习如何在最新的bevy库上，使用路径追踪技术构建全局光照
 *** reference
     https://github.com/cryscan/bevy-hikari
