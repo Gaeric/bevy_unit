@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = [ "bevy_lumen","modular_character"]
+members = [ "bevy_shine","modular_character"]
 
 [dependencies]
-bevy = { version = "0.15.0-rc.3", features = ["wayland", "dynamic_linking"] }
+bevy = { version = "0.15.0", features = ["wayland", "dynamic_linking"] }
 # modular_character = { path = "modular_character" }
 

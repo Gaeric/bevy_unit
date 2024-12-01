@@ -1370,10 +1370,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_lumen"
-version = "0.1.0"
-
-[[package]]
 name = "bevy_macro_utils"
 version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1828,6 +1824,10 @@ dependencies = [
  "serde",
  "uuid",
 ]
+
+[[package]]
+name = "bevy_shine"
+version = "0.1.0"
 
 [[package]]
 name = "bevy_sprite"
