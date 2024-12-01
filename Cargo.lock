@@ -608,7 +608,18 @@ checksum = "47863215e4454e0142cc7e0f7801ad256d44e690f43186743e3e2bc9da2de870"
 dependencies = [
  "anyhow",
  "bevy 0.14.2",
- "bevy_asset_loader_derive",
+ "bevy_asset_loader_derive 0.21.0",
+ "path-slash",
+]
+
+[[package]]
+name = "bevy_asset_loader"
+version = "0.22.0"
+source = "git+https://github.com/NiklasEi/bevy_asset_loader?branch=bevy-0-15#36d6eb7384ee5b385f166d73d69ad296863b2c8e"
+dependencies = [
+ "anyhow",
+ "bevy 0.15.0",
+ "bevy_asset_loader_derive 0.22.0",
  "path-slash",
 ]
 
@@ -617,6 +628,16 @@ name = "bevy_asset_loader_derive"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b12bd14ec1f3e57760d01b239bd27ab5dd13547379e5a83c167c7162525f646"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "bevy_asset_loader_derive"
+version = "0.22.0"
+source = "git+https://github.com/NiklasEi/bevy_asset_loader?branch=bevy-0-15#36d6eb7384ee5b385f166d73d69ad296863b2c8e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1755,6 +1776,7 @@ name = "bevy_shine"
 version = "0.1.0"
 dependencies = [
  "bevy 0.15.0",
+ "bevy_asset_loader 0.22.0",
 ]
 
 [[package]]
@@ -3827,7 +3849,7 @@ name = "modular_character"
 version = "0.1.0"
 dependencies = [
  "bevy 0.14.2",
- "bevy_asset_loader",
+ "bevy_asset_loader 0.21.0",
  "bevy_mod_billboard",
  "bevy_panorbit_camera",
 ]
