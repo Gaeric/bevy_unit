@@ -1,6 +1,9 @@
 use bevy::{
     asset::load_internal_asset,
-    core_pipeline::core_3d::graph::Core3d,
+    core_pipeline::{
+        core_3d::graph::{Core3d, Node3d},
+        post_process::PostProcessingPipeline,
+    },
     ecs::query::QueryItem,
     prelude::*,
     render::{
@@ -99,6 +102,27 @@ impl Plugin for ShinePlugin {
         render_app
             // The [`ViewNodeRunder`] is a special [`Node`] that will automatically run the node for each view
             // matching the [`ViewQuery`]
-            .add_render_graph_node::<ViewNodeRunner<PostProcessNode>>(Core3d, PostProcessLabel);
+            .add_render_graph_node::<ViewNodeRunner<PostProcessNode>>(Core3d, PostProcessLabel)
+            .add_render_graph_edges(
+                Core3d,
+                // Specify the node ordering.
+                // This will automatically create all required node edges to enforce the given ordering
+                (
+                    Node3d::Tonemapping,
+                    PostProcessLabel,
+                    Node3d::EndMainPassPostProcessing,
+                ),
+            );
+    }
+
+    fn finish(&self, app: &mut App) {
+        // We need to get the render app from the main cpp
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+
+        render_app
+            // Initialize the pipeline
+            .init_resource::<PostProcessingPipeline>();
     }
 }
