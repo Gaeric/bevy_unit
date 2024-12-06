@@ -1,6 +1,9 @@
 use bevy::{
     asset::load_internal_asset,
-    core_pipeline::core_3d::graph::{Core3d, Node3d},
+    core_pipeline::{
+        core_3d::graph::{Core3d, Node3d},
+        fullscreen_vertex_shader::fullscreen_shader_vertex_state,
+    },
     ecs::query::QueryItem,
     prelude::*,
     render::{
@@ -10,8 +13,14 @@ use bevy::{
         render_graph::{
             NodeRunError, RenderGraphApp, RenderGraphContext, RenderLabel, ViewNode, ViewNodeRunner,
         },
-        render_resource::{BindGroupLayout, CachedRenderPipelineId, Sampler, ShaderType},
-        renderer::RenderContext,
+        render_resource::{
+            binding_types::{sampler, texture_2d, uniform_buffer},
+            BindGroupLayout, BindGroupLayoutEntries, CachedRenderPipelineId, ColorTargetState,
+            ColorWrites, FragmentState, MultisampleState, PipelineCache, PrimitiveState,
+            RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages,
+            ShaderType, TextureFormat, TextureSampleType,
+        },
+        renderer::{RenderContext, RenderDevice},
         view::ViewTarget,
         RenderApp,
     },
@@ -20,6 +29,9 @@ use bevy::{
 pub struct ShinePlugin;
 
 pub const UTILS_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(4462033275253590181);
+
+/// This example uses a shader source file from the assets subdirectory
+const SHADER_ASSET_PATH: &str = "shaders/post_processing.wgsl";
 
 #[derive(Component, Default, Clone, Copy, ExtractComponent, ShaderType)]
 struct PostProcessSettings {
@@ -36,7 +48,65 @@ struct PostProcessPipeline {
 
 impl FromWorld for PostProcessPipeline {
     fn from_world(world: &mut World) -> Self {
+        let render_device = world.resource::<RenderDevice>();
+
+        // We nned to define the bind group layout used for our pipeline
+        let layout = render_device.create_bind_group_layout(
+            "post_process_bind_group_layout",
+            &BindGroupLayoutEntries::sequential(
+                // The layout entries will only be visible in the fragment stage
+                ShaderStages::FRAGMENT,
+                (
+                    // The screen texture
+                    texture_2d(TextureSampleType::Float { filterable: true }),
+                    // The sampler that will used to sample the screen texture
+                    sampler(SamplerBindingType::Filtering),
+                    // The settings uniform that will control the effect
+                    uniform_buffer::<PostProcessSettings>(true),
+                ),
+            ),
+        );
+
+        // We can create the sampler here since it won't change at runtime and doesn't depend on the view
+        let sampler = render_device.create_sampler(&SamplerDescriptor::default());
+
+        // Get the shader handle
+        let shader = world.load_asset(SHADER_ASSET_PATH);
+
+        let pipeline_id =
+            world
+                .resource_mut::<PipelineCache>()
+                .queue_render_pipeline(RenderPipelineDescriptor {
+                    label: Some("post_process_pipeline".into()),
+                    layout: vec![layout.clone()],
+                    // This will setup a fullscreen triangle for the vertex state
+                    vertex: fullscreen_shader_vertex_state(),
+                    fragment: Some(FragmentState {
+                        shader,
+                        shader_defs: vec![],
+                        // Make sure this matches the entry point of your shader.
+                        // It can be anything as long as it matches here and in the shader.
+                        entry_point: "fragment".into(),
+                        targets: vec![Some(ColorTargetState {
+                            format: TextureFormat::bevy_default(),
+                            blend: None,
+                            write_mask: ColorWrites::ALL,
+                        })],
+                    }),
+
+                    // All of the following properties are not important for this effect so just use the default values.
+                    // This struct doesn't have the Default trait implemented because not all fields can have a default value.
+                    primitive: PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: MultisampleState::default(),
+                    push_constant_ranges: vec![],
+                    zero_initialize_workgroup_memory: false,
+                });
+
         Self {
+            layout,
+            sampler,
+            pipeline_id,
         }
     }
 }
