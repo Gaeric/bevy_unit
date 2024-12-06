@@ -1,9 +1,6 @@
 use bevy::{
     asset::load_internal_asset,
-    core_pipeline::{
-        core_3d::graph::{Core3d, Node3d},
-        post_process::PostProcessingPipeline,
-    },
+    core_pipeline::core_3d::graph::{Core3d, Node3d},
     ecs::query::QueryItem,
     prelude::*,
     render::{
@@ -13,7 +10,7 @@ use bevy::{
         render_graph::{
             NodeRunError, RenderGraphApp, RenderGraphContext, RenderLabel, ViewNode, ViewNodeRunner,
         },
-        render_resource::ShaderType,
+        render_resource::{BindGroupLayout, CachedRenderPipelineId, Sampler, ShaderType},
         renderer::RenderContext,
         view::ViewTarget,
         RenderApp,
@@ -27,6 +24,21 @@ pub const UTILS_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(446203327
 #[derive(Component, Default, Clone, Copy, ExtractComponent, ShaderType)]
 struct PostProcessSettings {
     intensity: f32,
+}
+
+// Tis contains global data used by the render poipeline. This will be created once on startup.
+#[derive(Resource)]
+struct PostProcessPipeline {
+    layout: BindGroupLayout,
+    sampler: Sampler,
+    pipeline_id: CachedRenderPipelineId,
+}
+
+impl FromWorld for PostProcessPipeline {
+    fn from_world(world: &mut World) -> Self {
+        Self {
+        }
+    }
 }
 
 // The post process node used for the render graph
@@ -51,6 +63,13 @@ impl ViewNode for PostProcessNode {
         &'static DynamicUniformIndex<PostProcessSettings>,
     );
 
+    // Runs the node logic
+    // This is where you encode draw commands.
+    //
+    // This will run on every view on which the graph is running.
+    // If you don't want your effect to run on every camera,
+    // you'll need to make sure you have a marker component as part of [`ViewQuery`]
+    // to identify which camera(s) should run the effect.
     fn run(
         &self,
         _graph: &mut RenderGraphContext,
@@ -58,6 +77,9 @@ impl ViewNode for PostProcessNode {
         (view_target, _post_process_settings, settings_index): QueryItem<Self::ViewQuery>,
         world: &World,
     ) -> Result<(), NodeRunError> {
+        // Get the pipeline resource that contains the global data we need
+        // to create the render pipeline
+        let post_process_pipeline = world.resource::<PostProcessPipeline>();
         Ok(())
     }
 }
@@ -123,6 +145,6 @@ impl Plugin for ShinePlugin {
 
         render_app
             // Initialize the pipeline
-            .init_resource::<PostProcessingPipeline>();
+            .init_resource::<PostProcessPipeline>();
     }
 }
