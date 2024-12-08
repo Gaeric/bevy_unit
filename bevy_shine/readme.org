@@ -14,7 +14,6 @@
   5. [-] 传统降噪方法
   6. [-] 基于光线追踪硬件的优化
 
-
   猜测原始项目bevy_hikari是如何做到其列举的那些Feature的:
 
   - [ ] Extraction and preparation of mesh assets and instances
@@ -68,3 +67,5 @@
    http://raytracinggems.com/
 
    学习过程中大量参考《Ray Tracing Gems II》
+* Tips
+  1. 实现基础原型时不与bevy代码过度藕合，保证独立和简单的基础功能以理解原型本身是最重要的事情。
