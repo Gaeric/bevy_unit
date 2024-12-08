@@ -2,24 +2,51 @@
   ray tracing for bevy
 ** Intro
    这个crate基于bevy 0.15开始开发，目标是为bevy 0.16及以上版本支持路径追踪技术的全局光照。
-** roadmap
-   为了保证项目有计划可度量的进行，项目的开发进度受到本章指引。由于目前处于学习阶段，于是我们采样猜想并证明的方式渐进推进项目进展。
+* roadmap
+  为了保证项目有计划可度量的进行，项目的开发进度受到本章指引。由于目前处于学习阶段，于是我们采样猜想并证明的方式渐进推进项目进展。
 
-   具体来说，我们先根据已经掌握的知识，构想出如何实现一个完善可用的光线追踪库，并在既有项目和书藉中找到对应的实现并深入分析和验证其技术原理。
+  具体来说，我们先根据已经掌握的知识，构想出如何实现一个完善可用的光线追踪库，并在既有项目和书藉中找到对应的实现并深入分析和验证其技术原理。
 
-   猜测原始项目bevy_hikari是如何做到其列举的那些Feature的
-*** 猜想
-    Path Tracing从相机开始，向着屏幕上的每一个像素发出射线，这一条射线会击中场景中的物体，并发生弹射。
+  猜测原始项目bevy_hikari是如何做到其列举的那些Feature的:
 
-    1. 射线生成：射线生成有两个部分，一是从相机开始向像素投射的初始射线，二是与场景碰撞之后的次生射线
-    2. 射线与物体相交判断
-    3. 弹射所使用的BDXF函数
-    4. 由于硬件限制，每个像素的射线数量可能不多，开发过程统一按硬件1spp来假设
-    5. 对于1spp的路径追踪，会产生大量噪点，使用双边滤波降噪
-    6. 采用Temporal类方法加权上一帧的结果
-**** 疑问
-     1. 路径追踪是图像逐像素顺序的，光栅化渲染过种是逐物体的，两者如何结合
-     2. 路径追踪的相机、屏幕像素、物体位置和光栅化过程中使用的MVPE矩阵
+  [ ]Extraction and preparation of mesh assets and instances
+  [ ]Asynchronous building of acceleration structures
+  [ ]G-Buffer generation
+  [ ]N-bounce indirect lighting
+  [ ]Transparency
+  [ ]Next event estimation
+  [ ]Better light sampling (L-BVH + Alias table)
+  [ ]ReSTIR: Temporal sample reuse
+  [ ]ReSTIR: Spatial sample reuse
+  [ ]Spatiotemporal filtering
+  [ ]Temporal anti-aliasing
+  [ ]Spatial up-scaling (FSR 1.0)
+  [ ]Temporal up-scaling (SMAA TU4X)
+  [ ]Skinned animation
+  [ ]HDR output
+  [ ]Bloom
+  [ ]Hardware ray tracing (upstream related)
+** 原理
+   Path Tracing从相机开始，向着屏幕上的每一个像素发出射线，这一条射线会击中场景中的物体，并发生弹射。
+
+   1. 射线生成：射线生成有两个部分，一是从相机开始向像素投射的初始射线，二是与场景碰撞之后的次生射线
+   2. 射线与物体相交判断
+   3. 弹射所使用的BDXF函数
+   4. 由于硬件限制，每个像素的射线数量可能不多，开发过程统一按硬件1spp来假设
+   5. 对于1spp的路径追踪，会产生大量噪点，使用双边滤波降噪
+   6. 采用Temporal类方法加权上一帧的结果
+*** 疑问
+    1. 路径追踪是图像逐像素顺序的，光栅化渲染过种是逐物体的，两者如何结合
+    2. 路径追踪的相机、屏幕像素、物体位置和光栅化过程中使用的MVPE矩阵
+    3. render_graph如何将这些过程组合起来
+* 实现
+  PREPASS -> LIGHT -> POST_PROCESS -> OVERLAY -> BLOOM -> TONEMAPPING -> UPSCALING
+
+  以上述几个步骤拆分整个crate
+** prepass
+** light
+** post_process
+** overlay
 * Reference
 ** bevy_hikari
    https://github.com/cryscan/bevy-hikari
@@ -30,6 +57,6 @@
 
    在开始本项目前，我学习了《Ray Tracing in One Weedkend》系列三本书藉，按照参考代码实现了书中的示例
 ** 《Ray Tracing Gems II》
-    http://raytracinggems.com/
+   http://raytracinggems.com/
 
-    学习过程中大量参考《Ray Tracing Gems II》
+   学习过程中大量参考《Ray Tracing Gems II》
