@@ -14,6 +14,7 @@ use post_process::{
 };
 
 mod post_process;
+mod prepass;
 
 pub struct ShinePlugin;
 
