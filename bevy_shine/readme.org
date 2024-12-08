@@ -7,25 +7,33 @@
 
   具体来说，我们先根据已经掌握的知识，构想出如何实现一个完善可用的光线追踪库，并在既有项目和书藉中找到对应的实现并深入分析和验证其技术原理。
 
+  1. [-] 实现一个基础路径追踪
+  2. [-] BVH加速结构
+  3. [-] 重要性采样
+  4. [-] 基于temporal的优化
+  5. [-] 传统降噪方法
+  6. [-] 基于光线追踪硬件的优化
+
+
   猜测原始项目bevy_hikari是如何做到其列举的那些Feature的:
 
-  [ ]Extraction and preparation of mesh assets and instances
-  [ ]Asynchronous building of acceleration structures
-  [ ]G-Buffer generation
-  [ ]N-bounce indirect lighting
-  [ ]Transparency
-  [ ]Next event estimation
-  [ ]Better light sampling (L-BVH + Alias table)
-  [ ]ReSTIR: Temporal sample reuse
-  [ ]ReSTIR: Spatial sample reuse
-  [ ]Spatiotemporal filtering
-  [ ]Temporal anti-aliasing
-  [ ]Spatial up-scaling (FSR 1.0)
-  [ ]Temporal up-scaling (SMAA TU4X)
-  [ ]Skinned animation
-  [ ]HDR output
-  [ ]Bloom
-  [ ]Hardware ray tracing (upstream related)
+  - [ ] Extraction and preparation of mesh assets and instances
+  - [ ] Asynchronous building of acceleration structures
+  - [ ] G-Buffer generation
+  - [ ] N-bounce indirect lighting
+  - [ ] Transparency
+  - [ ] Next event estimation
+  - [ ] Better light sampling (L-BVH + Alias table)
+  - [ ] ReSTIR: Temporal sample reuse
+  - [ ] ReSTIR: Spatial sample reuse
+  - [ ] Spatiotemporal filtering
+  - [ ] Temporal anti-aliasing
+  - [ ] Spatial up-scaling (FSR 1.0)
+  - [ ] Temporal up-scaling (SMAA TU4X)
+  - [ ] Skinned animation
+  - [ ] HDR output
+  - [ ] Bloom
+  - [ ] Hardware ray tracing (upstream related)
 ** 原理
    Path Tracing从相机开始，向着屏幕上的每一个像素发出射线，这一条射线会击中场景中的物体，并发生弹射。
 
