@@ -9,11 +9,11 @@ use bevy::{
     },
 };
 
-use post_process_demo::{
+use post_process::{
     PostProcessLabel, PostProcessNode, PostProcessPipeline, PostProcessSettings,
 };
 
-mod post_process_demo;
+mod post_process;
 
 pub struct ShinePlugin;
 
