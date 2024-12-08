@@ -18,7 +18,7 @@ use bevy::{
 };
 
 /// This example uses a shader source file from the assets subdirectory
-const SHADER_ASSET_PATH: &str = "shaders/post_processing.wgsl";
+const SHADER_ASSET_PATH: &str = "shaders/post_processing_demo.wgsl";
 
 #[derive(Component, Default, Clone, Copy, ExtractComponent, ShaderType)]
 pub struct PostProcessSettings {

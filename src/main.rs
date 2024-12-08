@@ -3,6 +3,8 @@ use bevy::prelude::*;
 
 // use modular_character::ModularCharacterPlugin;
 
+use bevy_shine::ShinePlugin;
+
 // mod animation_demo;
 // mod bone_demo;
 // mod cloth_demo;
@@ -22,6 +24,7 @@ fn main() -> AppExit {
         // .register_type::<Player>()
         // .add_plugins(PhysicsPlugins::default())
         // .add_systems(Startup, setup)
+        .add_plugins(ShinePlugin)
         .run()
 }
 

@@ -8,5 +8,6 @@ members = [ "bevy_shine","modular_character"]
 
 [dependencies]
 bevy = { version = "0.15.0", features = ["wayland", "dynamic_linking"] }
+bevy_shine = {path = "bevy_shine"}
 # modular_character = { path = "modular_character" }
 
