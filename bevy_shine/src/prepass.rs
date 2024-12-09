@@ -4,16 +4,19 @@ use bevy::{
     app::{Plugin, Update},
     asset::{Assets, Handle},
     image::{Image, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
+    pbr::{GpuLights, MeshUniform},
     prelude::*,
     render::{
         extract_component::{ExtractComponent, ExtractComponentPlugin},
         render_phase::{DrawFunctionId, DrawFunctions, PhaseItem, PhaseItemExtraIndex},
         render_resource::{
-            AsBindGroup, BindGroupLayout, CachedRenderPipelineId, Extent3d,
-            TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+            binding_types::uniform_buffer, AsBindGroup, BindGroupLayout, BindGroupLayoutEntries,
+            CachedRenderPipelineId, Extent3d, ShaderStages, ShaderType, TextureDescriptor,
+            TextureDimension, TextureFormat, TextureUsages,
         },
         renderer::RenderDevice,
         sync_world::MainEntity,
+        view::ViewUniform,
         RenderApp,
     },
 };
@@ -156,7 +159,7 @@ impl PhaseItem for Prepass {
 
     #[inline]
     fn extra_index(&self) -> PhaseItemExtraIndex {
-        self.extra_index
+        self.extra_index.clone()
     }
 
     #[inline]
@@ -172,15 +175,48 @@ pub struct PrepassPipeline {
 }
 
 // todo
+#[derive(Debug, Default, Clone, Copy, Component, ShaderType)]
 pub struct FrameUniform {
     pub kernel: Mat3,
+}
+
+#[derive(Component, Default, Clone, Copy, ShaderType)]
+pub struct InstanceIndex {
+    pub instance: u32,
+    pub material: u32,
 }
 
 impl FromWorld for PrepassPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
 
-        Self {}
+        let view_layout = render_device.create_bind_group_layout(
+            "shine prepass all",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::all(),
+                (
+                    uniform_buffer::<FrameUniform>(true),
+                    uniform_buffer::<ViewUniform>(true),
+                    uniform_buffer::<GpuLights>(true),
+                ),
+            ),
+        );
+
+        let mesh_layout = render_device.create_bind_group_layout(
+            "shine prepass vertex",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::VERTEX_FRAGMENT,
+                (
+                    uniform_buffer::<MeshUniform>(true),
+                    uniform_buffer::<InstanceIndex>(true),
+                ),
+            ),
+        );
+
+        Self {
+            view_layout,
+            mesh_layout,
+        }
     }
 }
 
