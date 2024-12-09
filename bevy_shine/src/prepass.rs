@@ -8,7 +8,7 @@ use bevy::{
         render_resource::{
             AsBindGroup, Extent3d, TextureDescriptor, TextureDimension, TextureFormat,
             TextureUsages,
-        },
+        }, RenderApp,
     },
 };
 
@@ -116,5 +116,9 @@ impl Plugin for PrepassPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(ExtractComponentPlugin::<PrepassTextures>::default())
             .add_systems(Update, prepass_textures_system);
+
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
     }
 }
