@@ -1,3 +1,5 @@
+use core::ops::Range;
+
 use bevy::{
     app::{Plugin, Update},
     asset::{Assets, Handle},
@@ -5,10 +7,14 @@ use bevy::{
     prelude::*,
     render::{
         extract_component::{ExtractComponent, ExtractComponentPlugin},
+        render_phase::{DrawFunctionId, DrawFunctions, PhaseItem, PhaseItemExtraIndex},
         render_resource::{
-            AsBindGroup, Extent3d, TextureDescriptor, TextureDimension, TextureFormat,
-            TextureUsages,
-        }, RenderApp,
+            AsBindGroup, BindGroupLayout, CachedRenderPipelineId, Extent3d,
+            TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+        },
+        renderer::RenderDevice,
+        sync_world::MainEntity,
+        RenderApp,
     },
 };
 
@@ -112,6 +118,72 @@ fn prepass_textures_system(
     }
 }
 
+pub struct Prepass {
+    pub distance: f32,
+    // todo
+    pub entity: (Entity, MainEntity),
+    pub pipeline: CachedRenderPipelineId,
+    pub draw_function: DrawFunctionId,
+    // todo
+    pub batch_range: Range<u32>,
+    pub extra_index: PhaseItemExtraIndex,
+}
+
+impl PhaseItem for Prepass {
+    #[inline]
+    fn entity(&self) -> Entity {
+        self.entity.0
+    }
+
+    fn main_entity(&self) -> MainEntity {
+        self.entity.1
+    }
+
+    #[inline]
+    fn draw_function(&self) -> DrawFunctionId {
+        self.draw_function
+    }
+
+    #[inline]
+    fn batch_range(&self) -> &std::ops::Range<u32> {
+        &self.batch_range
+    }
+
+    #[inline]
+    fn batch_range_mut(&mut self) -> &mut Range<u32> {
+        &mut self.batch_range
+    }
+
+    #[inline]
+    fn extra_index(&self) -> PhaseItemExtraIndex {
+        self.extra_index
+    }
+
+    #[inline]
+    fn batch_range_and_extra_index_mut(&mut self) -> (&mut Range<u32>, &mut PhaseItemExtraIndex) {
+        (&mut self.batch_range, &mut self.extra_index)
+    }
+}
+
+#[derive(Resource)]
+pub struct PrepassPipeline {
+    pub view_layout: BindGroupLayout,
+    pub mesh_layout: BindGroupLayout,
+}
+
+// todo
+pub struct FrameUniform {
+    pub kernel: Mat3,
+}
+
+impl FromWorld for PrepassPipeline {
+    fn from_world(world: &mut World) -> Self {
+        let render_device = world.resource::<RenderDevice>();
+
+        Self {}
+    }
+}
+
 impl Plugin for PrepassPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(ExtractComponentPlugin::<PrepassTextures>::default())
@@ -120,5 +192,9 @@ impl Plugin for PrepassPlugin {
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
+
+        render_app
+            .init_resource::<DrawFunctions<Prepass>>()
+            .init_resource::<PrepassPipeline>();
     }
 }
