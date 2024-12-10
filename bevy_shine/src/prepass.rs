@@ -4,15 +4,22 @@ use bevy::{
     app::{Plugin, Update},
     asset::{Assets, Handle},
     image::{Image, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
-    pbr::{GpuLights, MeshUniform},
+    pbr::{DrawMesh, GpuLights, MeshPipelineKey, MeshUniform, PREPASS_SHADER_HANDLE},
     prelude::*,
     render::{
         extract_component::{ExtractComponent, ExtractComponentPlugin},
-        render_phase::{DrawFunctionId, DrawFunctions, PhaseItem, PhaseItemExtraIndex},
+        mesh::MeshVertexBufferLayoutRef,
+        render_phase::{
+            AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions,
+            PhaseItem, PhaseItemExtraIndex, SetItemPipeline,
+        },
         render_resource::{
             binding_types::uniform_buffer, AsBindGroup, BindGroupLayout, BindGroupLayoutEntries,
-            CachedRenderPipelineId, Extent3d, ShaderStages, ShaderType, TextureDescriptor,
-            TextureDimension, TextureFormat, TextureUsages,
+            CachedRenderPipelineId, ColorTargetState, ColorWrites, CompareFunction,
+            DepthStencilState, Extent3d, FragmentState, FrontFace, MultisampleState, PolygonMode,
+            PrimitiveState, RenderPipelineDescriptor, ShaderStages, ShaderType,
+            SpecializedMeshPipeline, SpecializedMeshPipelineError, SpecializedMeshPipelines,
+            TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, VertexState,
         },
         renderer::RenderDevice,
         sync_world::MainEntity,
@@ -24,8 +31,10 @@ use bevy::{
 pub const POSITION_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const NORMAL_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
 pub const DEPTH_GRADIENT_FORMAT: TextureFormat = TextureFormat::Rg32Float;
-pub const INSTACE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg32Float;
+pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg32Float;
 pub const VELOCITY_UV_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
+
+pub const SHADOW_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
 pub struct PrepassPlugin;
 
@@ -105,7 +114,7 @@ fn prepass_textures_system(
             let position = images.add(create_texture(POSITION_FORMAT));
             let normal = images.add(create_texture(NORMAL_FORMAT));
             let depth_gradient = images.add(create_texture(DEPTH_GRADIENT_FORMAT));
-            let instance_material = images.add(create_texture(INSTACE_MATERIAL_FORMAT));
+            let instance_material = images.add(create_texture(INSTANCE_MATERIAL_FORMAT));
             let velocity_uv = images.add(create_texture(VELOCITY_UV_FORMAT));
             // todo: previous for temporal
 
@@ -217,6 +226,91 @@ impl FromWorld for PrepassPipeline {
             view_layout,
             mesh_layout,
         }
+    }
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+pub struct PrepassPipelineKey {
+    pub mesh_pipeline_key: MeshPipelineKey,
+}
+
+impl SpecializedMeshPipeline for PrepassPipeline {
+    type Key = PrepassPipelineKey;
+
+    fn specialize(
+        &self,
+        key: Self::Key,
+        layout: &MeshVertexBufferLayoutRef,
+    ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
+        let vertex_attributes = vec![
+            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
+        ];
+        let vertex_buffer_layout = layout.0.get_layout(&vertex_attributes)?;
+
+        // todo
+        Ok(RenderPipelineDescriptor {
+            label: Some("shine specialized mesh".into()),
+            layout: vec![self.view_layout.clone(), self.mesh_layout.clone()],
+            push_constant_ranges: vec![],
+            vertex: VertexState {
+                shader: PREPASS_SHADER_HANDLE,
+                shader_defs: vec![],
+                entry_point: "vertex".into(),
+                buffers: vec![vertex_buffer_layout],
+            },
+            primitive: PrimitiveState {
+                topology: key.mesh_pipeline_key.primitive_topology(),
+                strip_index_format: None,
+                front_face: FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(DepthStencilState {
+                format: SHADOW_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: CompareFunction::GreaterEqual,
+                stencil: default(),
+                bias: default(),
+            }),
+            multisample: MultisampleState::default(),
+            fragment: Some(FragmentState {
+                shader: PREPASS_SHADER_HANDLE,
+                shader_defs: vec![],
+                entry_point: "fragment".into(),
+                targets: vec![
+                    Some(ColorTargetState {
+                        format: POSITION_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: NORMAL_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: DEPTH_GRADIENT_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: INSTANCE_MATERIAL_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: VELOCITY_UV_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                ],
+            }),
+            zero_initialize_workgroup_memory: false,
+        })
     }
 }
 
