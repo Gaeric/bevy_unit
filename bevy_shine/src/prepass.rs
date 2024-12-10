@@ -141,6 +141,15 @@ pub struct Prepass {
     pub extra_index: PhaseItemExtraIndex,
 }
 
+impl CachedRenderPipelinePhaseItem for Prepass {
+    #[inline]
+    fn cached_pipeline(&self) -> CachedRenderPipelineId {
+        self.pipeline
+    }
+}
+
+type DrawPrepass = (SetItemPipeline, DrawMesh);
+
 impl PhaseItem for Prepass {
     #[inline]
     fn entity(&self) -> Entity {
@@ -325,6 +334,8 @@ impl Plugin for PrepassPlugin {
 
         render_app
             .init_resource::<DrawFunctions<Prepass>>()
-            .init_resource::<PrepassPipeline>();
+            .init_resource::<PrepassPipeline>()
+            .init_resource::<SpecializedMeshPipelines<PrepassPipeline>>()
+            .add_render_command::<Prepass, DrawPrepass>();
     }
 }
