@@ -3,28 +3,37 @@ use core::ops::Range;
 use bevy::{
     app::{Plugin, Update},
     asset::{Assets, Handle},
+    core_pipeline::prepass::PreviousViewUniformOffset,
+    ecs::system::lifetimeless::{Read, SQuery, SRes},
     image::{Image, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
-    pbr::{DrawMesh, GpuLights, MeshPipelineKey, MeshUniform, PREPASS_SHADER_HANDLE},
+    math::FloatOrd,
+    pbr::{
+        DrawMesh, GpuLights, MeshPipelineKey, MeshTransforms, MeshUniform, ViewLightsUniformOffset,
+        PREPASS_SHADER_HANDLE,
+    },
     prelude::*,
     render::{
-        extract_component::{ExtractComponent, ExtractComponentPlugin},
+        extract_component::{DynamicUniformIndex, ExtractComponent, ExtractComponentPlugin},
         mesh::MeshVertexBufferLayoutRef,
         render_phase::{
-            AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions,
-            PhaseItem, PhaseItemExtraIndex, SetItemPipeline,
+            sort_phase_system, AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId,
+            DrawFunctions, PhaseItem, PhaseItemExtraIndex, RenderCommand, RenderCommandResult,
+            SetItemPipeline, SortedPhaseItem,
         },
         render_resource::{
-            binding_types::uniform_buffer, AsBindGroup, BindGroupLayout, BindGroupLayoutEntries,
-            CachedRenderPipelineId, ColorTargetState, ColorWrites, CompareFunction,
-            DepthStencilState, Extent3d, FragmentState, FrontFace, MultisampleState, PolygonMode,
-            PrimitiveState, RenderPipelineDescriptor, ShaderStages, ShaderType,
-            SpecializedMeshPipeline, SpecializedMeshPipelineError, SpecializedMeshPipelines,
-            TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, VertexState,
+            binding_types::uniform_buffer, AsBindGroup, BindGroup, BindGroupLayout,
+            BindGroupLayoutEntries, CachedRenderPipelineId, ColorTargetState, ColorWrites,
+            CompareFunction, DepthStencilState, Extent3d, FragmentState, FrontFace,
+            MultisampleState, PolygonMode, PrimitiveState, RenderPipelineDescriptor, ShaderStages,
+            ShaderType, SpecializedMeshPipeline, SpecializedMeshPipelineError,
+            SpecializedMeshPipelines, TextureDescriptor, TextureDimension, TextureFormat,
+            TextureUsages, TextureView, VertexState,
         },
         renderer::RenderDevice,
         sync_world::MainEntity,
-        view::ViewUniform,
-        RenderApp,
+        texture::TextureCache,
+        view::{ViewUniform, ViewUniformOffset},
+        Extract, Render, RenderApp, RenderSet,
     },
 };
 
@@ -148,7 +157,80 @@ impl CachedRenderPipelinePhaseItem for Prepass {
     }
 }
 
-type DrawPrepass = (SetItemPipeline, DrawMesh);
+impl SortedPhaseItem for Prepass {
+    type SortKey = FloatOrd;
+
+    #[inline]
+    fn sort_key(&self) -> Self::SortKey {
+        FloatOrd(self.distance)
+    }
+}
+
+type DrawPrepass = (
+    SetItemPipeline,
+    SetViewBindGroup<0>,
+    SetMeshBindGroup<1>,
+    DrawMesh,
+);
+
+pub struct SetViewBindGroup<const I: usize>;
+
+#[derive(Component, Default, Clone, Copy)]
+pub struct DynamicInstanceIndex(pub u32);
+
+impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetViewBindGroup<I> {
+    type Param = (
+        SRes<PrepassBindGroup>,
+        SQuery<(
+            Read<DynamicUniformIndex<FrameUniform>>,
+            Read<ViewUniformOffset>,
+            Read<PreviousViewUniformOffset>,
+            Read<ViewLightsUniformOffset>,
+        )>,
+    );
+
+    type ViewQuery = ();
+    type ItemQuery = ();
+
+    #[inline]
+    fn render<'w>(
+        item: &P,
+        view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
+        entity: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        param: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
+    ) -> bevy::render::render_phase::RenderCommandResult {
+        todo!();
+        RenderCommandResult::Success
+    }
+}
+
+// todo!
+pub struct SetMeshBindGroup<const I: usize>;
+impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
+    type Param = (
+        Option<SRes<PrepassBindGroup>>,
+        SQuery<(
+            // what is old MeshUniform ???
+            Read<DynamicUniformIndex<MeshTransforms>>,
+            Read<DynamicInstanceIndex>,
+        )>,
+    );
+
+    type ViewQuery = ();
+    type ItemQuery = ();
+
+    #[inline]
+    fn render<'w>(
+        item: &P,
+        view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
+        entity: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        param: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        todo!()
+    }
+}
 
 impl PhaseItem for Prepass {
     #[inline]
@@ -184,6 +266,12 @@ impl PhaseItem for Prepass {
     fn batch_range_and_extra_index_mut(&mut self) -> (&mut Range<u32>, &mut PhaseItemExtraIndex) {
         (&mut self.batch_range, &mut self.extra_index)
     }
+}
+
+#[derive(Resource)]
+pub struct PrepassBindGroup {
+    pub view: BindGroup,
+    pub mesh: BindGroup,
 }
 
 #[derive(Resource)]
@@ -323,6 +411,61 @@ impl SpecializedMeshPipeline for PrepassPipeline {
     }
 }
 
+fn extract_prepass_camera_phases(
+    mut commands: Commands,
+    cameras: Extract<Query<(Entity, &Camera), With<Camera3d>>>,
+) {
+    for (entity, camera) in cameras.iter() {
+        if camera.is_active {
+            todo!()
+        }
+    }
+}
+
+#[derive(Component, Deref, DerefMut)]
+pub struct PrepassDepthTexture(pub TextureView);
+
+fn queue_prepass_depth_texture(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    mut texture_cahce: ResMut<TextureCache>,
+    query: Query<(Entity, &PrepassTextures)>,
+) {
+    for (entity, textures) in &query {
+        let size = textures.size;
+        let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT;
+        let texture = texture_cahce.get(
+            &render_device,
+            TextureDescriptor {
+                label: Some("queue_prepass_depth_texture"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Depth32Float,
+                usage: texture_usage,
+                view_formats: &[],
+            },
+        );
+
+        commands
+            .entity(entity)
+            .insert(PrepassDepthTexture(texture.default_view));
+    }
+}
+
+fn queue_prepass_meshes() {
+    todo!()
+}
+
+fn queue_prepass_bind_group() {
+    todo!()
+}
+
+fn queue_deferred_bind_group() {
+    todo!()
+}
+
 impl Plugin for PrepassPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(ExtractComponentPlugin::<PrepassTextures>::default())
@@ -336,6 +479,18 @@ impl Plugin for PrepassPlugin {
             .init_resource::<DrawFunctions<Prepass>>()
             .init_resource::<PrepassPipeline>()
             .init_resource::<SpecializedMeshPipelines<PrepassPipeline>>()
-            .add_render_command::<Prepass, DrawPrepass>();
+            .add_render_command::<Prepass, DrawPrepass>()
+            .add_systems(
+                Render,
+                extract_prepass_camera_phases.in_set(RenderSet::ExtractCommands),
+            )
+            .add_systems(Render, queue_prepass_depth_texture.in_set(RenderSet::Queue))
+            .add_systems(Render, queue_prepass_meshes.in_set(RenderSet::Queue))
+            .add_systems(Render, queue_prepass_bind_group.in_set(RenderSet::Queue))
+            .add_systems(Render, queue_deferred_bind_group.in_set(RenderSet::Queue))
+            .add_systems(
+                Render,
+                sort_phase_system::<Prepass>.in_set(RenderSet::PhaseSort),
+            );
     }
 }
