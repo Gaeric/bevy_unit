@@ -51,6 +51,11 @@
 
   以上述几个步骤拆分整个crate
 ** prepass
+   1. ExtractComponent验证和应用
+   2. DrawFunctions验证和应用
+   3. SpecializedMeshPipelines验证和应用
+   4. add_render_command的验证和应用
+   5. RenderStage的验证和应用
 ** light
 ** post_process
 ** overlay
