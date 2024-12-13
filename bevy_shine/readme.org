@@ -50,6 +50,18 @@
   PREPASS -> LIGHT -> POST_PROCESS -> OVERLAY -> BLOOM -> TONEMAPPING -> UPSCALING
 
   以上述几个步骤拆分整个crate
+** basic
+   先学习并掌握如下bevy example
+*** headless_renderer
+*** shader_prepass
+*** custom_shader_instancing
+*** custom_phase_item
+*** custom_post_processing
+*** compute_shader_game_of_life
+*** gpu_readback
+*** fallback_image
+*** fps_overlay
+*** bloom_3d
 ** prepass
    1. ExtractComponent验证和应用
    2. DrawFunctions验证和应用
