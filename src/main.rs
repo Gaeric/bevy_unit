@@ -5,7 +5,9 @@ use bevy::prelude::*;
 
 use bevy_shine::ShinePlugin;
 
+
 mod headless_renderer;
+
 
 // mod animation_demo;
 // mod bone_demo;
@@ -26,7 +28,8 @@ fn main() -> AppExit {
         // .register_type::<Player>()
         // .add_plugins(PhysicsPlugins::default())
         // .add_systems(Startup, setup)
-        .add_plugins(ShinePlugin)
+        // .add_plugins(ShinePlugin)
+        .add_plugins(headless_renderer::HeadlessRendererPlugin)
         .run()
 }
 
