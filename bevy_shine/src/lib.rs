@@ -5,6 +5,7 @@ use prepass::PrepassPlugin;
 
 mod post_process;
 mod prepass;
+mod headless_renderer;
 
 pub struct ShinePlugin;
 
