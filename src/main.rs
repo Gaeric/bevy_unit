@@ -5,6 +5,8 @@ use bevy::prelude::*;
 
 use bevy_shine::ShinePlugin;
 
+mod headless_renderer;
+
 // mod animation_demo;
 // mod bone_demo;
 // mod cloth_demo;

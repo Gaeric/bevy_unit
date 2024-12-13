@@ -11,3 +11,11 @@ struct MainWorldReceiver(Receiver<Vec<u8>>);
 
 #[derive(Resource, Deref, Debug)]
 struct RenderWorldSender(Sender<Vec<u8>>);
+
+struct AppConfig {
+    width: u32,
+    height: u32,
+    single_image: bool,
+}
+
+
