@@ -3,6 +3,7 @@
 use bevy::{
     app::{App, Plugin},
     prelude::*,
+    winit::WinitPlugin,
 };
 
 use crossbeam_channel::{Receiver, Sender};
@@ -66,6 +67,12 @@ impl Plugin for HeadlessRendererPlugin {
             config.width,
             config.height,
             config.single_image,
-        ));
+        ))
+        .insert_resource(ClearColor(Color::srgb_u8(0, 0, 0)))
+        .add_plugins(
+            DefaultPlugins
+                .set(ImagePlugin::default_nearest())
+                .disable::<WinitPlugin>(),
+        );
     }
 }
