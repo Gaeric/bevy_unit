@@ -1,6 +1,7 @@
 use bevy::{asset::load_internal_asset, prelude::*};
 
 use post_process::PostProcessPlugin;
+use prepass::PrepassPlugin;
 
 mod post_process;
 mod prepass;
@@ -18,6 +19,7 @@ impl Plugin for ShinePlugin {
             Shader::from_wgsl
         );
 
-        app.add_plugins(PostProcessPlugin);
+        // app.add_plugins(PostProcessPlugin);
+        app.add_plugins(PrepassPlugin);
     }
 }
