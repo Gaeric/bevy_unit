@@ -5,9 +5,7 @@ use bevy::prelude::*;
 
 use bevy_shine::ShinePlugin;
 
-
 mod headless_renderer;
-
 
 // mod animation_demo;
 // mod bone_demo;
@@ -17,7 +15,7 @@ mod headless_renderer;
 
 fn main() -> AppExit {
     App::new()
-        .add_plugins(DefaultPlugins)
+        // .add_plugins(DefaultPlugins)
         // .add_plugins(animation_demo::plugin)
         // .add_plugins(bone_demo::plugin)
         // .add_plugins(ui::plugin)
