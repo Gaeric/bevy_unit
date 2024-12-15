@@ -53,6 +53,7 @@
 ** basic
    先学习并掌握如下bevy example
 *** headless_renderer
+    确认ScheduleRunnerPlugin的作用以及hang住流程的原因
 *** shader_prepass
 *** custom_shader_instancing
 *** custom_phase_item

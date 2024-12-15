@@ -20,7 +20,6 @@ use std::{
 use bevy::{
     app::{App, Plugin, ScheduleRunnerPlugin},
     asset::RenderAssetUsages,
-    core_pipeline::tonemapping::Tonemapping,
     image::TextureFormatPixelInfo,
     prelude::*,
     render::{
@@ -29,13 +28,13 @@ use bevy::{
         render_graph::{Node, NodeRunError, RenderGraph, RenderGraphContext, RenderLabel},
         render_resource::{
             Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d,
-            ImageCopyBuffer, ImageDataLayout, TextureDimension, TextureFormat, TextureUsages,
+            ImageCopyBuffer, ImageDataLayout, Maintain, MapMode, TextureDimension, TextureFormat,
+            TextureUsages,
         },
         renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::GpuImage,
         Extract, Render, RenderApp, RenderSet,
     },
-    winit::WinitPlugin,
 };
 
 use crossbeam_channel::{Receiver, Sender};
@@ -204,10 +203,15 @@ fn receive_image_from_buffer(
     render_device: Res<RenderDevice>,
     sender: Res<RenderWorldSender>,
 ) {
+    info!("receive image from buffer call");
+
     for image_copier in image_copiers.0.iter() {
+        info!("image copier iter.");
         if !image_copier.enabled() {
             continue;
         }
+
+        info!("image copier enabled.");
 
         // Finally time to get our data back from the gpu.
         // First we get a buffer slice which represents a chunk of the buffer (which we
@@ -225,7 +229,46 @@ fn receive_image_from_buffer(
         // either mapped or the mapping has failed.
         //
         // The problem with this is that we don't have a reliable way to wait in the main
-        // code for the buffer to be mapped and even worse,
+        // code for the buffer to be mapped and even worse, calling get_mapped_range or
+        // get mapped_range_mut prematurely will cause a panic, not retrun an error.
+        //
+        // Using channels solves this as awaiting the receiving of a message from
+        // the passed closure will force the outside code to wait. It also doesn't hurt
+        // if the closure finishes before the outside code catches up as the message is
+        // buffered and receiving will just pick that up.
+        //
+        // It may also be worth noting that although on native, the usage of asynchronous
+        // channels is wholly unnecessary, for the sake of portability wo Wasm
+        // we'll use async channels that work on both native and Wasm.
+
+        let (s, r) = crossbeam_channel::bounded(1);
+
+        // Maps the buffer to it can be read on the cpu
+        buffer_slice.map_async(MapMode::Read, move |r| match r {
+            // This will execute once the gpu is ready, so after the call to poll()
+            Ok(r) => s.send(r).expect("Failed to send map update"),
+            Err(err) => panic!("Failed to map buffer {err}"),
+        });
+
+        // In order for the mapping to be completed, one of three things must happen.
+        // One of those can be calling `Device::poll`. This isn't necessary on the web as devices
+        // are polled automatically but natively, we need to make sure this happeds manually.
+        // `Maintain::Wait` will cause the thread to wait on native but not on WebGpu.
+
+        // This blocks until the gpu is done executing everything
+        render_device.poll(Maintain::wait()).panic_on_timeout();
+
+        // This blocks until the buffer is mapped
+        r.recv().expect("Failed to receive the map_async message");
+
+        // This could fail on app exit, if Main world clears resources
+        // (including receiver) while Render world still renders
+        let _ = sender.try_send(buffer_slice.get_mapped_range().to_vec());
+
+        // We nned to make sure all `BufferView`'s are dropped before we do what we're about
+        // to do.
+        // Unmap so that we can copy to the staging buffer in the next iteration.
+        image_copier.buffer.unmap();
     }
 }
 
@@ -259,6 +302,8 @@ fn update(
     mut app_exit_writer: EventWriter<AppExit>,
     mut file_number: Local<u32>,
 ) {
+    info!("update for capture");
+
     if let SceneState::Render(n) = scene_controller.state {
         if n < 1 {
             // We don't want to block the main world on this,
@@ -267,6 +312,7 @@ fn update(
             while let Ok(data) = receiver.try_recv() {
                 // image generation could be faster than saving to fs,
                 // that's why use only last of them
+                info!("recv data success.");
                 image_data = data;
             }
 
@@ -442,12 +488,12 @@ fn setup(
 
     commands.spawn((
         Camera3d::default(),
-        Camera {
-            // render to image
-            target: render_target,
-            ..default()
-        },
-        Tonemapping::None,
+        // Camera {
+        //     // render to image
+        //     // target: render_target,
+        //     ..default()
+        // },
+        // Tonemapping::None,
         Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
@@ -460,7 +506,7 @@ impl Plugin for HeadlessRendererPlugin {
             single_image: false,
         };
 
-        info!("headless renderer plugin loadding");
+        println!("headless renderer plugin loadding");
 
         // setup frame capture
         app.insert_resource(SceneController::new(
@@ -470,19 +516,17 @@ impl Plugin for HeadlessRendererPlugin {
         ))
         .insert_resource(ClearColor(Color::srgb_u8(0, 0, 0)))
         .add_plugins(
-            DefaultPlugins
-                .set(ImagePlugin::default_nearest())
-                .disable::<WinitPlugin>(),
+            DefaultPlugins.set(ImagePlugin::default_nearest()), // .disable::<WinitPlugin>(),
         )
         .add_plugins(ImageCopyPlugin)
         // headless frame capture
         .add_plugins(CaptureFramePlugin)
         // Schedule RunnerPlugin provides an alternative to the default bevy_winit app runner, which
         // manages the loop without creating a window.
-        .add_plugins(ScheduleRunnerPlugin::run_loop(
-            // Run 60 times per second.
-            Duration::from_secs_f64(1.0 / 60.0),
-        ))
+        // .add_plugins(ScheduleRunnerPlugin::run_loop(
+        // Run 60 times per second.
+        // Duration::from_secs_f64(1.0 / 60.0),
+        // ))
         .init_resource::<SceneController>()
         .add_systems(Startup, setup);
     }

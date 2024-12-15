@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{core_pipeline::tonemapping::Tonemapping, prelude::*};
 // use blenvy::*;
 
 // use modular_character::ModularCharacterPlugin;
