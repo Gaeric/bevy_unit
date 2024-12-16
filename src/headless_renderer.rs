@@ -35,6 +35,7 @@ use bevy::{
         texture::GpuImage,
         Extract, Render, RenderApp, RenderSet,
     },
+    winit::WinitPlugin,
 };
 
 use crossbeam_channel::{Receiver, Sender};
@@ -203,15 +204,15 @@ fn receive_image_from_buffer(
     render_device: Res<RenderDevice>,
     sender: Res<RenderWorldSender>,
 ) {
-    info!("receive image from buffer call");
+    debug!("receive image from buffer call");
 
     for image_copier in image_copiers.0.iter() {
-        info!("image copier iter.");
+        debug!("image copier iter.");
         if !image_copier.enabled() {
             continue;
         }
 
-        info!("image copier enabled.");
+        debug!("image copier enabled.");
 
         // Finally time to get our data back from the gpu.
         // First we get a buffer slice which represents a chunk of the buffer (which we
@@ -302,7 +303,7 @@ fn update(
     mut app_exit_writer: EventWriter<AppExit>,
     mut file_number: Local<u32>,
 ) {
-    info!("update for capture");
+    debug!("update for capture");
 
     if let SceneState::Render(n) = scene_controller.state {
         if n < 1 {
@@ -312,7 +313,7 @@ fn update(
             while let Ok(data) = receiver.try_recv() {
                 // image generation could be faster than saving to fs,
                 // that's why use only last of them
-                info!("recv data success.");
+                debug!("recv data success.");
                 image_data = data;
             }
 
@@ -488,11 +489,11 @@ fn setup(
 
     commands.spawn((
         Camera3d::default(),
-        // Camera {
-        //     // render to image
-        //     // target: render_target,
-        //     ..default()
-        // },
+        Camera {
+            // render to image
+            target: render_target,
+            ..default()
+        },
         // Tonemapping::None,
         Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
@@ -516,17 +517,19 @@ impl Plugin for HeadlessRendererPlugin {
         ))
         .insert_resource(ClearColor(Color::srgb_u8(0, 0, 0)))
         .add_plugins(
-            DefaultPlugins.set(ImagePlugin::default_nearest()), // .disable::<WinitPlugin>(),
+            DefaultPlugins
+                .set(ImagePlugin::default_nearest())
+                .disable::<WinitPlugin>(),
         )
         .add_plugins(ImageCopyPlugin)
         // headless frame capture
         .add_plugins(CaptureFramePlugin)
         // Schedule RunnerPlugin provides an alternative to the default bevy_winit app runner, which
         // manages the loop without creating a window.
-        // .add_plugins(ScheduleRunnerPlugin::run_loop(
-        // Run 60 times per second.
-        // Duration::from_secs_f64(1.0 / 60.0),
-        // ))
+        .add_plugins(ScheduleRunnerPlugin::run_loop(
+            // Run 60 times per second.
+            Duration::from_secs_f64(1.0 / 60.0),
+        ))
         .init_resource::<SceneController>()
         .add_systems(Startup, setup);
     }

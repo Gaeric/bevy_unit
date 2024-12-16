@@ -54,6 +54,10 @@
    先学习并掌握如下bevy example
 *** headless_renderer
     确认ScheduleRunnerPlugin的作用以及hang住流程的原因
+
+    ScheduleRunnerPlugin用于在没有winit event loop时提供一个运行时状态，可以是轮询或单次运行
+
+    流程并没有真正hang住，可能是因为打印级别设置不正确的原因。
 *** shader_prepass
 *** custom_shader_instancing
 *** custom_phase_item
