@@ -58,12 +58,16 @@
     ScheduleRunnerPlugin用于在没有winit event loop时提供一个运行时状态，可以是轮询或单次运行
 
     流程并没有真正hang住，可能是因为打印级别设置不正确的原因。
+**** 如何更改render流程
+**** src data来源于哪里
+**** dest data何时接收
+**** 数据发送和接收流程如何同步
+*** gpu_readback
 *** shader_prepass
 *** custom_shader_instancing
 *** custom_phase_item
 *** custom_post_processing
 *** compute_shader_game_of_life
-*** gpu_readback
 *** fallback_image
 *** fps_overlay
 *** bloom_3d
