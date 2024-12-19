@@ -26,12 +26,12 @@ struct Controller;
 
 impl Plugin for ShinePlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            UTILS_SHADER_HANDLE,
-            "../shaders/utils.wgsl",
-            Shader::from_wgsl
-        );
+        // load_internal_asset!(
+        //     app,
+        //     UTILS_SHADER_HANDLE,
+        //     "../shaders/utils.wgsl",
+        //     Shader::from_wgsl
+        // );
 
         app.add_plugins((
             DefaultPlugins,
@@ -50,7 +50,6 @@ impl Plugin for ShinePlugin {
 /// Set up a simple 3D scene
 fn setup(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -137,6 +136,7 @@ fn setup(
             emissive: LinearRgba::new(0.8, 0.7, 0.6, 0.0),
             ..default()
         })),
+        Transform::from_xyz(1.2, 0.6, 1.0),
     ));
 
     commands.spawn((

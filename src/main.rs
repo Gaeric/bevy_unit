@@ -26,8 +26,8 @@ fn main() -> AppExit {
         // .register_type::<Player>()
         // .add_plugins(PhysicsPlugins::default())
         // .add_systems(Startup, setup)
-        // .add_plugins(ShinePlugin)
-        .add_plugins(headless_renderer::HeadlessRendererPlugin)
+        .add_plugins(ShinePlugin)
+        // .add_plugins(headless_renderer::HeadlessRendererPlugin)
         .run()
 }
 
