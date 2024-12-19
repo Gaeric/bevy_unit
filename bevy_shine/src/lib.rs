@@ -1,10 +1,12 @@
 use bevy::{asset::load_internal_asset, prelude::*};
 
-use post_process::PostProcessPlugin;
-use prepass::PrepassPlugin;
+// use post_process::PostProcessPlugin;
+// use prepass::PrepassPlugin;
 
-mod post_process;
-mod prepass;
+// mod post_process;
+// mod prepass;
+
+mod voxel_cone_tracing;
 
 pub struct ShinePlugin;
 
@@ -20,6 +22,5 @@ impl Plugin for ShinePlugin {
         );
 
         // app.add_plugins(PostProcessPlugin);
-        app.add_plugins(PrepassPlugin);
     }
 }
