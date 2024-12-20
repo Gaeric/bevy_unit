@@ -52,7 +52,6 @@ fn setup(
     ));
 
     // Only directional light is supported
-    const HALF_SIZE: f32 = 5.0;
     commands.spawn((
         DirectionalLight {
             illuminance: light_consts::lux::AMBIENT_DAYLIGHT,
