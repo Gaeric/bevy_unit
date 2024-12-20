@@ -1,10 +1,11 @@
 use std::f32::consts::PI;
 
 use bevy::{
-    asset::load_internal_asset,
+    asset::{load_internal_asset, transformer},
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     math::VectorSpace,
     prelude::*,
+    transform,
 };
 
 // use post_process::PostProcessPlugin;
@@ -154,6 +155,66 @@ fn setup(
     ));
 }
 
-fn light_rotate_system() {}
+fn controller_system(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut controller: Single<&mut Transform, With<Controller>>,
+) {
+    if keyboard_input.pressed(KeyCode::KeyW) {
+        controller.translation -= Vec3::Z * time.delta_secs();
+    }
+    if keyboard_input.pressed(KeyCode::KeyS) {
+        controller.translation += Vec3::Z * time.delta_secs();
+    }
 
-fn controller_system() {}
+    if keyboard_input.pressed(KeyCode::KeyA) {
+        controller.translation -= Vec3::X * time.delta_secs();
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyD) {
+        controller.translation += Vec3::X * time.delta_secs();
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyE) {
+        controller.translation += Vec3::Z * time.delta_secs();
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyQ) {
+        controller.translation -= Vec3::Z * time.delta_secs();
+    }
+
+    let speed = 0.7;
+    controller.rotation *= Quat::from_euler(
+        EulerRot::XYZ,
+        speed * time.delta_secs(),
+        speed * time.delta_secs(),
+        speed * time.delta_secs(),
+    );
+}
+
+fn light_rotate_system(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut direction_light: Single<&mut Transform, With<DirectionalLight>>,
+    mut euler: Local<Vec3>,
+) {
+    let speed = 1.0;
+
+    if keyboard_input.pressed(KeyCode::ArrowUp) {
+        euler.x -= speed * time.delta_secs();
+    }
+
+    if keyboard_input.pressed(KeyCode::ArrowDown) {
+        euler.x += speed * time.delta_secs();
+    }
+
+    if keyboard_input.pressed(KeyCode::ArrowLeft) {
+        euler.y -= speed * time.delta_secs();
+    }
+
+    if keyboard_input.pressed(KeyCode::ArrowRight) {
+        euler.y += speed * time.delta_secs();
+    }
+
+    direction_light.rotation = Quat::from_euler(EulerRot::ZYX, euler.z, euler.y, euler.x);
+}
