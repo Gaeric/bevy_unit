@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use bevy::{
     asset::RenderAssetUsages,
     ecs::system::{
@@ -8,22 +6,25 @@ use bevy::{
     },
     prelude::*,
     render::{
-        mesh::{
-            MeshVertexBufferLayoutRef, MeshVertexBufferLayouts, PrimitiveTopology, VertexFormatSize,
-        },
+        mesh::{MeshVertexBufferLayouts, VertexFormatSize},
         render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin},
-        render_resource::{BufferUsages, IndexFormat, RawBufferVec},
+        render_resource::{IndexFormat, ShaderType, StorageBuffer},
         renderer::{RenderDevice, RenderQueue},
         RenderApp,
     },
 };
-use bvh::aabb::{Aabb, Bounded};
+use bvh::{
+    aabb::{Aabb, Bounded},
+    bounding_hierarchy::BHShape,
+};
 
 pub struct ShinePlugin;
 
 impl Plugin for ShinePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TriangleTable>()
+        app
+            // todo
+            // .add_asset::<BatchMesh>
             .add_plugins(RenderAssetPlugin::<GpuBatchMesh>::default());
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
@@ -34,50 +35,82 @@ impl Plugin for ShinePlugin {
     }
 }
 
-pub struct Triangle {
+#[derive(Default, Clone, Copy, Debug, ShaderType)]
+pub struct GpuFace {
     /// Global positions of vertices.
-    pub vertices: [[f32; 3]; 3],
-    /// Indices of vertices in the universal vertex buffer.
-    pub indices: [usize; 3],
-    /// Instance id the triangle belongs to.
-    pub instance: usize,
+    pub vertices: [Vec3; 3],
+    /// Indices of vertices in the vertex buffer (offset not applied).
+    pub indices: [u32; 3],
+    /// Index of the material of the face
+    pub material: u32,
+    /// Index of the node in the node buffer (offset not applied).
+    node_index: u32,
 }
 
-impl Bounded<f32, 3> for Triangle {
+impl Bounded<f32, 3> for GpuFace {
     fn aabb(&self) -> Aabb<f32, 3> {
-        let mut aabb = Aabb::empty();
-        for vertex in self.vertices {
-            aabb.grow_mut(&vertex.into());
-        }
-        aabb
+        Aabb::empty()
+            .grow(&self.vertices[0].to_array().into())
+            .grow(&self.vertices[1].to_array().into())
+            .grow(&self.vertices[2].to_array().into())
     }
 }
 
-#[derive(Resource, Default)]
-pub struct TriangleTable {
-    table: BTreeMap<Entity, Vec<Triangle>>,
+impl BHShape<f32, 3> for GpuFace {
+    fn set_bh_node_index(&mut self, index: usize) {
+        self.node_index = index as u32;
+    }
+
+    fn bh_node_index(&self) -> usize {
+        self.node_index as usize
+    }
 }
 
-#[derive(Resource)]
+#[derive(Default, Clone, Copy, ShaderType)]
+pub struct GpuVertex {
+    pub position: Vec3,
+    pub normal: Vec3,
+    pub uv: Vec2,
+}
+
+#[derive(Default, Clone, Copy, ShaderType)]
+pub struct GpuNode {
+    pub min: Vec3,
+    pub max: Vec3,
+    pub entry_index: u32,
+    pub exit_index: u32,
+    pub face_index: u32,
+}
+
+#[derive(Default, ShaderType)]
+pub struct GpuVertexBuffer {
+    #[size(runtime)]
+    pub data: Vec<GpuVertex>,
+}
+
+#[derive(Default, ShaderType)]
+pub struct GpuFaceBuffer {
+    #[size(runtime)]
+    pub data: Vec<GpuFace>,
+}
+
+#[derive(Default, ShaderType)]
+pub struct GpuNodeBuffer {
+    #[size(runtime)]
+    pub data: Vec<GpuNode>,
+}
+
+#[derive(Default, Resource)]
 pub struct BatchMeshMeta {
-    pub index_buffer: RawBufferVec<u8>,
-    pub vertex_buffer: RawBufferVec<u8>,
-}
-
-impl Default for BatchMeshMeta {
-    fn default() -> Self {
-        Self {
-            index_buffer: RawBufferVec::new(BufferUsages::COPY_DST | BufferUsages::UNIFORM),
-            vertex_buffer: RawBufferVec::new(BufferUsages::COPY_DST | BufferUsages::UNIFORM),
-        }
-    }
+    pub index_buffer: StorageBuffer<GpuVertexBuffer>,
+    pub vertex_buffer: StorageBuffer<GpuFaceBuffer>,
+    pub node_buffer: StorageBuffer<GpuNodeBuffer>,
 }
 
 pub struct GpuBatchMesh {
     pub vertex_offset: u32,
-    pub buffer_info: GpuBatchBufferInfo,
-    pub primitive_topology: PrimitiveTopology,
-    pub layout: MeshVertexBufferLayoutRef,
+    pub face_offset: u32,
+    pub node_offset: u32,
 }
 
 pub enum GpuBatchBufferInfo {
@@ -124,44 +157,45 @@ impl RenderAsset for GpuBatchMesh {
 
     // refer RenderMesh
     fn prepare_asset(
-        mesh: Self::SourceAsset,
+        _mesh: Self::SourceAsset,
         _asset_id: AssetId<Self::SourceAsset>,
-        (render_device, render_queue, mesh_meta, ref mut mesh_vertex_buffer_layouts): &mut SystemParamItem<Self::Param>,
+        (_render_device, _render_queue, _mesh_meta, ref mut _mesh_vertex_buffer_layouts): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
-        let vertex_offset = mesh_meta.vertex_buffer.len() as u32;
-        for value in mesh.create_packed_vertex_buffer_data() {
-            mesh_meta.vertex_buffer.push(value);
-        }
+        // let vertex_offset = mesh_meta.vertex_buffer.len() as u32;
+        // for value in mesh.create_packed_vertex_buffer_data() {
+        //     mesh_meta.vertex_buffer.push(value);
+        // }
 
-        mesh_meta
-            .vertex_buffer
-            .write_buffer(render_device, render_queue);
+        // mesh_meta
+        //     .vertex_buffer
+        //     .write_buffer(render_device, render_queue);
 
-        let buffer_info = mesh.get_index_buffer_bytes().map_or(
-            GpuBatchBufferInfo::NonIndexed {
-                vertex_count: mesh.count_vertices() as u32,
-            },
-            |data| {
-                let offset = mesh_meta.index_buffer.len() as u32;
-                for value in data {
-                    mesh_meta.index_buffer.push(*value);
-                }
-                GpuBatchBufferInfo::Indexed {
-                    offset,
-                    count: mesh.indices().unwrap().len() as u32,
-                    index_format: mesh.indices().unwrap().into(),
-                }
-            },
-        );
+        // let buffer_info = mesh.get_index_buffer_bytes().map_or(
+        //     GpuBatchBufferInfo::NonIndexed {
+        //         vertex_count: mesh.count_vertices() as u32,
+        //     },
+        //     |data| {
+        //         let offset = mesh_meta.index_buffer.len() as u32;
+        //         for value in data {
+        //             mesh_meta.index_buffer.push(*value);
+        //         }
+        //         GpuBatchBufferInfo::Indexed {
+        //             offset,
+        //             count: mesh.indices().unwrap().len() as u32,
+        //             index_format: mesh.indices().unwrap().into(),
+        //         }
+        //     },
+        // );
 
-        let primitive_topology = mesh.primitive_topology();
-        let layout = mesh.get_mesh_vertex_buffer_layout(mesh_vertex_buffer_layouts);
+        // let primitive_topology = mesh.primitive_topology();
+        // let layout = mesh.get_mesh_vertex_buffer_layout(mesh_vertex_buffer_layouts);
 
-        Ok(GpuBatchMesh {
-            vertex_offset,
-            buffer_info,
-            primitive_topology,
-            layout,
-        })
+        // Ok(GpuBatchMesh {
+        //     vertex_offset,
+        //     buffer_info,
+        //     primitive_topology,
+        //     layout,
+        // })
+        todo!()
     }
 }
