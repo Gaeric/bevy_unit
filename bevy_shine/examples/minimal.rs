@@ -1,10 +1,12 @@
 use std::f32::consts::PI;
 
 use bevy::prelude::*;
+use bevy_shine::ShinePlugin;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(ShinePlugin)
         .add_systems(Startup, setup)
         .run();
 }
@@ -18,6 +20,7 @@ fn setup(
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(5.0, 5.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
+        Visibility::default(),
     ));
 
     // Cube
@@ -25,6 +28,7 @@ fn setup(
         Mesh3d(meshes.add(Cuboid::default())),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
         Transform::from_xyz(0.0, 0.5, 0.0),
+        Visibility::default(),
     ));
 
     commands.spawn((
