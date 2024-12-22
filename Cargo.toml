@@ -9,6 +9,7 @@ members = [ "bevy_shine","modular_character"]
 [dependencies]
 bevy = { path = "../bevy/", features = ["wayland", "dynamic_linking"] }
 bevy_shine = {path = "bevy_shine"}
+bitflags = "2.6.0"
 crossbeam-channel = "0.5.13"
 # modular_character = { path = "modular_character" }
 

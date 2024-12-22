@@ -2146,6 +2146,7 @@ version = "0.1.0"
 dependencies = [
  "bevy 0.15.0-dev",
  "bevy_shine",
+ "bitflags 2.6.0",
  "crossbeam-channel",
 ]
 

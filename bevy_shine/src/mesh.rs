@@ -1,38 +1,46 @@
 use bevy::{
     asset::RenderAssetUsages,
-    ecs::system::{
-        lifetimeless::{SRes, SResMut},
-        SystemParamItem,
+    ecs::{
+        query::ROQueryItem,
+        system::{
+            lifetimeless::{Read, SQuery, SRes, SResMut},
+            SystemParamItem,
+        },
     },
+    pbr::MeshFlags,
     prelude::*,
     render::{
-        mesh::{ PrimitiveTopology, VertexAttributeValues, VertexFormatSize},
-        render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin},
+        mesh::{PrimitiveTopology, VertexAttributeValues, VertexFormatSize},
+        render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssets},
+        render_phase::{PhaseItem, RenderCommand, RenderCommandResult},
         render_resource::{ShaderType, StorageBuffer},
         renderer::{RenderDevice, RenderQueue},
-        RenderApp,
+        Extract, RenderApp,
     },
 };
 use bvh::{aabb::Bounded, bounding_hierarchy::BHShape, bvh::Bvh};
 use itertools::Itertools;
 
-pub struct BatchMeshPlugin;
+pub struct BoundedMeshPlugin;
 
-impl Plugin for BatchMeshPlugin {
+impl Plugin for BoundedMeshPlugin {
     fn build(&self, app: &mut App) {
         // refer bevy example custom_assets.rs
-        app.init_asset::<BatchMesh>()
-            .add_plugins(RenderAssetPlugin::<GpuBatchMesh>::default());
-            // .add_systems(
-            //     PostUpdate,
-            //     calculate_bounds.after(VisibilitySystems::CheckVisibility),
-            // );
+        app.init_asset::<BoundedMesh>()
+            .add_plugins(RenderAssetPlugin::<GpuBoundedMesh>::default());
+        // why this system
+        // .add_systems(
+        //     PostUpdate,
+        //     calculate_bounds.after(VisibilitySystems::CheckVisibility),
+        // );
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
 
-        render_app.init_resource::<BatchMeshMeta>();
+        render_app
+            .init_resource::<BoundedMeshMeta>()
+            .add_systems(ExtractSchedule, extract_bounded_meshes);
     }
 }
 
@@ -100,54 +108,54 @@ pub struct GpuNodeBuffer {
 }
 
 #[derive(Default, Resource)]
-pub struct BatchMeshMeta {
+pub struct BoundedMeshMeta {
     pub vertex_buffer: StorageBuffer<GpuVertexBuffer>,
     pub face_buffer: StorageBuffer<GpuFaceBuffer>,
     pub node_buffer: StorageBuffer<GpuNodeBuffer>,
 }
 
-pub struct GpuBatchMesh {
+pub struct GpuBoundedMesh {
     pub vertex_offset: u32,
     pub face_offset: u32,
     pub node_offset: u32,
 }
 
-#[derive(Debug, Clone, Deref, DerefMut, Asset, Reflect)]
-pub struct BatchMesh(Mesh);
+#[derive(Debug, Clone, Deref, DerefMut, Asset, Reflect, Component)]
+pub struct BoundedMesh(Mesh);
 
-impl<T: Into<Mesh>> From<T> for BatchMesh {
+impl<T: Into<Mesh>> From<T> for BoundedMesh {
     fn from(value: T) -> Self {
         Self(value.into())
     }
 }
 
 #[derive(Debug)]
-pub enum BatchMeshPrepareError {
+pub enum BoundedMeshPrepareError {
     MissAttributePosition,
     MissAttributeNormal,
     MissAttributeUV,
     IncompatiblePrimitiveTopology,
 }
 
-impl BatchMesh {
+impl BoundedMesh {
     pub fn prepare_resource(
         &self,
-    ) -> Result<(Vec<GpuVertex>, Vec<GpuFace>), BatchMeshPrepareError> {
+    ) -> Result<(Vec<GpuVertex>, Vec<GpuFace>), BoundedMeshPrepareError> {
         let positions = self
             .attribute(Mesh::ATTRIBUTE_POSITION)
             .and_then(VertexAttributeValues::as_float3)
-            .ok_or(BatchMeshPrepareError::MissAttributePosition)?;
+            .ok_or(BoundedMeshPrepareError::MissAttributePosition)?;
         let normals = self
             .attribute(Mesh::ATTRIBUTE_NORMAL)
             .and_then(VertexAttributeValues::as_float3)
-            .ok_or(BatchMeshPrepareError::MissAttributeNormal)?;
+            .ok_or(BoundedMeshPrepareError::MissAttributeNormal)?;
         let uvs = self
             .attribute(Mesh::ATTRIBUTE_UV_0)
             .and_then(|attribute| match attribute {
                 VertexAttributeValues::Float32x2(value) => Some(value),
                 _ => None,
             })
-            .ok_or(BatchMeshPrepareError::MissAttributeUV)?;
+            .ok_or(BoundedMeshPrepareError::MissAttributeUV)?;
 
         let mut vertices = vec![];
         for (position, normal, uv) in itertools::multizip((positions, normals, uvs)) {
@@ -170,7 +178,7 @@ impl BatchMesh {
                     let (p0, p1, p2) = chunk
                         .cloned()
                         .next_tuple()
-                        .ok_or(BatchMeshPrepareError::IncompatiblePrimitiveTopology)?;
+                        .ok_or(BoundedMeshPrepareError::IncompatiblePrimitiveTopology)?;
                     let vertices = [p0, p1, p2]
                         .map(|id| vertices[id])
                         .map(|vertex| vertex.position);
@@ -202,7 +210,7 @@ impl BatchMesh {
                 }
                 Ok(faces)
             }
-            _ => Err(BatchMeshPrepareError::IncompatiblePrimitiveTopology),
+            _ => Err(BoundedMeshPrepareError::IncompatiblePrimitiveTopology),
         }?;
         Ok((vertices, faces))
     }
@@ -210,13 +218,13 @@ impl BatchMesh {
 
 // refer bevy GpuImage
 // refer RenderMesh
-impl RenderAsset for GpuBatchMesh {
-    // sould we use Mesh instand of BatchMesh?
-    type SourceAsset = BatchMesh;
+impl RenderAsset for GpuBoundedMesh {
+    // sould we use Mesh instand of BoundedMesh?
+    type SourceAsset = BoundedMesh;
     type Param = (
         SRes<RenderDevice>,
         SRes<RenderQueue>,
-        SResMut<BatchMeshMeta>,
+        SResMut<BoundedMeshMeta>,
     );
 
     #[inline]
@@ -275,11 +283,35 @@ impl RenderAsset for GpuBatchMesh {
             .node_buffer
             .write_buffer(render_device, render_queue);
 
-        Ok(GpuBatchMesh {
+        Ok(GpuBoundedMesh {
             vertex_offset,
             face_offset,
             node_offset,
         })
+    }
+}
+
+pub struct DrawBoundedMesh;
+
+impl<P: PhaseItem> RenderCommand<P> for DrawBoundedMesh {
+    type Param = (
+        SRes<RenderAssets<GpuBoundedMesh>>,
+        SQuery<Read<BoundedMesh>>,
+    );
+    type ViewQuery = ();
+    type ItemQuery = ();
+
+    #[inline]
+    fn render<'w>(
+        _item: &P,
+        _view: ROQueryItem<'w, Self::ViewQuery>,
+        _entity: Option<ROQueryItem<'w, Self::ItemQuery>>,
+        (_gpu_bounded_mesh, _bounded_mesh): SystemParamItem<'w, '_, Self::Param>,
+        _pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        // Can't understand what BoundedNess is and how to use it
+        // // so I leave it empty
+        todo!()
     }
 }
 
@@ -296,3 +328,41 @@ impl RenderAsset for GpuBatchMesh {
 //         }
 //     }
 // }
+
+// Is the MeshFlags suitable for a plugin?
+// i don't think here should add the MeshFlag code
+// so we just finish the framework
+
+pub fn extract_bounded_meshes(
+    mut _commands: Commands,
+    mut prev_mesh_commands_len: Local<usize>,
+    query: Extract<Query<(Entity, &GlobalTransform, &BoundedMesh)>>,
+) {
+    // this function extract the bounded meshes
+    // record the MeshUniform
+
+    // info!("check the extract bounded meshes function runtime");
+
+    // i think we need to refer to the batching mod from bevy_render
+    let mut mesh_commands = Vec::with_capacity(*prev_mesh_commands_len);
+
+    for (entity, transform, bounded_mesh) in query.iter() {
+        let transform = transform.compute_matrix();
+        let mut flags = MeshFlags::SHADOW_RECEIVER;
+
+        if Mat3A::from_mat4(transform).determinant().is_sign_positive() {
+            flags |= MeshFlags::SIGN_DETERMINANT_MODEL_3X3;
+        }
+
+        // let uniform = MeshUniform::new(mesh_transforms, first_vertex_index, material_bind_group_slot, maybe_lightmap_uv_rect, current_skin_index, previous_skin_index)
+
+        // bounded_mesh maybe a handle or refer for BoundedMesh
+        mesh_commands.push((entity, (bounded_mesh, 0)));
+    }
+
+    *prev_mesh_commands_len = mesh_commands.len();
+
+    // For lastest bevy, we must found a new way to insert the extract function.
+    // However, this code may be removed soon.
+    // commands.insert_or_spawn_batch(mesh_commands);
+}

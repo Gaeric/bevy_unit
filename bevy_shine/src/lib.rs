@@ -2,14 +2,15 @@ use bevy::prelude::*;
 
 pub mod mesh;
 pub mod prelude;
+pub mod prepass;
 
-use mesh::BatchMeshPlugin;
+use mesh::BoundedMeshPlugin;
 
 // 
 pub struct ShinePlugin;
 
 impl Plugin for ShinePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BatchMeshPlugin);
+        app.add_plugins(BoundedMeshPlugin);
     }
 }
