@@ -364,5 +364,6 @@ fn extract_meshes(
         }
     }
 
-    commands.insert_or_spawn_batch(batch_commands);
+    // bug code
+    // commands.insert_or_spawn_batch(batch_commands);
 }
