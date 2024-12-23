@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use bevy::{
     prelude::*,
     render::{
+        extract_component::UniformComponentPlugin,
         mesh::{PrimitiveTopology, VertexAttributeValues},
         render_resource::{ShaderType, StorageBuffer},
         renderer::{RenderDevice, RenderQueue},
@@ -17,6 +18,8 @@ pub struct BinglessMeshPlugin;
 
 impl Plugin for BinglessMeshPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(UniformComponentPlugin::<BindlessMeshUniform>::default());
+
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -24,9 +27,9 @@ impl Plugin for BinglessMeshPlugin {
         render_app
             .init_resource::<BindlessMeshes>()
             .init_resource::<BindlessMeshMeta>()
-            .init_resource::<ExtractedBindlessMeshes>()
-            .init_resource::<RenderBindlessMeshes>()
+            .init_resource::<BindlessMeshesUpdated>()
             .add_systems(ExtractSchedule, extract_mesh_assets)
+            .add_systems(ExtractSchedule, extract_meshes)
             .add_systems(Render, prepare_mesh_assets.in_set(RenderSet::Prepare));
     }
 }
@@ -101,9 +104,17 @@ pub struct BindlessMeshMeta {
     pub node_buffer: StorageBuffer<GpuNodeBuffer>,
 }
 
+impl BindlessMeshMeta {
+    pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
+        self.vertex_buffer.write_buffer(device, queue);
+        self.primitive_buffer.write_buffer(device, queue);
+        self.node_buffer.write_buffer(device, queue);
+    }
+}
+
 /// Gpu representation of assets of type [`BindlessMesh`]
 #[derive(Default, Clone)]
-pub struct GpuBindlessMesh {
+pub struct BindlessMeshOffset {
     pub vertex_offset: usize,
     pub primitive_offset: usize,
     pub node_offset: usize,
@@ -219,21 +230,20 @@ impl BindlessMesh {
     }
 }
 
+#[derive(Default, Resource, Deref, DerefMut)]
+pub struct BindlessMeshesUpdated(bool);
+
 #[derive(Default, Resource)]
-pub struct ExtractedBindlessMeshes {
-    extracted: Vec<(AssetId<Mesh>, BindlessMesh)>,
-    removed: Vec<AssetId<Mesh>>,
+pub struct BindlessMeshes {
+    pub assets: BTreeMap<AssetId<Mesh>, BindlessMesh>,
+    pub offsets: HashMap<AssetId<Mesh>, BindlessMeshOffset>,
 }
-
-#[derive(Default, Deref, DerefMut, Resource)]
-pub struct BindlessMeshes(BTreeMap<AssetId<Mesh>, BindlessMesh>);
-
-#[derive(Deref, DerefMut, Default, Resource)]
-pub struct RenderBindlessMeshes(HashMap<AssetId<Mesh>, GpuBindlessMesh>);
 
 fn extract_mesh_assets(
     mut commands: Commands,
     mut events: Extract<EventReader<AssetEvent<Mesh>>>,
+    mut meta: ResMut<BindlessMeshMeta>,
+    mut meshes: ResMut<BindlessMeshes>,
     assets: Extract<Res<Assets<Mesh>>>,
 ) {
     let mut changed_assets: HashSet<AssetId<Mesh>> = HashSet::default();
@@ -261,35 +271,24 @@ fn extract_mesh_assets(
         }
     }
 
-    commands.insert_resource(ExtractedBindlessMeshes { extracted, removed });
-}
+    let updated = !extracted.is_empty() || !removed.is_empty();
 
-/// Note: the system must be exclusive because the offsets in [`GpuBindlessMesh`] need to be updated
-/// before being written into any other buffers.
-fn prepare_mesh_assets(
-    mut extracted_assets: ResMut<ExtractedBindlessMeshes>,
-    mut meta: ResMut<BindlessMeshMeta>,
-    mut meshes: ResMut<BindlessMeshes>,
-    mut render_meshes: ResMut<RenderBindlessMeshes>,
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
-) {
-    let dirty = !extracted_assets.extracted.is_empty() || !extracted_assets.removed.is_empty();
-
-    for (id, mesh) in extracted_assets.extracted.drain(..) {
-        meshes.insert(id, mesh);
+    for (id, mesh) in extracted {
+        meshes.assets.insert(id, mesh);
     }
 
-    for id in extracted_assets.removed.drain(..) {
-        meshes.remove(&id);
+    for id in removed {
+        meshes.assets.remove(&id);
     }
 
-    if dirty {
+    if updated {
+        let mut offsets = Vec::new();
+
         meta.vertex_buffer.get_mut().data.clear();
         meta.primitive_buffer.get_mut().data.clear();
         meta.node_buffer.get_mut().data.clear();
 
-        for (id, mesh) in meshes.iter() {
+        for (id, mesh) in meshes.assets.iter() {
             let vertex_offset = meta.vertex_buffer.get().data.len();
             meta.vertex_buffer
                 .get_mut()
@@ -308,20 +307,62 @@ fn prepare_mesh_assets(
                 .data
                 .append(&mut mesh.nodes.clone());
 
-            render_meshes.insert(
+            offsets.push((
                 id.clone(),
-                GpuBindlessMesh {
+                BindlessMeshOffset {
                     vertex_offset,
                     primitive_offset,
                     node_offset,
                 },
-            );
+            ));
         }
-
-        meta.vertex_buffer
-            .write_buffer(&render_device, &render_queue);
-        meta.primitive_buffer
-            .write_buffer(&render_device, &render_queue);
-        meta.node_buffer.write_buffer(&render_device, &render_queue);
+        for (id, offset) in offsets {
+            meshes.offsets.insert(id, offset);
+        }
     }
+
+    commands.insert_resource(BindlessMeshesUpdated(updated));
+}
+
+fn prepare_mesh_assets(
+    updated: Res<BindlessMeshesUpdated>,
+    mut meta: ResMut<BindlessMeshMeta>,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+) {
+    if **updated {
+        meta.write_buffer(&render_device, &render_queue);
+    }
+}
+
+#[derive(Default, Component, Clone, ShaderType)]
+pub struct BindlessMeshUniform {
+    pub id: u32,
+    pub vertex_offset: u32,
+    pub primitive_offset: u32,
+    pub node_offset: u32,
+}
+
+// found all the changed meshes
+// I'm not sure if Mesh3d will work properly
+fn extract_meshes(
+    mut commands: Commands,
+    query: Extract<Query<(Entity, &Mesh3d)>>,
+    meshes: Res<BindlessMeshes>,
+) {
+    let mut batch_commands = Vec::new();
+
+    for (entity, handle) in query.iter() {
+        if let Some(offset) = meshes.offsets.get(&handle.id()) {
+            let uniform = BindlessMeshUniform {
+                id: entity.index(),
+                vertex_offset: offset.vertex_offset as u32,
+                primitive_offset: offset.primitive_offset as u32,
+                node_offset: offset.node_offset as u32,
+            };
+            batch_commands.push((entity, (uniform,)));
+        }
+    }
+
+    commands.insert_or_spawn_batch(batch_commands);
 }
