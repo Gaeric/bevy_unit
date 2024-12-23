@@ -1,1 +1,1 @@
-pub use crate::{mesh::BoundedMesh, ShinePlugin};
+pub use crate::ShinePlugin;
