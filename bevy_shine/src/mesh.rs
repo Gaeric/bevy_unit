@@ -264,6 +264,8 @@ fn extract_mesh_assets(
     commands.insert_resource(ExtractedBindlessMeshes { extracted, removed });
 }
 
+/// Note: the system must be exclusive because the offsets in [`GpuBindlessMesh`] need to be updated
+/// before being written into any other buffers.
 fn prepare_mesh_assets(
     mut extracted_assets: ResMut<ExtractedBindlessMeshes>,
     mut meta: ResMut<BindlessMeshMeta>,
