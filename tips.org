@@ -1,0 +1,10 @@
+#+title: tips
+#+startup: content
+#+author: Gaeric
+#+HTML_HEAD: <link href="./worg.css" rel="stylesheet" type="text/css">
+#+HTML_HEAD: <link href="/static/css/worg.css" rel="stylesheet" type="text/css">
+#+OPTIONS: ^:{}
+** debug调试
+   开启trace级别日志
+
+   RUST_BACKTRACE=full RUST_LOG=trace cargo run -r --example minimal
