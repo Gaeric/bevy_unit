@@ -20,6 +20,8 @@
   PREPASS -> LIGHT -> POST_PROCESS -> OVERLAY -> BLOOM -> TONEMAPPING -> UPSCALING
 
   以上述几个步骤拆分整个crate
+
+  prepare/light/mesh/material/post_processing
 ** basic
    先学习并掌握如下bevy example
 *** headless_renderer
