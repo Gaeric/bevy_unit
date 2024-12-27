@@ -8,3 +8,35 @@
    开启trace级别日志
 
    RUST_BACKTRACE=full RUST_LOG=trace cargo run -r --example minimal
+** note
+*** insert resource from main world and use them for render world
+    #+begin_src rust-ts
+      // bevy v0.9
+
+      let noise_path = self.noise_folder.clone();
+      let load_system = move |mut commands: Commands, asset_server: Res<AssetServer>| {
+          let handles = (0..NOISE_TEXTURE_COUNT)
+              .map(|id| {
+                  let name = format!("{}/LDR_RGBA_{}.png", noise_path, id);
+                  asset_server.load(&name)
+              })
+              .collect();
+          commands.insert_resource(NoiseTexture(handles));
+      };
+
+      fn extract_noise_texture(mut commands: Commands, noise_texture: Extract<Res<NoiseTexture>>) {
+          commands.insert_resource(noise_texture.clone());
+      }
+    #+end_src
+
+    #+begin_src rust-ts
+      fn extract_noise_texture(mut commands: Commands, noise_texture: Extract<Res<NoiseTexture>>) {
+          commands.insert_resource(noise_texture.clone());
+      }
+
+      // 可以参考GameOfLife中的写法，直接使用ExtractPlugins等效替代
+      #[derive(Clone, Deref, DerefMut, ExtractResource)]
+      pub struct NoiseTexture(pub Vec<Handle<Image>>);
+
+      app.add_plugin(ExtractResourcePlugin::<NoiseTexture>::default());
+    #+end_src
