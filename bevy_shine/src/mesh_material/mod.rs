@@ -1,21 +1,29 @@
+use std::num::NonZeroU32;
+
 use bevy::{
     pbr::MeshPipeline,
     prelude::*,
     render::{
         mesh::{PrimitiveTopology, VertexAttributeValues},
+        render_asset::RenderAssets,
         render_resource::{
-            binding_types::{sampler, storage_buffer_read_only_sized, texture_2d},
-            BindGroup, BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
-            BindGroupLayoutEntry, BindingType, BufferBindingType, SamplerBindingType, ShaderStages,
-            ShaderType, TextureSampleType,
+            binding_types::storage_buffer_read_only_sized, BindGroup, BindGroupEntry,
+            BindGroupLayout, BindGroupLayoutEntries, BindGroupLayoutEntry, BindingResource,
+            BindingType, SamplerBindingType, ShaderStages, ShaderType, TextureSampleType,
+            TextureViewDimension,
         },
         renderer::RenderDevice,
+        texture::GpuImage,
     },
 };
 use bvh::{aabb::Bounded, bounding_hierarchy::BHShape, bvh::Bvh};
+use instance::InstanceRenderAssets;
 use material::MaterialRenderAssets;
+use mesh::MeshRenderAssets;
 
+pub mod instance;
 pub mod material;
+pub mod mesh;
 
 /// todo: describe this plugin
 pub struct MeshMaterialPlugin;
@@ -294,7 +302,9 @@ pub enum MeshMaterialSystems {
     PostPrepareInstances,
 }
 
+#[derive(Resource)]
 pub struct MeshMaterialBindGroupLayout(pub BindGroupLayout);
+
 impl FromWorld for MeshMaterialBindGroupLayout {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
@@ -323,6 +333,7 @@ impl FromWorld for MeshMaterialBindGroupLayout {
     }
 }
 
+#[derive(Resource)]
 pub struct TextureBindGroupLayout {
     pub layout: BindGroupLayout,
     pub count: usize,
@@ -334,11 +345,125 @@ fn prepare_texture_bind_group_layout(
     materials: Res<MaterialRenderAssets>,
 ) {
     let count = materials.textures.len();
+
+    let layout = render_device.create_bind_group_layout(
+        "shine prepare texture bindgroup",
+        &[
+            BindGroupLayoutEntry {
+                binding: 0,
+                ty: BindingType::Texture {
+                    sample_type: TextureSampleType::Float { filterable: true },
+                    view_dimension: TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                visibility: ShaderStages::all(),
+                count: NonZeroU32::new(count as u32),
+            },
+            BindGroupLayoutEntry {
+                binding: 1,
+                ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                visibility: ShaderStages::all(),
+                count: NonZeroU32::new(count as u32),
+            },
+        ],
+    );
+
+    commands.insert_resource(TextureBindGroupLayout { layout, count });
 }
 
+#[derive(Resource)]
 pub struct MeshMaterialBindGroup {
     pub mesh_material: BindGroup,
     pub texture: BindGroup,
 }
 
-fn queue_mesh_material_bind_group() {}
+fn queue_mesh_material_bind_group(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    mesh_pipeline: Res<MeshPipeline>,
+    meshes: Res<MeshRenderAssets>,
+    materials: Res<MaterialRenderAssets>,
+    instances: Res<InstanceRenderAssets>,
+    // migration from 0.8
+    images: Res<RenderAssets<GpuImage>>,
+    mesh_material_layout: Res<MeshMaterialBindGroupLayout>,
+    texture_layout: Res<TextureBindGroupLayout>,
+) {
+    if let (
+        Some(vertex_binding),
+        Some(primitive_binding),
+        Some(asset_node_binding),
+        Some(instance_binding),
+        Some(instance_node_binding),
+        Some(material_binding),
+    ) = (
+        meshes.vertex_buffer.binding(),
+        meshes.primitive_buffer.binding(),
+        meshes.node_buffer.binding(),
+        instances.instance_buffer.binding(),
+        instances.node_buffer.binding(),
+        materials.buffer.binding(),
+    ) {
+        let mesh_material = render_device.create_bind_group(
+            "shine queue mesh material",
+            &mesh_material_layout.0,
+            &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: vertex_binding,
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: primitive_binding,
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: asset_node_binding,
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: instance_binding,
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: instance_node_binding,
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: material_binding,
+                },
+            ],
+        );
+
+        let images = materials.textures.iter().map(|handle| {
+            images
+                .get(handle)
+                .unwrap_or(&mesh_pipeline.dummy_white_gpu_image)
+        });
+
+        let textures: Vec<_> = images.clone().map(|image| &*image.texture_view).collect();
+        let samplers: Vec<_> = images.map(|image| &*image.sampler).collect();
+
+        let texture = render_device.create_bind_group(
+            "shine queue mesh material texture",
+            &texture_layout.layout,
+            &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureViewArray(textures.as_slice()),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::SamplerArray(samplers.as_slice()),
+                },
+            ],
+        );
+
+        commands.insert_resource(MeshMaterialBindGroup {
+            mesh_material,
+            texture,
+        });
+    } else {
+        commands.remove_resource::<MeshMaterialBindGroup>();
+    }
+}
