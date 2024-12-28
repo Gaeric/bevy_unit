@@ -154,7 +154,7 @@ pub struct GpuNodeBuffer {
 #[derive(Default, ShaderType)]
 pub struct GpuInstanceBuffer {
     #[size(runtime)]
-    pub data: Vec<GpuStandardMaterial>,
+    pub data: Vec<GpuInstance>,
 }
 
 #[derive(Default, ShaderType)]

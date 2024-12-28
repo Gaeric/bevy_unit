@@ -4,6 +4,7 @@ pub mod mesh;
 pub mod prelude;
 pub mod prepass;
 
+pub mod transform;
 pub mod mesh_material;
 
 use mesh_material::MeshMaterialPlugin;
