@@ -24,6 +24,10 @@
   prepare/light/mesh/material/post_processing
 ** basic
    先学习并掌握如下bevy example
+*** ssao plugin
+    ScreenSpaceAmbientOcclusionPlugin
+
+    基于bevy 0.12版本学习ssao plugin的插件内容，掌握关联技术，以促进bevy-hikari miza分支在bevy-0.12版本bug的修复
 *** headless_renderer
     确认ScheduleRunnerPlugin的作用以及hang住流程的原因
 
