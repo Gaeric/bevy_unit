@@ -77,3 +77,15 @@
    学习如何在最新的bevy库上，使用路径追踪技术构建全局光照
 
    详细信息记录于bevy_shine crate中
+** render_graph
+   在bevy 0.12中验证确认，Camera指定的render_graph后，渲染流程仅遵循指定的render_graph运行
+
+   #+begin_src rust-ts
+     commands.spawn(Camera3dBundle {
+         camera_render_graph: CameraRenderGraph::new(my_plugin::graph::NAME),
+         transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+         ..Default::default()
+     });
+   #+end_src
+
+   如上所示，如果指定了Camera3dBundle的render_graph为my_plugin中的render_graph，则渲染过程完全按照render graph中的节点顺序进行。
