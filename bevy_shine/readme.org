@@ -28,6 +28,9 @@
     ScreenSpaceAmbientOcclusionPlugin
 
     基于bevy 0.12版本学习ssao plugin的插件内容，掌握关联技术，以促进bevy-hikari miza分支在bevy-0.12版本bug的修复
+
+    增加定位信息： push_debug_group/pop_debug_group
+    
 *** headless_renderer
     确认ScheduleRunnerPlugin的作用以及hang住流程的原因
 
