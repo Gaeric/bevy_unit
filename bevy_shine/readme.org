@@ -15,7 +15,9 @@
 *** 疑问
     1. 路径追踪是图像逐像素顺序的，光栅化渲染过种是逐物体的，两者如何结合
     2. 路径追踪的相机、屏幕像素、物体位置和光栅化过程中使用的MVPE矩阵
+       参考《Ray Tracing: GPU Edition》
     3. render_graph如何将这些过程组合起来
+       An example with render_graph and special pipelines
 * 实现
   PREPASS -> LIGHT -> POST_PROCESS -> OVERLAY -> BLOOM -> TONEMAPPING -> UPSCALING
 
