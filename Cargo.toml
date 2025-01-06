@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = [ "bevy_shine","modular_character"]
+members = [ "bevy_shine", "modular_character", "render_pass"]
 
 [dependencies]
 bevy = { path = "../bevy/", features = ["wayland", "dynamic_linking"] }
