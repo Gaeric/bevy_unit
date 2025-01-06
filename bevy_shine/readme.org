@@ -64,7 +64,7 @@
    https://github.com/cryscan/bevy-hikari
 
    本项目受bevy_hikari启发，做为学习光线追踪并为bevy高版本重新制作
-** 《Ray Tracing in One Weekend 》
+** 《Ray Tracing in One Weekend》
    https://raytracing.github.io/
 
    在开始本项目前，我学习了《Ray Tracing in One Weedkend》系列三本书藉，按照参考代码实现了书中的示例

@@ -89,3 +89,7 @@
    #+end_src
 
    如上所示，如果指定了Camera3dBundle的render_graph为my_plugin中的render_graph，则渲染过程完全按照render graph中的节点顺序进行。
+** viewtarget
+   在bevy 0.12版本中，UpscalingNode节点能正常向窗口输出最终图像
+
+   需要使用ViewTarget结构的out_texture做为RenderPassColorAttachment的view输出
