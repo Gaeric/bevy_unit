@@ -12,8 +12,7 @@ use bevy::{
             PhaseItemExtraIndex, ViewBinnedRenderPhases,
         },
         render_resource::{
-            CachedRenderPipelineId, LoadOp, Operations, RenderPassColorAttachment,
-            RenderPassDescriptor, StoreOp,
+            CachedRenderPipelineId, LoadOp, Operations, PipelineCache, RenderPassColorAttachment, RenderPassDescriptor, StoreOp
         },
         sync_world::MainEntity,
         view::ViewTarget,
@@ -50,6 +49,11 @@ impl Plugin for ShinePlugin {
 /// Render node used by shine
 #[derive(Default)]
 pub struct ShineNode;
+
+#[derive(Resource)]
+pub struct ShinePipeline {
+    pipeline_id: CachedRenderPipelineId 
+}
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ShineBinKey {
@@ -152,12 +156,24 @@ impl ViewNode for ShineNode {
             return Ok(());
         };
 
+        // The pipeline cache is a cache of all previously created pipelines.
+        // It is required to avoid creating a new pipeline each frame,
+        // which is expensive due to shader compilation.
+        let pipeline_cache = world.resource::<PipelineCache>();
+        let shine_pipeline = world.resource::<ShinePipeline>();
+
+        let Some(pipeline) = pipeline_cache.get_render_pipeline(shine_pipeline.pipeline_id) else {
+            return Ok(())
+        };
+
         let ops = Operations {
             load: LoadOp::Clear(LinearRgba::BLACK.into()),
             store: StoreOp::default(),
         };
 
-        let descriptor = RenderPassDescriptor {
+        // let diagnostics = render_context.diagnostic_recorder();
+
+        let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
             label: Some("shine node"),
             color_attachments: &[Some(RenderPassColorAttachment {
                 view: &view_target.out_texture(),
@@ -165,11 +181,7 @@ impl ViewNode for ShineNode {
                 ops,
             })],
             ..Default::default()
-        };
-
-        // let diagnostics = render_context.diagnostic_recorder();
-
-        let mut render_pass = render_context.begin_tracked_render_pass(descriptor);
+        });
 
         // let pass_span = render_context
         //     .diagnostic_recorder()
