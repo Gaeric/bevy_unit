@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = { path = "../../bevy/", features = ["wayland", "dynamic_linking"] }
+bevy = { path = "../../bevy_0.15/", features = ["wayland", "dynamic_linking"] }
 bvh = { version = "0.10.0" }
 itertools = "0.13.0"
