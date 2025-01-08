@@ -76,6 +76,7 @@ impl Plugin for ShinePlugin {
 
         render_app
             .init_resource::<ShinePipeline>()
+            .init_resource::<SpecializedRenderPipelines<ShinePipeline>>()
             .init_resource::<DrawFunctions<ShinePhase>>()
             .init_resource::<ViewBinnedRenderPhases<ShinePhase>>()
             .add_render_command::<ShinePhase, DrawShineCustom>()
@@ -159,10 +160,6 @@ pub fn extract_shine_phases(
     }
 }
 
-/// Render node used by shine
-#[derive(Default)]
-pub struct ShineNode;
-
 #[derive(Resource)]
 pub struct ShinePipeline {
     shader: Handle<Shader>,
@@ -170,7 +167,7 @@ pub struct ShinePipeline {
 }
 
 impl FromWorld for ShinePipeline {
-    fn from_world(world: &mut World) -> Self {
+    fn from_world(_world: &mut World) -> Self {
         ShinePipeline {
             shader: SHINE_SHADER_HANDLE,
         }
@@ -180,7 +177,7 @@ impl FromWorld for ShinePipeline {
 impl SpecializedRenderPipeline for ShinePipeline {
     type Key = Msaa;
 
-    fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
+    fn specialize(&self, _key: Self::Key) -> RenderPipelineDescriptor {
         RenderPipelineDescriptor {
             label: Some("shine render pipeline".into()),
             layout: vec![],
@@ -197,7 +194,7 @@ impl SpecializedRenderPipeline for ShinePipeline {
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
                     // todo: check HDR format
-                    format: TextureFormat::bevy_default(),
+                    format: TextureFormat::Bgra8UnormSrgb,
                     blend: None,
                     write_mask: ColorWrites::ALL,
                 })],
@@ -205,7 +202,7 @@ impl SpecializedRenderPipeline for ShinePipeline {
             primitive: PrimitiveState::default(),
             depth_stencil: None,
             multisample: MultisampleState {
-                count: key.samples(),
+                count: (Msaa::Off).samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -306,16 +303,20 @@ impl<P: PhaseItem> RenderCommand<P> for DrawShine {
 
     #[inline]
     fn render<'w>(
-        item: &P,
-        view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        entity: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
-        param: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
+        _item: &P,
+        _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
+        _entity: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        _param: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> bevy::render::render_phase::RenderCommandResult {
-        pass.draw_indexed(0..3, 0, 0..1);
+        pass.draw(0..6, 0..1);
         RenderCommandResult::Success
     }
 }
+
+/// Render node used by shine
+#[derive(Default)]
+pub struct ShineNode;
 
 impl ViewNode for ShineNode {
     type ViewQuery = (Entity, &'static ExtractedCamera, &'static ViewTarget);
@@ -337,17 +338,15 @@ impl ViewNode for ShineNode {
             panic!("shine phase not exists");
         };
 
-        let ops = Operations {
-            load: LoadOp::Clear(LinearRgba::BLACK.into()),
-            store: StoreOp::default(),
-        };
-
         let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
             label: Some("shine node"),
             color_attachments: &[Some(RenderPassColorAttachment {
                 view: &view_target.out_texture(),
                 resolve_target: None,
-                ops,
+                ops: Operations {
+                    load: LoadOp::Clear(LinearRgba::BLACK.into()),
+                    store: StoreOp::default(),
+                },
             })],
             ..Default::default()
         });
