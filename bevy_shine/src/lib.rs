@@ -18,18 +18,20 @@ use bevy::{
         },
         render_resource::{
             binding_types::uniform_buffer, BindGroup, BindGroupEntries, BindGroupLayout,
-            BindGroupLayoutEntries, CachedRenderPipelineId, ColorTargetState, ColorWrites,
-            FragmentState, LoadOp, MultisampleState, Operations, PipelineCache, PrimitiveState,
-            RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
-            ShaderStages, ShaderType, SpecializedRenderPipeline, SpecializedRenderPipelines,
-            StoreOp, TextureFormat, VertexState,
+            BindGroupLayoutEntries, BufferUsages, CachedRenderPipelineId, ColorTargetState,
+            ColorWrites, FragmentState, LoadOp, MultisampleState, Operations, PipelineCache,
+            PrimitiveState, RawBufferVec, RenderPassColorAttachment, RenderPassDescriptor,
+            RenderPipelineDescriptor, ShaderStages, ShaderType, SpecializedRenderPipeline,
+            SpecializedRenderPipelines, StoreOp, TextureFormat, VertexState,
         },
-        renderer::RenderDevice,
+        renderer::{RenderDevice, RenderQueue},
         sync_world::{MainEntity, RenderEntity},
         view::{ExtractedView, RenderVisibleEntities, ViewTarget},
         Extract, Render, RenderApp, RenderSet,
     },
+    state::commands,
 };
+use bytemuck::{Pod, Zeroable};
 
 pub const SHINE_SHADER_HANDLE: Handle<Shader> =
     Handle::weak_from_u128(317121890436397358688431063998852477026);
@@ -62,7 +64,7 @@ impl Plugin for ShinePlugin {
             "shaders/shader.wgsl",
             Shader::from_wgsl
         );
-        app.add_plugins(UniformComponentPlugin::<ShineUniform>::default());
+        // app.add_plugins(UniformComponentPlugin::<ShineUniform>::default());
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
@@ -73,12 +75,8 @@ impl Plugin for ShinePlugin {
             .init_resource::<DrawFunctions<ShinePhase>>()
             .init_resource::<ViewBinnedRenderPhases<ShinePhase>>()
             .add_render_command::<ShinePhase, DrawShineCustom>()
-            .add_systems(ExtractSchedule, extract_shine_data)
+            // .add_systems(ExtractSchedule, extract_shine_data)
             .add_systems(ExtractSchedule, extract_shine_phases)
-            .add_systems(
-                Render,
-                prepare_shine_bind_group.in_set(RenderSet::PrepareBindGroups),
-            )
             .add_systems(Render, queue_shine_phase_item.in_set(RenderSet::Queue));
 
         render_app
@@ -90,20 +88,24 @@ impl Plugin for ShinePlugin {
     }
 
     fn finish(&self, app: &mut App) {
-        app.sub_app_mut(RenderApp).init_resource::<ShinePipeline>();
-        println!("shine plugin finish")
+        app.sub_app_mut(RenderApp)
+            .init_resource::<ShinePipeline>()
+            .add_systems(
+                Render,
+                prepare_shine_bind_group.in_set(RenderSet::PrepareBindGroups),
+            );
     }
 }
 
-/// transfer data to GPU use UniformComponentPlugin
-fn extract_shine_data(mut commands: Commands) {
-    commands.spawn(ShineUniform {
-        width: 800,
-        height: 600,
-        padding_a: 0,
-        padding_b: 0,
-    });
-}
+// /// transfer data to GPU use UniformComponentPlugin
+// fn extract_shine_data(mut commands: Commands) {
+//     commands.spawn(ShineUniform {
+//         width: 800,
+//         height: 600,
+//         padding_a: 0,
+//         padding_b: 0,
+//     });
+// }
 
 /// A render-world system that enqueues the entity with custom rendering into
 /// the shine render phases of each view
@@ -173,41 +175,57 @@ pub fn extract_shine_phases(
     }
 }
 
-/// The ShinePlugin Data trasfer to GPU
-#[derive(Component, ShaderType, Clone, Copy, ExtractComponent)]
-pub struct ShineUniform {
+// /// The ShinePlugin Data trasfer to GPU
+// #[derive(Component, ShaderType, Clone, Copy, ExtractComponent)]
+// pub struct ShineUniform {
+//     width: u32,
+//     height: u32,
+//     padding_a: u32,
+//     padding_b: u32,
+// }
+
+/// The CPU-side structure that describes some fake data
+#[derive(Clone, Copy, Pod, Zeroable, ShaderType)]
+#[repr(C)]
+struct ShineProp {
     width: u32,
     height: u32,
-    padding_a: u32,
-    padding_b: u32,
 }
 
-// /// The GPU data for shine phase item
-// #[derive(Resource)]
-// pub struct ShineUniformBuffers {
-//     /// The property for shine config
-//     /// transfer data to GPU.
-//     property: RawBufferVec<ShineProp>,
-// }
+/// The GPU data for shine phase item
+#[derive(Resource)]
+pub struct ShineUniformBuffers {
+    /// The property for shine config
+    /// transfer data to GPU.
+    property: RawBufferVec<ShineProp>,
+}
 
-// impl FromWorld for ShineUniformBuffers {
-//     fn from_world(world: &mut World) -> Self {
-//         let render_device = world.resource::<RenderDevice>();
-//         let render_queue = world.resource::<RenderQueue>();
+/// Create the [`ShineUniformBuffers`] resource.
+///
+/// This mut be done in a startup system because it needs the [`RenderDevice`]
+/// and [`RenderQueue`] to exist, and they don't until [`App::run`] is called.
+fn prepare_shine_phase_item_buffers(mut commands: Commands) {
+    commands.init_resource::<ShineUniformBuffers>();
+}
 
-//         let mut property = RawBufferVec::new(BufferUsages::UNIFORM);
-//         let prop = ShineProp {
-//             width: 800,
-//             height: 600,
-//         };
+impl FromWorld for ShineUniformBuffers {
+    fn from_world(world: &mut World) -> Self {
+        let render_device = world.resource::<RenderDevice>();
+        let render_queue = world.resource::<RenderQueue>();
 
-//         property.push(prop);
+        let mut property = RawBufferVec::new(BufferUsages::UNIFORM);
+        let prop = ShineProp {
+            width: 800,
+            height: 600,
+        };
 
-//         property.write_buffer(render_device, render_queue);
+        property.push(prop);
 
-//         ShineUniformBuffers { property }
-//     }
-// }
+        property.write_buffer(render_device, render_queue);
+
+        ShineUniformBuffers { property }
+    }
+}
 
 #[derive(Resource)]
 pub struct ShinePipeline {
@@ -221,26 +239,40 @@ pub struct ShineBindGroup {
     bindgroup: BindGroup,
 }
 
-// pub struct ShineBindGroupLayout {
-//     bindgroup_layout: BindGroupLayout
-// }
+pub struct ShineBindGroupLayout {
+    bindgroup_layout: BindGroupLayout,
+}
 
 fn prepare_shine_bind_group(
     mut commands: Commands,
     shine_pipeline: Res<ShinePipeline>,
     render_device: Res<RenderDevice>,
-    shine_uniforms: Res<ComponentUniforms<ShineUniform>>,
+    buffers: Res<ShineUniformBuffers>,
 ) {
-    if let Some(binding) = shine_uniforms.uniforms().binding() {
-        commands.insert_resource(ShineBindGroup {
-            bindgroup: render_device.create_bind_group(
-                "shine bindgroup",
-                &shine_pipeline.bind_group_layout,
-                &BindGroupEntries::single(binding),
-            ),
-        });
+    if let Some(binding) = buffers.property.binding() {
+        let bindgroup = render_device.create_bind_group(
+            "shine bindgroup",
+            &shine_pipeline.bind_group_layout,
+            &BindGroupEntries::single(binding),
+        );
+
+        commands.insert_resource(ShineBindGroup { bindgroup });
     }
 }
+
+// fn prepare_shine_bind_group(
+//     mut commands: Commands,
+//     shine_pipeline: Res<ShinePipeline>,
+//     render_device: Res<RenderDevice>,
+// ) {
+//     commands.insert_resource(ShineBindGroup {
+//         bindgroup: render_device.create_bind_group(
+//             "shine bindgroup",
+//             &shine_pipeline.bind_group_layout,
+//             &BindGroupEntries::single(binding),
+//         ),
+//     });
+// }
 
 impl FromWorld for ShinePipeline {
     fn from_world(world: &mut World) -> Self {
@@ -250,7 +282,7 @@ impl FromWorld for ShinePipeline {
             "shine uniform bindgroup layout",
             &BindGroupLayoutEntries::single(
                 ShaderStages::all(),
-                uniform_buffer::<ShineUniform>(true),
+                uniform_buffer::<ShineProp>(false),
             ),
         );
 
@@ -388,22 +420,23 @@ struct DrawShine;
 
 impl<P: PhaseItem> RenderCommand<P> for DrawShine {
     type Param = SRes<ShineBindGroup>;
+    // type Param = SRes<ShineUniformBuffers>;
+    // type Param = ();
     type ViewQuery = ();
-    type ItemQuery = Read<DynamicUniformIndex<ShineUniform>>;
+    // type ItemQuery = Read<DynamicUniformIndex<ShineUniform>>;
+    type ItemQuery = ();
 
     #[inline]
     fn render<'w>(
         _item: &P,
         _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        uniform_index: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
-        bind_group: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
+        _entity: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        shine_bindgroup: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> bevy::render::render_phase::RenderCommandResult {
-        pass.set_bind_group(
-            0,
-            &bind_group.into_inner().bindgroup,
-            &[uniform_index.unwrap().index()],
-        );
+        let bind_group = &shine_bindgroup.into_inner().bindgroup;
+
+        pass.set_bind_group(0, &bind_group, &[]);
 
         pass.draw(0..6, 0..1);
         RenderCommandResult::Success
@@ -419,17 +452,15 @@ impl ViewNode for ShineNode {
         Entity,
         &'static ExtractedCamera,
         &'static ViewTarget,
-        &'static ShineUniform,
+        // &'static ShineUniform,
     );
 
     fn run<'w>(
         &self,
         graph: &mut bevy::render::render_graph::RenderGraphContext,
         render_context: &mut bevy::render::renderer::RenderContext<'w>,
-        (view, camera, view_target, _shine_uniform): bevy::ecs::query::QueryItem<
-            'w,
-            Self::ViewQuery,
-        >,
+        // (view, camera, view_target, _shine_uniform): bevy::ecs::query::QueryItem<
+        (view, camera, view_target): bevy::ecs::query::QueryItem<'w, Self::ViewQuery>,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
         let view_entity = graph.view_entity();
