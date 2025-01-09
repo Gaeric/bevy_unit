@@ -76,6 +76,7 @@ impl Plugin for ShinePlugin {
             .init_resource::<ViewBinnedRenderPhases<ShinePhase>>()
             .add_render_command::<ShinePhase, DrawShineCustom>()
             // .add_systems(ExtractSchedule, extract_shine_data)
+            .add_systems(Render, prepare_shine_phase_item_buffers.in_set(RenderSet::Prepare))
             .add_systems(ExtractSchedule, extract_shine_phases)
             .add_systems(Render, queue_shine_phase_item.in_set(RenderSet::Queue));
 
@@ -316,7 +317,7 @@ impl SpecializedRenderPipeline for ShinePipeline {
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
                     // todo: check HDR format
-                    format: TextureFormat::Bgra8UnormSrgb,
+                    format: TextureFormat::Rgba8UnormSrgb,
                     blend: None,
                     write_mask: ColorWrites::ALL,
                 })],
