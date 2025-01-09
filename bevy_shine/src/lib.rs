@@ -2,9 +2,13 @@ use std::ops::Range;
 
 use bevy::{
     asset::{load_internal_asset, UntypedAssetId},
+    ecs::system::lifetimeless::{Read, SRes},
     prelude::*,
     render::{
         camera::ExtractedCamera,
+        extract_component::{
+            ComponentUniforms, DynamicUniformIndex, ExtractComponent, UniformComponentPlugin,
+        },
         render_graph::{NodeRunError, RenderGraphApp, ViewNode, ViewNodeRunner},
         render_phase::{
             AddRenderCommand, BinnedPhaseItem, BinnedRenderPhaseType,
@@ -13,29 +17,19 @@ use bevy::{
             ViewBinnedRenderPhases,
         },
         render_resource::{
-            CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState, LoadOp,
-            MultisampleState, Operations, PipelineCache, PrimitiveState, RenderPassColorAttachment,
-            RenderPassDescriptor, RenderPipelineDescriptor, SpecializedRenderPipeline,
-            SpecializedRenderPipelines, StoreOp, TextureFormat, VertexState,
+            binding_types::uniform_buffer, BindGroup, BindGroupEntries, BindGroupLayout,
+            BindGroupLayoutEntries, CachedRenderPipelineId, ColorTargetState, ColorWrites,
+            FragmentState, LoadOp, MultisampleState, Operations, PipelineCache, PrimitiveState,
+            RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
+            ShaderStages, ShaderType, SpecializedRenderPipeline, SpecializedRenderPipelines,
+            StoreOp, TextureFormat, VertexState,
         },
+        renderer::RenderDevice,
         sync_world::{MainEntity, RenderEntity},
         view::{ExtractedView, RenderVisibleEntities, ViewTarget},
         Extract, Render, RenderApp, RenderSet,
     },
 };
-
-// pub mod mesh;
-// pub mod prelude;
-// pub mod prepass;
-
-// pub mod transform;
-// pub mod mesh_material;
-// pub mod light;
-
-// use mesh_material::MeshMaterialPlugin;
-
-// use mesh::BinglessMeshPlugin;
-// use prepass::PrepassPlugin;
 
 pub const SHINE_SHADER_HANDLE: Handle<Shader> =
     Handle::weak_from_u128(317121890436397358688431063998852477026);
@@ -58,7 +52,6 @@ pub mod graph {
     }
 }
 
-//
 pub struct ShinePlugin;
 
 impl Plugin for ShinePlugin {
@@ -69,18 +62,23 @@ impl Plugin for ShinePlugin {
             "shaders/shader.wgsl",
             Shader::from_wgsl
         );
+        app.add_plugins(UniformComponentPlugin::<ShineUniform>::default());
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
 
         render_app
-            .init_resource::<ShinePipeline>()
             .init_resource::<SpecializedRenderPipelines<ShinePipeline>>()
             .init_resource::<DrawFunctions<ShinePhase>>()
             .init_resource::<ViewBinnedRenderPhases<ShinePhase>>()
             .add_render_command::<ShinePhase, DrawShineCustom>()
+            .add_systems(ExtractSchedule, extract_shine_data)
             .add_systems(ExtractSchedule, extract_shine_phases)
+            .add_systems(
+                Render,
+                prepare_shine_bind_group.in_set(RenderSet::PrepareBindGroups),
+            )
             .add_systems(Render, queue_shine_phase_item.in_set(RenderSet::Queue));
 
         render_app
@@ -90,6 +88,21 @@ impl Plugin for ShinePlugin {
                 graph::ShineRenderNode::OneNode,
             );
     }
+
+    fn finish(&self, app: &mut App) {
+        app.sub_app_mut(RenderApp).init_resource::<ShinePipeline>();
+        println!("shine plugin finish")
+    }
+}
+
+/// transfer data to GPU use UniformComponentPlugin
+fn extract_shine_data(mut commands: Commands) {
+    commands.spawn(ShineUniform {
+        width: 800,
+        height: 600,
+        padding_a: 0,
+        padding_b: 0,
+    });
 }
 
 /// A render-world system that enqueues the entity with custom rendering into
@@ -160,16 +173,90 @@ pub fn extract_shine_phases(
     }
 }
 
+/// The ShinePlugin Data trasfer to GPU
+#[derive(Component, ShaderType, Clone, Copy, ExtractComponent)]
+pub struct ShineUniform {
+    width: u32,
+    height: u32,
+    padding_a: u32,
+    padding_b: u32,
+}
+
+// /// The GPU data for shine phase item
+// #[derive(Resource)]
+// pub struct ShineUniformBuffers {
+//     /// The property for shine config
+//     /// transfer data to GPU.
+//     property: RawBufferVec<ShineProp>,
+// }
+
+// impl FromWorld for ShineUniformBuffers {
+//     fn from_world(world: &mut World) -> Self {
+//         let render_device = world.resource::<RenderDevice>();
+//         let render_queue = world.resource::<RenderQueue>();
+
+//         let mut property = RawBufferVec::new(BufferUsages::UNIFORM);
+//         let prop = ShineProp {
+//             width: 800,
+//             height: 600,
+//         };
+
+//         property.push(prop);
+
+//         property.write_buffer(render_device, render_queue);
+
+//         ShineUniformBuffers { property }
+//     }
+// }
+
 #[derive(Resource)]
 pub struct ShinePipeline {
     shader: Handle<Shader>,
+    bind_group_layout: BindGroupLayout,
     // pipeline_id: CachedRenderPipelineId,
 }
 
+#[derive(Resource)]
+pub struct ShineBindGroup {
+    bindgroup: BindGroup,
+}
+
+// pub struct ShineBindGroupLayout {
+//     bindgroup_layout: BindGroupLayout
+// }
+
+fn prepare_shine_bind_group(
+    mut commands: Commands,
+    shine_pipeline: Res<ShinePipeline>,
+    render_device: Res<RenderDevice>,
+    shine_uniforms: Res<ComponentUniforms<ShineUniform>>,
+) {
+    if let Some(binding) = shine_uniforms.uniforms().binding() {
+        commands.insert_resource(ShineBindGroup {
+            bindgroup: render_device.create_bind_group(
+                "shine bindgroup",
+                &shine_pipeline.bind_group_layout,
+                &BindGroupEntries::single(binding),
+            ),
+        });
+    }
+}
+
 impl FromWorld for ShinePipeline {
-    fn from_world(_world: &mut World) -> Self {
+    fn from_world(world: &mut World) -> Self {
+        let render_device = world.resource::<RenderDevice>();
+
+        let bind_group_layout = render_device.create_bind_group_layout(
+            "shine uniform bindgroup layout",
+            &BindGroupLayoutEntries::single(
+                ShaderStages::all(),
+                uniform_buffer::<ShineUniform>(true),
+            ),
+        );
+
         ShinePipeline {
             shader: SHINE_SHADER_HANDLE,
+            bind_group_layout,
         }
     }
 }
@@ -178,9 +265,12 @@ impl SpecializedRenderPipeline for ShinePipeline {
     type Key = Msaa;
 
     fn specialize(&self, _key: Self::Key) -> RenderPipelineDescriptor {
+        // let layout = vec![self.bind_group_layout.clone()];
+        let layout = vec![];
+
         RenderPipelineDescriptor {
             label: Some("shine render pipeline".into()),
-            layout: vec![],
+            layout,
             push_constant_ranges: vec![],
             vertex: VertexState {
                 shader: self.shader.clone(),
@@ -297,18 +387,24 @@ type DrawShineCustom = (SetItemPipeline, DrawShine);
 struct DrawShine;
 
 impl<P: PhaseItem> RenderCommand<P> for DrawShine {
-    type Param = ();
+    type Param = SRes<ShineBindGroup>;
     type ViewQuery = ();
-    type ItemQuery = ();
+    type ItemQuery = Read<DynamicUniformIndex<ShineUniform>>;
 
     #[inline]
     fn render<'w>(
         _item: &P,
         _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        _entity: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
-        _param: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
+        uniform_index: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        bind_group: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> bevy::render::render_phase::RenderCommandResult {
+        pass.set_bind_group(
+            0,
+            &bind_group.into_inner().bindgroup,
+            &[uniform_index.unwrap().index()],
+        );
+
         pass.draw(0..6, 0..1);
         RenderCommandResult::Success
     }
@@ -319,16 +415,26 @@ impl<P: PhaseItem> RenderCommand<P> for DrawShine {
 pub struct ShineNode;
 
 impl ViewNode for ShineNode {
-    type ViewQuery = (Entity, &'static ExtractedCamera, &'static ViewTarget);
+    type ViewQuery = (
+        Entity,
+        &'static ExtractedCamera,
+        &'static ViewTarget,
+        &'static ShineUniform,
+    );
 
     fn run<'w>(
         &self,
         graph: &mut bevy::render::render_graph::RenderGraphContext,
         render_context: &mut bevy::render::renderer::RenderContext<'w>,
-        (view, camera, view_target): bevy::ecs::query::QueryItem<'w, Self::ViewQuery>,
+        (view, camera, view_target, _shine_uniform): bevy::ecs::query::QueryItem<
+            'w,
+            Self::ViewQuery,
+        >,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
         let view_entity = graph.view_entity();
+
+        info!("shine node run");
 
         let Some(shine_phases) = world.get_resource::<ViewBinnedRenderPhases<ShinePhase>>() else {
             panic!("shine phases not exists");
