@@ -191,6 +191,8 @@ pub fn extract_shine_phases(
 struct ShineProp {
     width: u32,
     height: u32,
+    pad_a: u32,
+    pad_b: u32,
 }
 
 /// The GPU data for shine phase item
@@ -218,6 +220,8 @@ impl FromWorld for ShineUniformBuffers {
         let prop = ShineProp {
             width: 800,
             height: 600,
+            pad_a: 0,
+            pad_b: 0,
         };
 
         property.push(prop);
@@ -298,8 +302,8 @@ impl SpecializedRenderPipeline for ShinePipeline {
     type Key = Msaa;
 
     fn specialize(&self, _key: Self::Key) -> RenderPipelineDescriptor {
-        // let layout = vec![self.bind_group_layout.clone()];
-        let layout = vec![];
+        let layout = vec![self.bind_group_layout.clone()];
+        // let layout = vec![];
 
         RenderPipelineDescriptor {
             label: Some("shine render pipeline".into()),
@@ -317,7 +321,7 @@ impl SpecializedRenderPipeline for ShinePipeline {
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
                     // todo: check HDR format
-                    format: TextureFormat::Rgba8UnormSrgb,
+                    format: TextureFormat::Bgra8UnormSrgb,
                     blend: None,
                     write_mask: ColorWrites::ALL,
                 })],
@@ -466,7 +470,7 @@ impl ViewNode for ShineNode {
     ) -> Result<(), NodeRunError> {
         let view_entity = graph.view_entity();
 
-        info!("shine node run");
+        trace!("shine node run");
 
         let Some(shine_phases) = world.get_resource::<ViewBinnedRenderPhases<ShinePhase>>() else {
             panic!("shine phases not exists");
