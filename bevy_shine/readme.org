@@ -38,6 +38,9 @@
     :END:
 *** 支持不同的out_texture格式
 *** ray casting with fragment shader
+*** 获取mesh数据并将这些数据传递到GPU
+*** 获取view数据并将这些数据传递到GPU
+*** 获取material数据并将这些数据传递到GPU
 ** example
    先学习并掌握如下bevy example
 *** ssao plugin
