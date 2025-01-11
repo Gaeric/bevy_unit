@@ -2,13 +2,13 @@ use std::ops::Range;
 
 use bevy::{
     asset::{load_internal_asset, UntypedAssetId},
-    ecs::system::lifetimeless::{Read, SRes},
+    ecs::system::lifetimeless::SRes,
+    pbr::RenderMeshInstances,
     prelude::*,
     render::{
         camera::ExtractedCamera,
-        extract_component::{
-            ComponentUniforms, DynamicUniformIndex, ExtractComponent, UniformComponentPlugin,
-        },
+        mesh::RenderMesh,
+        render_asset::RenderAssets,
         render_graph::{NodeRunError, RenderGraphApp, ViewNode, ViewNodeRunner},
         render_phase::{
             AddRenderCommand, BinnedPhaseItem, BinnedRenderPhaseType,
@@ -29,7 +29,6 @@ use bevy::{
         view::{ExtractedView, RenderVisibleEntities, ViewTarget},
         Extract, Render, RenderApp, RenderSet,
     },
-    state::commands,
 };
 use bytemuck::{Pod, Zeroable};
 
@@ -76,7 +75,10 @@ impl Plugin for ShinePlugin {
             .init_resource::<ViewBinnedRenderPhases<ShinePhase>>()
             .add_render_command::<ShinePhase, DrawShineCustom>()
             // .add_systems(ExtractSchedule, extract_shine_data)
-            .add_systems(Render, prepare_shine_phase_item_buffers.in_set(RenderSet::Prepare))
+            .add_systems(
+                Render,
+                prepare_shine_phase_item_buffers.in_set(RenderSet::Prepare),
+            )
             .add_systems(ExtractSchedule, extract_shine_phases)
             .add_systems(Render, queue_shine_phase_item.in_set(RenderSet::Queue));
 
@@ -97,16 +99,6 @@ impl Plugin for ShinePlugin {
             );
     }
 }
-
-// /// transfer data to GPU use UniformComponentPlugin
-// fn extract_shine_data(mut commands: Commands) {
-//     commands.spawn(ShineUniform {
-//         width: 800,
-//         height: 600,
-//         padding_a: 0,
-//         padding_b: 0,
-//     });
-// }
 
 /// A render-world system that enqueues the entity with custom rendering into
 /// the shine render phases of each view
@@ -244,10 +236,6 @@ pub struct ShineBindGroup {
     bindgroup: BindGroup,
 }
 
-pub struct ShineBindGroupLayout {
-    bindgroup_layout: BindGroupLayout,
-}
-
 fn prepare_shine_bind_group(
     mut commands: Commands,
     shine_pipeline: Res<ShinePipeline>,
@@ -264,20 +252,6 @@ fn prepare_shine_bind_group(
         commands.insert_resource(ShineBindGroup { bindgroup });
     }
 }
-
-// fn prepare_shine_bind_group(
-//     mut commands: Commands,
-//     shine_pipeline: Res<ShinePipeline>,
-//     render_device: Res<RenderDevice>,
-// ) {
-//     commands.insert_resource(ShineBindGroup {
-//         bindgroup: render_device.create_bind_group(
-//             "shine bindgroup",
-//             &shine_pipeline.bind_group_layout,
-//             &BindGroupEntries::single(binding),
-//         ),
-//     });
-// }
 
 impl FromWorld for ShinePipeline {
     fn from_world(world: &mut World) -> Self {
@@ -424,24 +398,43 @@ type DrawShineCustom = (SetItemPipeline, DrawShine);
 struct DrawShine;
 
 impl<P: PhaseItem> RenderCommand<P> for DrawShine {
-    type Param = SRes<ShineBindGroup>;
-    // type Param = SRes<ShineUniformBuffers>;
-    // type Param = ();
+    // type Param = SRes<ShineBindGroup>;
+    type Param = (
+        SRes<ShineBindGroup>,
+        SRes<RenderAssets<RenderMesh>>,
+        SRes<RenderMeshInstances>,
+    );
     type ViewQuery = ();
-    // type ItemQuery = Read<DynamicUniformIndex<ShineUniform>>;
     type ItemQuery = ();
 
     #[inline]
     fn render<'w>(
-        _item: &P,
+        item: &P,
         _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
         _entity: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
-        shine_bindgroup: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
+        (shine_bindgroup, meshes, mesh_instances): bevy::ecs::system::SystemParamItem<
+            'w,
+            '_,
+            Self::Param,
+        >,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> bevy::render::render_phase::RenderCommandResult {
         let bind_group = &shine_bindgroup.into_inner().bindgroup;
-
         pass.set_bind_group(0, &bind_group, &[]);
+
+        let meshes = meshes.into_inner();
+        let mesh_instances = mesh_instances.into_inner();
+
+        // get mesh info, but how to set the 
+        if let Some(mesh_instance) = mesh_instances.render_mesh_queue_data(item.main_entity()) {
+            info!(
+                "get mesh instance success: {:?}",
+                mesh_instance.mesh_asset_id
+            );
+            if let Some(mesh) = meshes.get(mesh_instance.mesh_asset_id) {
+                info!("get mesh success: {:?}", mesh);
+            }
+        }
 
         pass.draw(0..6, 0..1);
         RenderCommandResult::Success
