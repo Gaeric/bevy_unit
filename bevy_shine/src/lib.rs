@@ -32,6 +32,8 @@ use bevy::{
 };
 use bytemuck::{Pod, Zeroable};
 
+mod mesh;
+
 pub const SHINE_SHADER_HANDLE: Handle<Shader> =
     Handle::weak_from_u128(317121890436397358688431063998852477026);
 
