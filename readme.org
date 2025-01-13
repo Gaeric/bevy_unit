@@ -691,3 +691,21 @@
        }
      #+end_src
      设置了一个新的RenderCommand
+** shine
+   检查AssetEvent::Added，发现仅有两个球体的场景中存在两个额外的网格体，通过uuid转换成u128数字，可查到这两个网格体来源于VolumetricFog，其定义如下
+   #+begin_src rust-ts
+     pub const PLANE_MESH: Handle<Mesh> = Handle::weak_from_u128(435245126479971076);
+
+     pub const CUBE_MESH: Handle<Mesh> = Handle::weak_from_u128(5023959819001661507);
+   #+end_src
+
+   为了减少额外的网格判定，shine中需要找到禁用VolumetricFog插件的方法。
+
+   或者仅添加指定网格体。
+
+   #+begin_example
+     2025-01-13T01:01:54.243733Z  INFO bevy_shine::mesh: mesh event: Added { id: AssetId<bevy_mesh::mesh::Mesh>{uuid: 00000000-0000-0000-060a-4d22f20f0304} }
+     2025-01-13T01:01:54.243813Z  INFO bevy_shine::mesh: mesh event: Added { id: AssetId<bevy_mesh::mesh::Mesh>{uuid: 00000000-0000-0000-45b8-b0d6596e0843} }
+     2025-01-13T01:01:54.243875Z  INFO bevy_shine::mesh: mesh event: Added { id: AssetId<bevy_mesh::mesh::Mesh>{ index: 0, generation: 0} }
+     2025-01-13T01:01:54.244789Z  INFO bevy_shine::mesh: mesh event: Added { id: AssetId<bevy_mesh::mesh::Mesh>{ index: 1, generation: 0} }
+   #+end_example

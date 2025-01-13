@@ -1,6 +1,9 @@
 use bevy::{
     prelude::*,
-    render::{mesh::VertexAttributeValues, render_resource::ShaderType},
+    render::{
+        mesh::VertexAttributeValues, render_resource::ShaderType, Extract, Render, RenderApp,
+        RenderSet,
+    },
 };
 
 /// The mesh vertex on Gpu
@@ -17,15 +20,27 @@ pub struct GpuVertexBuffer {
     pub data: Vec<GpuVertex>,
 }
 
+#[derive(Debug)]
 pub struct GpuMesh {
     pub vertices: Vec<GpuVertex>,
 }
 
+#[derive(Debug)]
 pub enum ExtractMeshResult {
     MissingAttributePositon,
     MissingAttributeNormal,
     MissingAttributeUV,
     IncompatiblePrimitiveTopology,
+}
+
+pub struct ShineMeshPlugin;
+
+impl Plugin for ShineMeshPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, extract_mesh_assets);
+        // let render_app = app.sub_app_mut(RenderApp);
+        // render_app.add_systems(Render, extract_mesh_assets.in_set(RenderSet::PrepareAssets));
+    }
 }
 
 impl GpuMesh {
@@ -59,5 +74,25 @@ impl GpuMesh {
         }
 
         Ok(Self { vertices })
+    }
+}
+
+fn extract_mesh_assets(mut command: Commands, mut events: EventReader<AssetEvent<Mesh>>,
+    assets: ResMut<Assets<Mesh>>
+) {
+    for event in events.read() {
+        info!("mesh event: {:?}", event);
+
+        match event {
+            AssetEvent::Added { id } => {
+                if let Some(mesh) = assets.get(*id) {
+
+                    let gpu_mesh = GpuMesh::from_mesh(mesh.clone());
+                    info!("asset mesh is {:?}", mesh);
+                    info!("gpu mesh is {:?}", gpu_mesh);
+                }
+            }
+            _ => {}
+        }
     }
 }

@@ -61,7 +61,7 @@ fn setup(
 
     commands.spawn((
         Camera3d::default(),
-        CameraRenderGraph::new(ShineRenderGraph),
+        // CameraRenderGraph::new(ShineRenderGraph),
         Transform::from_xyz(0.0, 0.0, 1.0).looking_at(Vec3::ZERO, Vec3::Y),
         // Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3 { x: 0.0, y: 0.0, z: 100.0 }, Vec3::Y),
         Msaa::default(),

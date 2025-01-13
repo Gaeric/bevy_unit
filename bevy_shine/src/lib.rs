@@ -31,6 +31,7 @@ use bevy::{
     },
 };
 use bytemuck::{Pod, Zeroable};
+use mesh::ShineMeshPlugin;
 
 mod mesh;
 
@@ -59,6 +60,8 @@ pub struct ShinePlugin;
 
 impl Plugin for ShinePlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(ShineMeshPlugin);
+
         load_internal_asset!(
             app,
             SHINE_SHADER_HANDLE,
