@@ -1,9 +1,14 @@
 use bevy::{
-    gizmos::primitives, prelude::*, render::{mesh::{PrimitiveTopology, VertexAttributeValues}, render_resource::{ShaderType, StorageBuffer}}
+    prelude::*,
+    render::{
+        mesh::{PrimitiveTopology, VertexAttributeValues},
+        render_resource::{ShaderType, StorageBuffer},
+    },
 };
+use itertools::Itertools;
 
 /// The mesh vertex on Gpu
-#[derive(Debug, ShaderType)]
+#[derive(Debug, ShaderType, Clone, Copy)]
 pub struct GpuVertex {
     pub position: Vec3,
     pub normal: Vec3,
@@ -23,13 +28,13 @@ pub struct GpuMesh {
 
 #[derive(Debug, ShaderType)]
 pub struct GpuTriangle {
-    pub triangle: [GpuVertex; 3]
+    pub triangle: [GpuVertex; 3],
 }
 
 #[derive(Debug, Default, ShaderType)]
 pub struct GpuTriangles {
     #[size(runtime)]
-    pub data: Vec<GpuTriangle>,
+    pub triangles: Vec<GpuTriangle>,
 }
 
 #[derive(Default, Resource)]
@@ -49,13 +54,13 @@ pub struct ShineMeshPlugin;
 
 impl Plugin for ShineMeshPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, collect_mesh_assetid);
+        app.add_systems(Update, collect_mesh_triangles);
         // let render_app = app.sub_app_mut(RenderApp);
         // render_app.add_systems(Render, extract_mesh_assets.in_set(RenderSet::PrepareAssets));
     }
 }
 
-impl GpuMesh {
+impl GpuTriangles {
     pub fn from_mesh(mesh: Mesh) -> Result<Self, ExtractMeshResult> {
         let positions = mesh
             .attribute(Mesh::ATTRIBUTE_POSITION)
@@ -85,11 +90,49 @@ impl GpuMesh {
             });
         }
 
-        Ok(Self { vertices })
+        let indices: Vec<_> = match mesh.indices() {
+            Some(indices) => indices.iter().collect(),
+            None => vertices.iter().enumerate().map(|(id, _)| id).collect(),
+        };
+
+        let triangles = match mesh.primitive_topology() {
+            PrimitiveTopology::TriangleList => {
+                let mut triangles = vec![];
+                for chunk in &indices.iter().chunks(3) {
+                    let (i0, i1, i2) = chunk
+                        .cloned()
+                        .next_tuple()
+                        .ok_or(ExtractMeshResult::IncompatiblePrimitiveTopology)?;
+
+                    let triangle = [i0, i1, i2].map(|id| vertices[id]);
+                    triangles.push(GpuTriangle { triangle })
+                }
+                Ok(triangles)
+            }
+
+            PrimitiveTopology::TriangleStrip => {
+                let mut triangles = vec![];
+                for (id, (i0, i1, i2)) in indices.iter().cloned().tuple_windows().enumerate() {
+                    let indices = if id & 1 == 0 {
+                        [i0, i1, i2]
+                    } else {
+                        [i1, i0, i2]
+                    };
+
+                    let triangle = indices.map(|id| vertices[id]);
+                    triangles.push(GpuTriangle { triangle })
+                }
+                Ok(triangles)
+            }
+
+            _ => Err(ExtractMeshResult::IncompatiblePrimitiveTopology),
+        }?;
+
+        Ok(Self { triangles })
     }
 }
 
-fn collect_mesh_assetid(
+fn collect_mesh_triangles(
     mut command: Commands,
     mut events: EventReader<AssetEvent<Mesh>>,
     assets: Res<Assets<Mesh>>,
@@ -100,9 +143,9 @@ fn collect_mesh_assetid(
         match event {
             AssetEvent::Added { id } => {
                 if let Some(mesh) = assets.get(*id) {
-                    let gpu_mesh = GpuMesh::from_mesh(mesh.clone());
+                    let gpu_triangles = GpuTriangles::from_mesh(mesh.clone());
                     info!("asset mesh is {:?}", mesh);
-                    info!("gpu mesh is {:?}", gpu_mesh);
+                    info!("gpu mesh is {:?}", gpu_triangles);
                 }
             }
             _ => {}
