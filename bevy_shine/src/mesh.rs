@@ -1,9 +1,5 @@
 use bevy::{
-    prelude::*,
-    render::{
-        mesh::VertexAttributeValues, render_resource::ShaderType, Extract, Render, RenderApp,
-        RenderSet,
-    },
+    gizmos::primitives, prelude::*, render::{mesh::{PrimitiveTopology, VertexAttributeValues}, render_resource::{ShaderType, StorageBuffer}}
 };
 
 /// The mesh vertex on Gpu
@@ -25,6 +21,22 @@ pub struct GpuMesh {
     pub vertices: Vec<GpuVertex>,
 }
 
+#[derive(Debug, ShaderType)]
+pub struct GpuTriangle {
+    pub triangle: [GpuVertex; 3]
+}
+
+#[derive(Debug, Default, ShaderType)]
+pub struct GpuTriangles {
+    #[size(runtime)]
+    pub data: Vec<GpuTriangle>,
+}
+
+#[derive(Default, Resource)]
+pub struct ShineTriangleAssets {
+    pub trangle_buffer: StorageBuffer<GpuTriangles>,
+}
+
 #[derive(Debug)]
 pub enum ExtractMeshResult {
     MissingAttributePositon,
@@ -37,7 +49,7 @@ pub struct ShineMeshPlugin;
 
 impl Plugin for ShineMeshPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, extract_mesh_assets);
+        app.add_systems(Update, collect_mesh_assetid);
         // let render_app = app.sub_app_mut(RenderApp);
         // render_app.add_systems(Render, extract_mesh_assets.in_set(RenderSet::PrepareAssets));
     }
@@ -77,8 +89,10 @@ impl GpuMesh {
     }
 }
 
-fn extract_mesh_assets(mut command: Commands, mut events: EventReader<AssetEvent<Mesh>>,
-    assets: ResMut<Assets<Mesh>>
+fn collect_mesh_assetid(
+    mut command: Commands,
+    mut events: EventReader<AssetEvent<Mesh>>,
+    assets: Res<Assets<Mesh>>,
 ) {
     for event in events.read() {
         info!("mesh event: {:?}", event);
@@ -86,7 +100,6 @@ fn extract_mesh_assets(mut command: Commands, mut events: EventReader<AssetEvent
         match event {
             AssetEvent::Added { id } => {
                 if let Some(mesh) = assets.get(*id) {
-
                     let gpu_mesh = GpuMesh::from_mesh(mesh.clone());
                     info!("asset mesh is {:?}", mesh);
                     info!("gpu mesh is {:?}", gpu_mesh);
