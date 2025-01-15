@@ -96,3 +96,5 @@
   2. 通过UniformComponentPlugin将数据从main world传递到render world的方法，和viewnode可能无法同时协作使用，存在uniform_index未正确获取的问题。后续如果遇到类似场景，需要继续检查。
      对应提交节点： de1004f * master origin/master bevy_shine: uniform buffer for rendering - failed
   3. array<uniform>时遇到了对齐问题，依据提示进行了padding位的添加暂时解决，但尚不明白具体规则
+  4. renderdoc调用可执行文件时，设置CARGO_MANIFEST_DIR为bevy项目所在路径。
+     注意不要使用sh脚本包装命令，会无法捕捉画面
