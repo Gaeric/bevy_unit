@@ -98,3 +98,4 @@
   3. array<uniform>时遇到了对齐问题，依据提示进行了padding位的添加暂时解决，但尚不明白具体规则
   4. renderdoc调用可执行文件时，设置CARGO_MANIFEST_DIR为bevy项目所在路径。
      注意不要使用sh脚本包装命令，会无法捕捉画面
+  5. 在bevy 0.12版本中，遇到了未加载shader文件但bevy未报错的情况，此时shader和对应的phaseitem并未执行
