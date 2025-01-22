@@ -99,3 +99,6 @@
   4. renderdoc调用可执行文件时，设置CARGO_MANIFEST_DIR为bevy项目所在路径。
      注意不要使用sh脚本包装命令，会无法捕捉画面
   5. 在bevy 0.12版本中，遇到了未加载shader文件但bevy未报错的情况，此时shader和对应的phaseitem并未执行
+  6. 在bevy 0.12版本中，mesh对应的buffer并不需要指定dynamic offset，其offset通过batching模块进行处理，并在mesh_functions中通过instance相关函数处理
+  7. 如下打印表示着没有任何输出提交到当前的out_texture上，很有可能是render graph未正确指定
+     2025-01-22T08:01:30.766251Z ERROR present_frames: log: No work has been submitted for this frame 
