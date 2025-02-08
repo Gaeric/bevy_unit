@@ -18,6 +18,7 @@
        参考《Ray Tracing: GPU Edition》
     3. render_graph如何将这些过程组合起来
        An example with render_graph and special pipelines
+    4. blue noise参考gtao部分，以确认是否需要进行改进
 * 实现
   PREPASS -> LIGHT -> POST_PROCESS -> OVERLAY -> BLOOM -> TONEMAPPING -> UPSCALING
 
@@ -102,3 +103,4 @@
   6. 在bevy 0.12版本中，mesh对应的buffer并不需要指定dynamic offset，其offset通过batching模块进行处理，并在mesh_functions中通过instance相关函数处理
   7. 如下打印表示着没有任何输出提交到当前的out_texture上，很有可能是render graph未正确指定
      2025-01-22T08:01:30.766251Z ERROR present_frames: log: No work has been submitted for this frame 
+  8. bevy0.12版本out_texture不受rbga值中透明度的影响，而在bevy0.11版本中透明度值影响了实际的颜色值
