@@ -92,6 +92,25 @@
    http://raytracinggems.com/
 
    学习过程中大量参考《Ray Tracing Gems II》
+** Some GI data
+   SDFGI (SDF + probe based): https://www.docdroid.net/YNntL0e/godot-sdfgi-pdf
+   GI-1.0 (radiance cache): https://gpuopen.com/download/publications/GPUOpen2022_GI1_0.pdf?utm_source=twitter&utm_medium=social&utm_campaign=arrg
+   ReSTIR (reservoir based):
+   https://cs.dartmouth.edu/wjarosz/publications/bitterli20spatiotemporal.pdf
+   https://d1qx31qr3h6wln.cloudfront.net/publications/ReSTIR%20GI.pdf
+   https://d1qx31qr3h6wln.cloudfront.net/publications/sig22_GRIS.pdf
+
+   Lumen (combined SDF + radiance cache?, unsure):
+   http://advances.realtimerendering.com/s2022/SIGGRAPH2022-Advances-Lumen-Wright%20et%20al.pdf
+   https://www.youtube.com/watch?v=2GYXuM10riw 
+
+   SVGF: https://cg.ivd.kit.edu/publications/2017/svgf/svgf_preprint.pdf 
+
+   DDGI (SDFGI is like 50% DDGI)
+   https://morgan3d.github.io/articles/2019-04-01-ddgi/ (scroll down for GDC video)
+   https://github.com/morgan3d/articles/blob/main/2019-04-01-ddgi/optimization.html (has some info not on the site)
+   Paper/Code: https://jcgt.org/published/0008/02/01/
+   Follow up paper: https://arxiv.org/pdf/2009.10796.pdf 
 * Tips
   1. 实现基础原型时不与bevy代码过度藕合，保证独立和简单的基础功能以理解原型本身是最重要的事情。
   2. 通过UniformComponentPlugin将数据从main world传递到render world的方法，和viewnode可能无法同时协作使用，存在uniform_index未正确获取的问题。后续如果遇到类似场景，需要继续检查。
