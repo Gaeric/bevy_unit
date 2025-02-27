@@ -125,3 +125,4 @@
   7. 如下打印表示着没有任何输出提交到当前的out_texture上，很有可能是render graph未正确指定
      2025-01-22T08:01:30.766251Z ERROR present_frames: log: No work has been submitted for this frame 
   8. bevy0.12版本out_texture不受rbga值中透明度的影响，而在bevy0.11版本中透明度值影响了实际的颜色值
+  9. BRDF影响重要性采样(光线分布)和着色(颜色累积)，但两者可以分开考虑
