@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = { version = "0.14.2", features = ["wayland", "dynamic_linking"] }
-bevy_asset_loader = "0.21.0"
+bevy = { path = "../../bevy_0.15/", features = ["wayland", "dynamic_linking"] }
+bevy_asset_loader = "0.22.0"
+bevy_panorbit_camera = "0.25.0"
+
+# outdated
 bevy_mod_billboard = "0.7.0"
-bevy_panorbit_camera = "0.20.0"
