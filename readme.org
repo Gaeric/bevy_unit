@@ -1,4 +1,4 @@
-#+title: Bevy Unit
+#+title: Bevy Booklet
 #+startup: content
 #+author: Gaeric
 #+HTML_HEAD: <link href="./worg.css" rel="stylesheet" type="text/css">
