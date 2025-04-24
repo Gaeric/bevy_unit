@@ -113,6 +113,8 @@
    Follow up paper: https://arxiv.org/pdf/2009.10796.pdf 
 ** Filament BDRF
    https://google.github.io/filament/Filament.html#about
+** Exposure settings
+   https://github.com/bevyengine/bevy/pull/11347
 * Tips
   1. 实现基础原型时不与bevy代码过度藕合，保证独立和简单的基础功能以理解原型本身是最重要的事情。
   2. 通过UniformComponentPlugin将数据从main world传递到render world的方法，和viewnode可能无法同时协作使用，存在uniform_index未正确获取的问题。后续如果遇到类似场景，需要继续检查。
@@ -128,3 +130,4 @@
   9. BRDF影响重要性采样(光线分布)和着色(颜色累积)，但两者可以分开考虑
   10. 检查light相关参数，以确定color计算过程符合Filament的描述
       https://github.com/bevyengine/bevy/pull/8407
+  11. discord link: https://discord.com/channels/691052431525675048/872438954421547008/872439437164961792
