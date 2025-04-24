@@ -1,9 +1,8 @@
 use bevy::{core_pipeline::tonemapping::Tonemapping, prelude::*};
 // use blenvy::*;
 
-// use modular_character::ModularCharacterPlugin;
-
-use bevy_shine::ShinePlugin;
+// use bevy_shine::ShinePlugin;
+use modular_character::ModularCharacterPlugin;
 
 mod headless_renderer;
 
@@ -19,14 +18,14 @@ fn main() -> AppExit {
         // .add_plugins(animation_demo::plugin)
         // .add_plugins(bone_demo::plugin)
         // .add_plugins(ui::plugin)
-        // .add_plugins(ModularCharacterPlugin)
+        .add_plugins(ModularCharacterPlugin)
         // .add_plugins(dev::plugin)
         // .add_plugins(cloth_demo::plugin)
         // .add_plugins(BlenvyPlugin::default())
         // .register_type::<Player>()
         // .add_plugins(PhysicsPlugins::default())
         // .add_systems(Startup, setup)
-        .add_plugins(ShinePlugin)
+        // .add_plugins(ShinePlugin)
         // .add_plugins(headless_renderer::HeadlessRendererPlugin)
         .run()
 }
