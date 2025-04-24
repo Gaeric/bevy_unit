@@ -7,6 +7,12 @@
 * Intro
   这个仓库用来记录我对bevy引擎和其相关示例的学习
 
-  该项目分为两个部分，一部分记录一些有用的示例，可见于 [[file:units.org][units]]
+  该项目分为几个部分：
 
-  另一部分记录引擎某些重要功能的分析，可见于 [[file:functional.org][functional]]
+  [[file:units.org][units]] 记录一些有用的示例。
+ 
+  [[file:functional.org][functional]] 记录引擎某些重要功能的分析。
+
+  [[file:tips.org][tips]] 记录一些有用的小提示。
+
+  

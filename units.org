@@ -4,7 +4,6 @@
 #+HTML_HEAD: <link href="./worg.css" rel="stylesheet" type="text/css">
 #+HTML_HEAD: <link href="/static/css/worg.css" rel="stylesheet" type="text/css">
 #+OPTIONS: ^:{}
-
 * Units
 ** modular character
    这个示例展示了如何将多个使用相同骨骼或基于同一套骨骼拆分出的各个子模块拼接到一起，并播放完整动画的功能。

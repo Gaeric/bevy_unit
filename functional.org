@@ -4,5 +4,8 @@
 #+HTML_HEAD: <link href="./worg.css" rel="stylesheet" type="text/css">
 #+HTML_HEAD: <link href="/static/css/worg.css" rel="stylesheet" type="text/css">
 #+OPTIONS: ^:{}
-
+* Intro
+  本节以games104的线路学习，从源码层面理解bevy的原理过程，并记录要点。
 * Engine Functional
+** render
+** 
