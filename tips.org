@@ -40,3 +40,53 @@
 
       app.add_plugin(ExtractResourcePlugin::<NoiseTexture>::default());
     #+end_src
+*** 使用parse库和宏来减少冗余代码
+    见于parse文档： https://docs.rs/paste/latest/paste/
+
+    示例：
+    #+begin_src rust-ts
+      macro_rules! create_modular_segment {
+          ($name:ident) => {
+              paste::paste! {
+                  #[derive(Debug, Component)]
+                  pub struct [<ModularCharacter $name>] {
+                      pub id: usize,
+                      pub instance_id: Option<InstanceId>,
+                      pub entities: Vec<Entity>,
+                  }
+                  impl ModularCharacter for [<ModularCharacter $name>] {
+                      fn id_mut(&mut self) -> &mut usize {
+                          &mut self.id
+                      }
+
+                      fn instance_id_mut(&mut self) -> &mut Option<InstanceId> {
+                          &mut self.instance_id
+                      }
+
+                      fn entities_mut(&mut self) -> &mut Vec<Entity> {
+                          &mut self.entities
+                      }
+
+                      fn id(&self) -> &usize {
+                          &self.id
+                      }
+
+                      fn instance_id(&self) -> Option<&InstanceId> {
+                          self.instance_id.as_ref()
+                      }
+
+                      fn entities(&self) -> &Vec<Entity> {
+                         &self.entities
+                      }
+                  }
+              }
+          };
+      }
+    #+end_src
+
+    这段代码创建了一个create_modular_segment的宏，用这个宏来生成ModularCharacterXx的组件，由于每个组件的写法基本相同，这个方法可以减少大重的冗余代码。
+
+    在这个宏中，使用paste宏拼接了[<>]中的字符串，然后为这个Component生成ModularCharacter需要的方法
+    
+    
+    
