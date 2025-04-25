@@ -7,9 +7,9 @@ use asset_loader::AssetLoaderPlugin;
 mod core;
 use core::ModularCharacterCorePlugin;
 
+mod modular;
+
 use bevy::{app::Plugin, pbr::AmbientLight, prelude::Color};
-use bevy_mod_billboard::plugin::BillboardPlugin;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
 
 pub struct ModularCharacterPlugin;
 
@@ -19,8 +19,6 @@ impl Plugin for ModularCharacterPlugin {
             color: Color::default(),
             brightness: 1000.0,
         })
-        .add_plugins(PanOrbitCameraPlugin)
-        .add_plugins(BillboardPlugin)
         .add_plugins(MCCameraPlugin)
         .add_plugins(AssetLoaderPlugin)
         .add_plugins(ModularCharacterCorePlugin);
