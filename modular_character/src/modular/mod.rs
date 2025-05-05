@@ -2,10 +2,12 @@ mod components;
 mod events;
 
 pub struct ModularPlugin;
+use std::collections::BTreeMap;
+
 use bevy::{
     input::keyboard::KeyboardFocusLost,
     prelude::*,
-    render::{mesh::skinning::SkinnedMesh, primitives::Aabb},
+    render::{batching::NoAutomaticBatching, mesh::skinning::SkinnedMesh, primitives::Aabb},
 };
 use components::{
     ModularCharacter, ModularCharacterBody, ModularCharacterFeet, ModularCharacterHead,
@@ -87,6 +89,7 @@ type MeshPrimitiveParamSet = (
     &'static Parent,
     &'static Name,
     &'static SkinnedMesh,
+    &'static Mesh3d,
     &'static MeshMaterial3d<StandardMaterial>,
     &'static Aabb,
 );
@@ -104,6 +107,110 @@ fn update_modular<T: components::ModularCharacter>(
         let Some(scene_instance) = modular.instance_id().copied() else {
             continue;
         };
+        info!("entity is {entity}, scene_instance is {scene_instance:?}");
+        if scene_spawner.instance_is_ready(scene_instance) {
+            // Delete old
+            info!("deleting old modular segment");
+            if !modular.entities().is_empty() {
+                commands.entity(entity).remove_children(modular.entities());
+            }
+            for entity in modular.entities_mut().drain(..) {
+                commands.entity(entity).despawn_recursive();
+            }
+
+            // Get MeshPrimitives
+            let mesh_primitives = scene_spawner
+                .iter_instance_entities(scene_instance)
+                .filter(|node| mesh_primitives_query.contains(*node))
+                .collect::<Vec<_>>();
+
+            // Get Meshs
+            let mut meshes = BTreeMap::new();
+            for mesh_primitive in mesh_primitives {
+                match mesh_primitives_query.get(mesh_primitive) {
+                    Ok((parent, _, _, _, _, _)) => {
+                        meshes
+                            .entry(parent.get())
+                            .and_modify(|v: &mut Vec<_>| v.push(mesh_primitive))
+                            .or_insert(vec![mesh_primitive]);
+                    }
+                    Err(err) => {
+                        error!("MeshPrimitive {mesh_primitive:?} did not have a parent. '{err:?}'");
+                    }
+                }
+            }
+
+            // Rebuild Mesh Hierarchy on Modular entity
+            for (mesh, primitives) in meshes {
+                let mesh_entity = match names.get(mesh) {
+                    Ok(name) => {
+                        commands.spawn((Transform::default(), Visibility::default(), name.clone()))
+                    }
+                    Err(_) => {
+                        warn!("Mesh {mesh:?} did not have a name");
+                        commands.spawn((Transform::default(), Visibility::default()))
+                    }
+                }
+                .with_children(|parent| {
+                    for primitive in primitives {
+                        let Ok((_, name, skinned_mesh, mesh, material, aabb)) =
+                            mesh_primitives_query.get(primitive)
+                        else {
+                            unreachable!();
+                        };
+
+                        let new_joints: Vec<_> = skinned_mesh
+                            .joints
+                            .iter()
+                            .flat_map(|joint| {
+                                names
+                                    .get(*joint)
+                                    .inspect_err(|_| {
+                                        bevy::log::error!("Joint {joint:?} had no name")
+                                    })
+                                    .ok()
+                                    .map(|joint_name| {
+                                        children.iter_descendants(entity).find(|node_on_modular| {
+                                            names
+                                                .get(*node_on_modular)
+                                                .ok()
+                                                .filter(|node_on_modular_name| {
+                                                    node_on_modular_name
+                                                        .as_str()
+                                                        .eq(joint_name.as_str())
+                                                })
+                                                .is_some()
+                                        })
+                                    })
+                            })
+                            .flatten()
+                            .collect();
+
+                        parent.spawn((
+                            name.clone(),
+                            mesh.clone(),
+                            material.clone(),
+                            SkinnedMesh {
+                                inverse_bindposes: skinned_mesh.inverse_bindposes.clone(),
+                                joints: new_joints,
+                            },
+                            *aabb,
+                            NoAutomaticBatching,
+                        ));
+                    }
+                })
+                .id();
+
+                modular.entities_mut().push(mesh_entity);
+                commands.entity(entity).add_child(mesh_entity);
+            }
+
+            if let Some(instance) = modular.instance_id_mut().take() {
+                scene_spawner.despawn_instance(instance);
+            }
+        } else {
+            writer.send(ResetChanged(entity));
+        }
     }
 }
 
