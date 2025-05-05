@@ -1,14 +1,15 @@
 mod modular;
 
-use bevy::{app::Plugin, pbr::AmbientLight, prelude::Color};
+use bevy::prelude::*;
 
 pub struct ModularCharacterPlugin;
 
 impl Plugin for ModularCharacterPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.insert_resource(AmbientLight {
-            color: Color::default(),
-            brightness: 1000.0,
-        });
+        app.add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
+            .insert_resource(AmbientLight {
+                color: Color::default(),
+                brightness: 1000.0,
+            });
     }
 }

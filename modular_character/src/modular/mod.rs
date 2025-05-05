@@ -125,15 +125,15 @@ fn update_modular<T: components::ModularCharacter>(
                 commands.entity(entity).despawn_recursive();
             }
 
-            trace!("get mesh_primitives from scene");
             // Get MeshPrimitives
+            trace!("get mesh_primitives from scene");
             let mesh_primitives = scene_spawner
                 .iter_instance_entities(scene_instance)
                 .filter(|node| mesh_primitives_query.contains(*node))
                 .collect::<Vec<_>>();
 
-            trace!("get meshs from mesh_primitives");
             // Get Meshs
+            trace!("get meshs from mesh_primitives");
             let mut meshes = BTreeMap::new();
             for mesh_primitive in mesh_primitives {
                 match mesh_primitives_query.get(mesh_primitive) {
