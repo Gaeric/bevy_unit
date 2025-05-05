@@ -108,22 +108,31 @@ fn update_modular<T: components::ModularCharacter>(
             continue;
         };
         info!("entity is {entity}, scene_instance is {scene_instance:?}");
+
+        // the scene.spawn() operation executes asynchronously.
+        //  accessing mesh_primitives requires waiting for all dependent resources to complete loading.
+        // the modular.entities container remains empty upon initialization.
+        // data is populated only after processing by the update_modular system.
         if scene_spawner.instance_is_ready(scene_instance) {
             // Delete old
             info!("deleting old modular segment");
             if !modular.entities().is_empty() {
+                trace!("remove entities children.");
                 commands.entity(entity).remove_children(modular.entities());
             }
             for entity in modular.entities_mut().drain(..) {
+                trace!("despawn entities children.");
                 commands.entity(entity).despawn_recursive();
             }
 
+            trace!("get mesh_primitives from scene");
             // Get MeshPrimitives
             let mesh_primitives = scene_spawner
                 .iter_instance_entities(scene_instance)
                 .filter(|node| mesh_primitives_query.contains(*node))
                 .collect::<Vec<_>>();
 
+            trace!("get meshs from mesh_primitives");
             // Get Meshs
             let mut meshes = BTreeMap::new();
             for mesh_primitive in mesh_primitives {
@@ -201,11 +210,17 @@ fn update_modular<T: components::ModularCharacter>(
                 })
                 .id();
 
+                trace!("modular entities push mesh entities");
                 modular.entities_mut().push(mesh_entity);
                 commands.entity(entity).add_child(mesh_entity);
             }
 
+            // the scene_spawner instance has been regenerated at the parent location
+            // with correct parent/child hierarchy relationships.
+            // the original instance in scene_spawner must now be deleted
+            // to ensure proper mesh hierarchy in the active scene.
             if let Some(instance) = modular.instance_id_mut().take() {
+                trace!("scene spawner despawn instance");
                 scene_spawner.despawn_instance(instance);
             }
         } else {
