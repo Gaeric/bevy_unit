@@ -154,4 +154,6 @@
 
     modular.get_single_mut() 获取了可变引用，但是没有修改其值，Changed不置位。
     *module.id_mut() = module.id().clone() 尽管赋值前后值相同，但是有解引用操作，Changed会置位。
-    
+*** 使用Observer
+    bevy example: observers
+    bevy example: observer_propagation
