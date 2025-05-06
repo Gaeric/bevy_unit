@@ -1,7 +1,7 @@
 * bevy_shine
   ray tracing for bevy
 ** Intro
-   这个crate基于bevy 0.15开始开发，目标是为bevy 0.16及以上版本支持路径追踪技术的全局光照。
+   这个crate基于bevy 0.15开始开发，目标是为bevy支持路径追踪技术的全局光照。
 * roadmap
 ** 原理
    Path Tracing从相机开始，向着屏幕上的每一个像素发出射线，这一条射线会击中场景中的物体，并发生弹射。
