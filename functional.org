@@ -5,7 +5,7 @@
 #+HTML_HEAD: <link href="/static/css/worg.css" rel="stylesheet" type="text/css">
 #+OPTIONS: ^:{}
 * Intro
-  本节以games104的线路学习，从源码层面理解bevy的原理过程，并记录要点。
+  本节以games104的讲解线路学习，要求掌握games104中所列举的各个主要方向的基本原理，并在bevy中找到每个主要方向的具体实现。
 * Engine Functional
 ** render
 ** 
