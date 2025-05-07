@@ -156,6 +156,148 @@
     *module.id_mut() = module.id().clone() 尽管赋值前后值相同，但是有解引用操作，Changed会置位。
 *** 使用Observer
     Observer是在Bevy0.14版本添加到bevy-ecs系统中的一系列方法，与之一同添加的component hooks共同处理ecs需要的即刻响应的事件机制。
+
+    Observer的api使用相当简单，示例如下：
+    #+begin_src rust-ts
+      fn on_add_mine(
+          trigger: Trigger<OnAdd, Mine>,
+          query: Query<&Mine>,
+          mut index: ResMut<SpatialIndex>,
+      ) {
+          let mine = query.get(trigger.target()).unwrap();
+          let tile = (
+              (mine.pos.x / CELL_SIZE).floor() as i32,
+              (mine.pos.y / CELL_SIZE).floor() as i32,
+          );
+          index.map.entry(tile).or_default().insert(trigger.target());
+      }
+
+      app.add_observer(on_add_mine)
+    #+end_src
+
+    on_add_mine会在Mine实体在OnAdd事件触发时立刻响应该事件。
+
+    为了深入理解Observer的触发方式，继续阅读observer相关代码，可以看到OnAdd事件的触发逻辑。
+    #+begin_src rust-ts
+      // app.add_observer调用了World下的add_observer
+      pub fn add_observer<E: Event, B: Bundle, M>(
+          &mut self,
+          observer: impl IntoObserverSystem<E, B, M>,
+      ) -> &mut Self {
+          self.world_mut().add_observer(observer);
+          self
+      }
+
+      // World下的add_observer会生成一个Observer结构实体
+      pub fn add_observer<E: Event, B: Bundle, M>(
+          &mut self,
+          system: impl IntoObserverSystem<E, B, M>,
+      ) -> EntityWorldMut {
+          self.spawn(Observer::new(system))
+      }
+
+      // 生成Observer结构实体时，会使用hook_on_add方法处理Event
+      pub fn new<E: Event, B: Bundle, M, I: IntoObserverSystem<E, B, M>>(system: I) -> Self {
+          Self {
+              system: Box::new(IntoObserverSystem::into_system(system)),
+              descriptor: Default::default(),
+              hook_on_add: hook_on_add::<E, B, I::System>,
+              error_handler: None,
+          }
+      }
+
+      // hook_on_add函数中，提取了Event的ComponentId，并生成ObserverDescriptor
+      // 再与原有的ObserverDescriptor相融合，然后insert到对应的entity
+      fn hook_on_add<E: Event, B: Bundle, S: ObserverSystem<E, B>>(
+          mut world: DeferredWorld<'_>,
+          HookContext { entity, .. }: HookContext,
+      ) {
+          world.commands().queue(move |world: &mut World| {
+              let event_id = E::register_component_id(world);
+              let mut components = Vec::new();
+              B::component_ids(&mut world.components_registrator(), &mut |id| {
+                  components.push(id);
+              });
+              let mut descriptor = ObserverDescriptor {
+                  events: vec![event_id],
+                  components,
+                  ..Default::default()
+              };
+
+              let error_handler = default_error_handler();
+
+              // Initialize System
+              let system: *mut dyn ObserverSystem<E, B> =
+                  if let Some(mut observe) = world.get_mut::<Observer>(entity) {
+                      descriptor.merge(&observe.descriptor);
+                      if observe.error_handler.is_none() {
+                          observe.error_handler = Some(error_handler);
+                      }
+                      let system = observe.system.downcast_mut::<S>().unwrap();
+                      &mut *system
+                  } else {
+                      return;
+                  };
+              // SAFETY: World reference is exclusive and initialize does not touch system, so references do not alias
+              unsafe {
+                  (*system).initialize(world);
+              }
+
+              {
+                  let mut entity = world.entity_mut(entity);
+                  if let crate::world::Entry::Vacant(entry) = entity.entry::<ObserverState>() {
+                      entry.insert(ObserverState {
+                          descriptor,
+                          runner: observer_system_runner::<E, B, S>,
+                          ..Default::default()
+                      });
+                  }
+              }
+          });
+      }
+    #+end_src
+
+    然后，在形如如下调用中，通过trigger_observers或trigger_observers_with_data函数，根据ON_DESPAWN这个ComponentID，调用对应的caller函数处理具体的逻辑。
+    #+begin_src rust-ts
+      if archetype.has_despawn_observer() {
+          deferred_world.trigger_observers(
+              ON_DESPAWN,
+              self.entity,
+              archetype.components(),
+              caller,
+          );
+      }
+    #+end_src
+    ON_ADD也是相似逻辑。
+
+    那么，ON_ADD这个CompontentID和OnAdd这个Event是如何关联的呢？
+
+    查询compontent_constants这个文件，可以看到注释中清晰指明了ON_ADD是OnAdd的CompontentID。
+    
+    进一步检查代码，两者的关联关系在World初始化代码中得到了保证。
+    #+begin_src rust-ts
+      fn bootstrap(&mut self) {
+          // The order that we register these events is vital to ensure that the constants are correct!
+          let on_add = OnAdd::register_component_id(self);
+          assert_eq!(ON_ADD, on_add);
+
+          let on_insert = OnInsert::register_component_id(self);
+          assert_eq!(ON_INSERT, on_insert);
+
+          let on_replace = OnReplace::register_component_id(self);
+          assert_eq!(ON_REPLACE, on_replace);
+
+          let on_remove = OnRemove::register_component_id(self);
+          assert_eq!(ON_REMOVE, on_remove);
+
+          let on_despawn = OnDespawn::register_component_id(self);
+          assert_eq!(ON_DESPAWN, on_despawn);
+
+          // This sets up `Disabled` as a disabling component, via the FromWorld impl
+          self.init_resource::<DefaultQueryFilters>();
+      }
+    #+end_src
+    至此，Observer中OnAdd/OnInsert/OnReplace/OnRemove/OnDespawn的逻辑已经相对清晰，自定义的Observer Event的层次与这些也基本相似。
 **** refer
      [[https://github.com/bevyengine/bevy-website/blob/main/release-content/0.14/release-notes/10756_hooks_and_observers.md][component hooks and observer]] 
      [[https://github.com/bevyengine/bevy-website/blob/main/release-content/0.14/migration-guides/10839_Generalised_ECS_reactivity_with_Observers.md][ecs with observers]]
