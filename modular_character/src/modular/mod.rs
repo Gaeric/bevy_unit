@@ -5,7 +5,6 @@ pub struct ModularPlugin;
 use std::collections::BTreeMap;
 
 use bevy::{
-    input::keyboard::KeyboardFocusLost,
     prelude::*,
     render::{batching::NoAutomaticBatching, mesh::skinning::SkinnedMesh, primitives::Aabb},
 };
