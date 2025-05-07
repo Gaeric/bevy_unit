@@ -155,5 +155,9 @@
     modular.get_single_mut() 获取了可变引用，但是没有修改其值，Changed不置位。
     *module.id_mut() = module.id().clone() 尽管赋值前后值相同，但是有解引用操作，Changed会置位。
 *** 使用Observer
-    bevy example: observers
-    bevy example: observer_propagation
+    Observer是在Bevy0.14版本添加到bevy-ecs系统中的一系列方法，与之一同添加的component hooks共同处理ecs需要的即刻响应的事件机制。
+**** refer
+     [[https://github.com/bevyengine/bevy-website/blob/main/release-content/0.14/release-notes/10756_hooks_and_observers.md][component hooks and observer]] 
+     [[https://github.com/bevyengine/bevy-website/blob/main/release-content/0.14/migration-guides/10839_Generalised_ECS_reactivity_with_Observers.md][ecs with observers]]
+     [[https://github.com/bevyengine/bevy/blob/release-0.16.0/examples/ecs/observers.rs][bevy example: observers]]
+     [[https://github.com/bevyengine/bevy/blob/release-0.16.0/examples/ecs/observer_propagation.rs][bevy example: observer_propagation]]
