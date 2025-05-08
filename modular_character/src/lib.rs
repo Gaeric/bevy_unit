@@ -25,11 +25,19 @@ impl Plugin for ModularCharacterPlugin {
             brightness: 1000.0,
         });
 
+        // Systems
+        app.add_systems(Startup, spawn_camera);
         // Observers
         app.add_observer(animation_player_added);
     }
 }
 
+fn spawn_camera(mut commands: Commands) {
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(0.0, 0.5, 5.0).looking_at(Vec3::new(0.0, 0.5, 0.0), Vec3::Y),
+    ));
+}
 #[derive(Debug, Resource)]
 struct AnimationGraphCache {
     animations: Vec<AnimationNodeIndex>,
