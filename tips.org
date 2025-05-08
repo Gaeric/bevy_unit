@@ -303,5 +303,10 @@
      [[https://github.com/bevyengine/bevy-website/blob/main/release-content/0.14/migration-guides/10839_Generalised_ECS_reactivity_with_Observers.md][ecs with observers]]
      [[https://github.com/bevyengine/bevy/blob/release-0.16.0/examples/ecs/observers.rs][bevy example: observers]]
      [[https://github.com/bevyengine/bevy/blob/release-0.16.0/examples/ecs/observer_propagation.rs][bevy example: observer_propagation]]
+**** issue
+     1. 从github的issue来看，目前observer似乎没有指定执行顺序的能力
+        https://github.com/bevyengine/bevy/issues/14890
+
+        [2025-05-08 Thu]
 *** 理解AnimationGraph
 *** 使用AnimationTransitions
