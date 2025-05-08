@@ -13,8 +13,8 @@ pub struct ModularCharacterPlugin;
 impl Plugin for ModularCharacterPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         // plugins
-        app.add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
-            .add_plugins(ModularPlugin);
+        app.add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()));
+        // .add_plugins(ModularPlugin);
 
         #[cfg(feature = "with-inspector")]
         app.add_plugins(WorldInspectorPlugin::new());
