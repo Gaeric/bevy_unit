@@ -26,7 +26,9 @@ impl Plugin for ModularCharacterPlugin {
         });
 
         // Systems
-        app.add_systems(Startup, spawn_camera);
+        app.add_systems(Startup, spawn_camera)
+            .add_systems(Startup, spawn_text);
+
         // Observers
         app.add_observer(animation_player_added);
     }
@@ -38,6 +40,46 @@ fn spawn_camera(mut commands: Commands) {
         Transform::from_xyz(0.0, 0.5, 5.0).looking_at(Vec3::new(0.0, 0.5, 0.0), Vec3::Y),
     ));
 }
+
+fn spawn_text(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let text_font = TextFont {
+        font: asset_server.load("modular_character/FiraSans-Regular.ttf"),
+        font_size: 16.0,
+        ..Default::default()
+    };
+
+    let text_color = TextColor(Color::WHITE);
+    commands
+        .spawn(Node {
+            top: Val::Px(3.0),
+            left: Val::Px(3.0),
+            flex_direction: FlexDirection::Column,
+            ..Default::default()
+        })
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("Cycle through heads with Q and W"),
+                text_font.clone(),
+                text_color,
+            ));
+            parent.spawn((
+                Text::new("Cycle through bodies with E and R"),
+                text_font.clone(),
+                text_color,
+            ));
+            parent.spawn((
+                Text::new("Cycle through legs with T and Y"),
+                text_font.clone(),
+                text_color,
+            ));
+            parent.spawn((
+                Text::new("Cycle through feet with U and I"),
+                text_font.clone(),
+                text_color,
+            ));
+        });
+}
+
 #[derive(Debug, Resource)]
 struct AnimationGraphCache {
     animations: Vec<AnimationNodeIndex>,
