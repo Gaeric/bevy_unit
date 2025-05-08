@@ -27,7 +27,8 @@ impl Plugin for ModularCharacterPlugin {
 
         // Systems
         app.add_systems(Startup, spawn_camera)
-            .add_systems(Startup, spawn_text);
+            .add_systems(Startup, spawn_text)
+            .add_systems(Startup, spawn_models);
 
         // Observers
         app.add_observer(animation_player_added);
@@ -78,6 +79,14 @@ fn spawn_text(mut commands: Commands, asset_server: Res<AssetServer>) {
                 text_color,
             ));
         });
+}
+
+fn spawn_models(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.spawn((
+        SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("Witch.gltf"))),
+        Transform::from_xyz(1.0, 0.0, 0.0),
+        Name::new("Witch"),
+    ));
 }
 
 #[derive(Debug, Resource)]
