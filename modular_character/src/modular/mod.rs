@@ -14,6 +14,10 @@ pub use components::{
 };
 use events::ResetChanged;
 
+pub fn mc_model_path(path: &str) -> String {
+    format!("modular_character/origin/{path}")
+}
+
 pub const HEADS: [&str; 4] = [
     "Witch.gltf#Scene2",
     "SciFi.gltf#Scene2",
@@ -26,7 +30,7 @@ pub const BODIES: [&str; 5] = [
     "SciFi.gltf#Scene3",
     "Soldier.gltf#Scene3",
     "Adventurer.gltf#Scene3",
-    "scifi_torso.glb#Scene3",
+    "scifi_torso.glb#Scene0",
 ];
 
 pub const LEGS: [&str; 5] = [
@@ -34,7 +38,7 @@ pub const LEGS: [&str; 5] = [
     "SciFi.gltf#Scene4",
     "Soldier.gltf#Scene4",
     "Adventurer.gltf#Scene4",
-    "with_legs.glb#Scene4",
+    "witch_legs.glb#Scene0",
 ];
 
 pub const FEET: [&str; 4] = [
@@ -258,7 +262,7 @@ fn cycle_modular_segment<T: ModularCharacter, const ID: usize>(
         scene_spawner.despawn_instance(*instance);
     }
     *module.instance_id_mut() =
-        Some(scene_spawner.spawn(asset_server.load(MODULES[ID][*module.id()])));
+        Some(scene_spawner.spawn(asset_server.load(mc_model_path(MODULES[ID][*module.id()]))));
 }
 
 fn reset_changed<T: ModularCharacter>(

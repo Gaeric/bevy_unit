@@ -16,8 +16,8 @@ pub struct ModularCharacterPlugin;
 impl Plugin for ModularCharacterPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         // plugins
-        app.add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()));
-        // .add_plugins(ModularPlugin);
+        app.add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
+            .add_plugins(ModularPlugin);
 
         #[cfg(feature = "with-inspector")]
         app.add_plugins(WorldInspectorPlugin::new());
@@ -90,7 +90,7 @@ fn spawn_text(mut commands: Commands, asset_server: Res<AssetServer>) {
 fn spawn_models(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         SceneRoot(
-            asset_server.load(GltfAssetLabel::Scene(0).from_asset("modular_character/Witch.gltf")),
+            asset_server.load(GltfAssetLabel::Scene(0).from_asset(mc_model_path("Witch.gltf"))),
         ),
         Transform::from_xyz(1.0, 0.0, 0.0),
         Name::new("Witch"),
@@ -98,7 +98,7 @@ fn spawn_models(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.spawn((
         SceneRoot(
-            asset_server.load(GltfAssetLabel::Scene(0).from_asset("modular_character/SciFi.gltf")),
+            asset_server.load(GltfAssetLabel::Scene(0).from_asset(mc_model_path("SciFi.gltf"))),
         ),
         Transform::from_xyz(-1.0, 0., 0.0),
         Name::new("SciFi"),
@@ -120,9 +120,8 @@ fn setup_animation_graph(
     let animations = graph
         .add_clips(
             (0..24).map(|index| {
-                asset_server.load(
-                    GltfAssetLabel::Animation(index).from_asset("modular_character/Witch.gltf"),
-                )
+                asset_server
+                    .load(GltfAssetLabel::Animation(index).from_asset(mc_model_path("Witch.gltf")))
             }),
             1.0,
             graph.root,
@@ -190,10 +189,6 @@ fn cycle_through_animations(
                 .resume();
         }
     }
-}
-
-fn mc_model_path(path: &str) -> String {
-    format!("modular_character/{path}")
 }
 
 fn spawn_modular(
