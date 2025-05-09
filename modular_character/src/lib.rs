@@ -28,7 +28,8 @@ impl Plugin for ModularCharacterPlugin {
         // Systems
         app.add_systems(Startup, spawn_camera)
             .add_systems(Startup, spawn_text)
-            .add_systems(Startup, spawn_models);
+            .add_systems(Startup, spawn_models)
+            .add_systems(Startup, setup_animation_graph);
 
         // Observers
         app.add_observer(animation_player_added);
@@ -103,6 +104,31 @@ fn spawn_models(mut commands: Commands, asset_server: Res<AssetServer>) {
 struct AnimationGraphCache {
     animations: Vec<AnimationNodeIndex>,
     graph: Handle<AnimationGraph>,
+}
+
+fn setup_animation_graph(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
+) {
+    let mut graph = AnimationGraph::new();
+    let animations = graph
+        .add_clips(
+            (0..24).map(|index| {
+                asset_server.load(
+                    GltfAssetLabel::Animation(index).from_asset("modular_character/Witch.gltf"),
+                )
+            }),
+            1.0,
+            graph.root,
+        )
+        .collect();
+
+    let graph_handle = graphs.add(graph);
+    commands.insert_resource(AnimationGraphCache {
+        animations,
+        graph: graph_handle,
+    });
 }
 
 // todo: analyzer the animation process
