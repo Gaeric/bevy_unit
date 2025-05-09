@@ -236,3 +236,9 @@
         [2025-05-08 Thu]
 *** 理解AnimationGraph
 *** 使用AnimationTransitions
+*** 理解gltf
+**** gltf spec
+     gltf和glb的spec中描述了gltf格式的细节，如果需要对gltf格式进行处理，可能需要参考spec
+
+     https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html
+
