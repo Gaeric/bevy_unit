@@ -1,6 +1,9 @@
 mod modular;
 
-use std::time::Duration;
+use std::{
+    collections::{btree_map::Entry, BTreeMap},
+    time::Duration,
+};
 
 use bevy::prelude::*;
 use modular::*;
@@ -29,7 +32,8 @@ impl Plugin for ModularCharacterPlugin {
         app.add_systems(Startup, spawn_camera)
             .add_systems(Startup, spawn_text)
             .add_systems(Startup, spawn_models)
-            .add_systems(Startup, setup_animation_graph);
+            .add_systems(Startup, setup_animation_graph)
+            .add_systems(Update, cycle_through_animations);
 
         // Observers
         app.add_observer(animation_player_added);
@@ -152,4 +156,37 @@ fn animation_player_added(
         .entity(trigger.entity())
         .insert(transitions)
         .insert(AnimationGraphHandle(graph_cache.graph.clone()));
+}
+
+fn cycle_through_animations(
+    mut players: Query<(Entity, &mut AnimationPlayer, &mut AnimationTransitions)>,
+    mut animation_id: Local<BTreeMap<Entity, usize>>,
+    graph_cache: Res<AnimationGraphCache>,
+) {
+    for (entity, mut player, mut transition) in &mut players {
+        let next_to_play = match animation_id.entry(entity) {
+            Entry::Vacant(e) => {
+                e.insert(0);
+                Some(0)
+            }
+            Entry::Occupied(mut e) => {
+                if player.all_finished() | player.all_paused() {
+                    *e.get_mut() = (e.get() + 1) % 24;
+                    Some(*e.get())
+                } else {
+                    None
+                }
+            }
+        };
+
+        if let Some(next_ani) = next_to_play {
+            transition
+                .play(
+                    &mut player,
+                    graph_cache.animations[next_ani],
+                    Duration::from_millis(250),
+                )
+                .resume();
+        }
+    }
 }
