@@ -83,7 +83,7 @@ fn spawn_text(mut commands: Commands, asset_server: Res<AssetServer>) {
 
 fn spawn_models(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
-        SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("Witch.gltf"))),
+        SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("modular_character/Witch.gltf"))),
         Transform::from_xyz(1.0, 0.0, 0.0),
         Name::new("Witch"),
     ));
