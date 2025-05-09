@@ -8,9 +8,9 @@ use bevy::{
     prelude::*,
     render::{batching::NoAutomaticBatching, mesh::skinning::SkinnedMesh, primitives::Aabb},
 };
-use components::{
-    ModularCharacter, ModularCharacterBody, ModularCharacterFeet, ModularCharacterHead,
-    ModularCharacterLegs,
+use components::ModularCharacter;
+pub use components::{
+    ModularCharacterBody, ModularCharacterFeet, ModularCharacterHead, ModularCharacterLegs,
 };
 use events::ResetChanged;
 

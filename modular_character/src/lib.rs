@@ -32,6 +32,7 @@ impl Plugin for ModularCharacterPlugin {
         app.add_systems(Startup, spawn_camera)
             .add_systems(Startup, spawn_text)
             .add_systems(Startup, spawn_models)
+            .add_systems(Startup, spawn_modular)
             .add_systems(Startup, setup_animation_graph)
             .add_systems(Update, cycle_through_animations);
 
@@ -189,4 +190,56 @@ fn cycle_through_animations(
                 .resume();
         }
     }
+}
+
+fn mc_model_path(path: &str) -> String {
+    format!("modular_character/{path}")
+}
+
+fn spawn_modular(
+    mut commands: Commands,
+    mut scene_spawner: ResMut<SceneSpawner>,
+    asset_server: Res<AssetServer>,
+) {
+    let entity = commands
+        .spawn((
+            Transform::default(),
+            Visibility::default(),
+            Name::new("Modular"),
+            ModularCharacterHead {
+                id: 0,
+                instance_id: Some(
+                    scene_spawner.spawn(asset_server.load(mc_model_path(modular::HEADS[0]))),
+                ),
+                entities: vec![],
+            },
+            ModularCharacterBody {
+                id: 0,
+                instance_id: Some(
+                    scene_spawner.spawn(asset_server.load(mc_model_path(modular::BODIES[0]))),
+                ),
+                entities: vec![],
+            },
+            ModularCharacterLegs {
+                id: 0,
+                instance_id: Some(
+                    scene_spawner.spawn(asset_server.load(mc_model_path(modular::LEGS[0]))),
+                ),
+                entities: vec![],
+            },
+            ModularCharacterFeet {
+                id: 0,
+                instance_id: Some(
+                    scene_spawner.spawn(asset_server.load(mc_model_path(modular::FEET[0]))),
+                ),
+                entities: vec![],
+            },
+        ))
+        .id();
+
+    // Armature
+    scene_spawner.spawn_as_child(
+        asset_server.load(GltfAssetLabel::Scene(1).from_asset(mc_model_path("Witch.gltf"))),
+        entity,
+    );
 }
