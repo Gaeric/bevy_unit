@@ -29,3 +29,11 @@
   This example uses the Adventurer, SciFi, Soldier and Witch models with minor adjustments. The original
   models contain one (1) scene that loads the Armature and the meshes (head, torso, legs, and feet). Also included
   is 2 models that were used by Snowden on his video, that have most of it's content deleted.
+* Issues
+** 切换modular部分时，旧模块存在残留
+   在不进行优化的版本中profiler，连续按下q或其它切换键，可以复现这个问题
+
+   经过简单分析：
+   update_modular和cycle_modular_segment在执行过程中出现穿插，scene_spawner.instance_is_ready()判定生效前，scene_spawner就已经掉用despawn_instance，可能导致了该问题产生。
+
+   具体原因仍待进一步确认

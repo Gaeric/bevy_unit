@@ -110,7 +110,7 @@ fn update_modular<T: components::ModularCharacter>(
         let Some(scene_instance) = modular.instance_id().copied() else {
             continue;
         };
-        info!("entity is {entity}, scene_instance is {scene_instance:?}");
+        info!("for entity {entity}, change to scene_instance is {scene_instance:?}");
 
         // the scene.spawn() operation executes asynchronously.
         //  accessing mesh_primitives requires waiting for all dependent resources to complete loading.
@@ -213,7 +213,7 @@ fn update_modular<T: components::ModularCharacter>(
                 })
                 .id();
 
-                trace!("modular entities push mesh entities");
+                info!("modular entities push mesh entities");
                 modular.entities_mut().push(mesh_entity);
                 commands.entity(entity).add_child(mesh_entity);
             }
@@ -258,6 +258,9 @@ fn cycle_modular_segment<T: ModularCharacter, const ID: usize>(
     } else {
         return;
     };
+
+    info!("modular changed");
+
     if let Some(instance) = module.instance_id() {
         scene_spawner.despawn_instance(*instance);
     }
