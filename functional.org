@@ -9,7 +9,13 @@
 * Engine Functional
   本节以games104的讲解线路学习，要求掌握games104中所列举的各个主要方向的基本原理，并在bevy中找到每个主要方向的具体实现。
 ** render
-** 
+** tool chain
+   工具核心解决的问题，是调合思维方式不同的人协同工作
+
+   - programmer:
+   - artists:
+   - design:
+
 * Bevy Functional
 ** reference
 ** Bevy
