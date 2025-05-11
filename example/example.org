@@ -10,7 +10,33 @@
 ** 1.1.0 资源导入
    使用asset_loader导入资源，并在游戏中生成对应的实体
 ** 1.1.1 角色控制
-   使用bevy内置的键盘事件来控制角色的移动
+   使用bevy内置的键盘事件
+
+   使用bevy-tnua来控制角色的移动
 ** 1.1.2 相机控制
-   使用bevy_third_person_camera以满足当前需要
+   需要使用第三人称控制时，使用bevy_dolly插件
+
+   需要使用第一人称控制时，使用bevy_fps_controller插件
+* Archive
+* Plugins
+* Reference
+  foxtrot历史版本中使用的插件参考：
+  - A 3D character controller via [`bevy-tnua`](https://crates.io/crates/bevy-tnua)
+  - Physics via [`bevy_xpbd`](https://crates.io/crates/bevy_xpbd_3d)
+  - Audio via [`bevy_kira_audio`](https://crates.io/crates/bevy_kira_audio)
+  - Pathfinding via [`oxidized_navigation`](https://crates.io/crates/oxidized_navigation)
+  - [`bevy_editor_pls`](https://crates.io/crates/bevy_editor_pls) bound to 'Q'
+  - Custom editor found in the windows selection for `bevy_editor_pls`.
+  - Animations
+  - Dialogs via [`Yarn Spinner for Rust`](https://crates.io/crates/bevy_yarnspinner)
+  - Shaders, using the code from [DGriffin's tutorial](https://www.youtube.com/watch?v=O6A_nVmpvhc)
+  - GLTF imports, including auto-insertion of markers via the GLTF extras field
+  - Smooth cameras via [`bevy_dolly`](https://crates.io/crates/bevy_dolly)
+  - Simple error handling via [`bevy_mod_sysfail`](https://crates.io/crates/bevy_mod_sysfail)
+  - Particle effects via [`bevy_hanabi`](https://crates.io/crates/bevy_hanabi)
+  - Procedural skies via [`bevy_atmosphere`](https://crates.io/crates/bevy_atmosphere)
+  - Grass via [`warbler_grass`](https://crates.io/crates/warbler_grass)
+  - Integration with Blender as an editor via
+    the [`Blender_bevy_components_workflow`](https://github.com/kaosat-dev/Blender_bevy_components_workflow) set of tools
+
 
