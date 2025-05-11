@@ -1,0 +1,16 @@
+#+title: Bevy Example
+#+startup: content
+#+author: Gaeric
+#+HTML_HEAD: <link href="./worg.css" rel="stylesheet" type="text/css">
+#+HTML_HEAD: <link href="/static/css/worg.css" rel="stylesheet" type="text/css">
+#+OPTIONS: ^:{}
+* Intro
+  本文档以示例说明bevy完成一个tps游戏时所用到的基础知识
+* Content
+** 1.1.0 资源导入
+   使用asset_loader导入资源，并在游戏中生成对应的实体
+** 1.1.1 角色控制
+   使用bevy内置的键盘事件来控制角色的移动
+** 1.1.2 相机控制
+   使用bevy_third_person_camera以满足当前需要
+
