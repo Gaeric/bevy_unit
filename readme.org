@@ -9,10 +9,10 @@
 
   该项目分为几个部分：
 
-  [[file:units.org][units]] 记录一些有用的示例。
+  [[file:bevy_docs/units.org][units]] 记录一些有用的示例。
  
-  [[file:functional.org][functional]] 记录引擎某些重要功能的分析。
+  [[file:bevy_docs/functional.org][functional]] 记录引擎某些重要功能的分析。
 
-  [[file:tips.org][tips]] 记录一些有用的小提示。
+  [[file:bevy_docs/tips.org][tips]] 记录一些有用的小提示。
 
   
