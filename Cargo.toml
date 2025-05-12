@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = [ "bevy_shine", "modular_character" ]
+members = [ "bevy_shine", "bevy_waltz", "modular_character" ]
 
 [dependencies]
-bevy = { path = "../bevy_0.15/", features = ["wayland", "dynamic_linking"] }
+bevy = { path = "../bevy_engines/bevy_0.15/", features = ["wayland", "dynamic_linking"] }
 bevy_shine = { path = "bevy_shine" }
 bitflags = "2.6.0"
 crossbeam-channel = "0.5.13"
