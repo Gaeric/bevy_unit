@@ -7,9 +7,10 @@ edition = "2021"
 members = [ "bevy_shine", "bevy_waltz", "modular_character" ]
 
 [dependencies]
-bevy = { path = "../bevy_engines/bevy_0.15/", features = ["wayland", "dynamic_linking"] }
+bevy = { path = "../bevy_engines/bevy_0.16/", features = ["wayland", "dynamic_linking"] }
 bevy_shine = { path = "bevy_shine" }
 bitflags = "2.6.0"
 crossbeam-channel = "0.5.13"
 modular_character = { path = "modular_character" }
+bevy_waltz = { path = "bevy_waltz" }
 
