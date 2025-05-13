@@ -708,3 +708,7 @@
      2025-01-13T01:01:54.243875Z  INFO bevy_shine::mesh: mesh event: Added { id: AssetId<bevy_mesh::mesh::Mesh>{ index: 0, generation: 0} }
      2025-01-13T01:01:54.244789Z  INFO bevy_shine::mesh: mesh event: Added { id: AssetId<bevy_mesh::mesh::Mesh>{ index: 1, generation: 0} }
    #+end_example
+** waltz
+   1. 使用leafwing-input-manager控制输入和action之间的映射，包括character的动作控制，camera的orbit和zoom，以及全局pause
+   2. 使用bevy_atmosphere构建了一个skybox
+   3. 使用bevy_dolly构建了相机的移动
