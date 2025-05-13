@@ -1,20 +1,21 @@
 use std::ops::Range;
 
 use bevy::{
-    asset::{load_internal_asset, UntypedAssetId},
-    ecs::system::lifetimeless::SRes,
+    asset::{load_internal_asset, weak_handle, UntypedAssetId},
+    ecs::{component::Tick, system::lifetimeless::SRes},
     pbr::RenderMeshInstances,
     prelude::*,
     render::{
+        batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreprocessingSupport},
         camera::ExtractedCamera,
-        mesh::RenderMesh,
+        mesh::{allocator::SlabId, RenderMesh},
         render_asset::RenderAssets,
         render_graph::{NodeRunError, RenderGraphApp, ViewNode, ViewNodeRunner},
         render_phase::{
             AddRenderCommand, BinnedPhaseItem, BinnedRenderPhaseType,
-            CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions, PhaseItem,
-            PhaseItemExtraIndex, RenderCommand, RenderCommandResult, SetItemPipeline,
-            ViewBinnedRenderPhases,
+            CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions, InputUniformIndex,
+            PhaseItem, PhaseItemBatchSetKey, PhaseItemExtraIndex, RenderCommand,
+            RenderCommandResult, SetItemPipeline, ViewBinnedRenderPhases,
         },
         render_resource::{
             binding_types::uniform_buffer, BindGroup, BindGroupEntries, BindGroupLayout,
@@ -26,7 +27,9 @@ use bevy::{
         },
         renderer::{RenderDevice, RenderQueue},
         sync_world::{MainEntity, RenderEntity},
-        view::{ExtractedView, RenderVisibleEntities, ViewTarget},
+        view::{
+            ExtractedView, NoIndirectDrawing, RenderVisibleEntities, RetainedViewEntity, ViewTarget,
+        },
         Extract, Render, RenderApp, RenderSet,
     },
 };
@@ -36,7 +39,7 @@ use mesh::ShineMeshPlugin;
 mod mesh;
 
 pub const SHINE_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(317121890436397358688431063998852477026);
+    weak_handle!("6a0298da-71cd-4bce-9553-048b4f9d7069");
 
 /// The ShinePlugin uses its own render graph
 /// Now we only have one node, use for verify the PhaseItem and Render graph node
@@ -111,7 +114,7 @@ impl Plugin for ShinePlugin {
 /// For each view, iterates over all the meshes visible from that view and adds
 /// them to [`BinnedRenderPhase`]s as appropriate.
 /// [0.15] refer queue_material_meshes
-/// [0.15] refer example custom_render_instancing::queue_custom
+/// [0.15] refer example custom_shader_instancing::queue_custom
 /// [0.15] refer example custom_phase_item::queue_custom_phase_item
 pub fn queue_shine_phase_item(
     pipeline_cache: Res<PipelineCache>,
@@ -119,15 +122,16 @@ pub fn queue_shine_phase_item(
     mut shine_phases: ResMut<ViewBinnedRenderPhases<ShinePhase>>,
     shine_draw_functions: Res<DrawFunctions<ShinePhase>>,
     mut specialized_render_pipelines: ResMut<SpecializedRenderPipelines<ShinePipeline>>,
-    views: Query<(Entity, &RenderVisibleEntities, &Msaa), With<ExtractedView>>,
+    views: Query<(&ExtractedView, &RenderVisibleEntities, &Msaa)>,
+    mut next_tick: Local<Tick>,
 ) {
     let draw_shine_function = shine_draw_functions.read().id::<DrawShineCustom>();
 
     // Render phases are pre-view, so we nned to iterate over all views so that
     // the entity appears in them. (In this example, we have only one view, but
     // it's good practice to loop over all views anyway.)
-    for (view_entity, view_visible_entities, msaa) in views.iter() {
-        let Some(shine_phases) = shine_phases.get_mut(&view_entity) else {
+    for (view, view_visible_entities, msaa) in views.iter() {
+        let Some(shine_phases) = shine_phases.get_mut(&view.retained_view_entity) else {
             continue;
         };
 
@@ -139,6 +143,16 @@ pub fn queue_shine_phase_item(
             let pipeline_id =
                 specialized_render_pipelines.specialize(&pipeline_cache, &shine_pipeline, *msaa);
 
+            // Bump the change tick in order to force Bevy to rebuild the bin
+            let this_tick = next_tick.get() + 1;
+            next_tick.set(this_tick);
+
+            let batch_set_key = ShineBatchSetKey {
+                pipeline: pipeline_id,
+                draw_function: draw_shine_function,
+                index_slab: None,
+            };
+
             // Add the custom render item. We use the
             // [`BinnedRenderPhaseType::NonMesh`] type to skip the special
             // handleing that Bevy has for meshes (preprocessing, indirect draws, etc.)
@@ -147,13 +161,14 @@ pub fn queue_shine_phase_item(
             // but you can use anything you lik. Note that the asset ID need
             // not be the ID of a [`Mesh`]
             shine_phases.add(
+                batch_set_key,
                 ShineBinKey {
-                    pipeline: pipeline_id,
-                    draw_function: draw_shine_function,
                     asset_id: AssetId::<Mesh>::invalid().untyped(),
                 },
                 entity,
+                InputUniformIndex::default(),
                 BinnedRenderPhaseType::NonMesh,
+                *next_tick,
             )
         }
     }
@@ -161,15 +176,27 @@ pub fn queue_shine_phase_item(
 
 /// extract the shine phase
 /// [0.15] refer opaque_3d phase and node
+/// [0.16] refer extract_core_3d_camera_phases
 pub fn extract_shine_phases(
     mut shine_phases: ResMut<ViewBinnedRenderPhases<ShinePhase>>,
-    cameras_3d: Extract<Query<(RenderEntity, &Camera), With<Camera3d>>>,
+    cameras_3d: Extract<Query<(RenderEntity, &Camera, Has<NoIndirectDrawing>), With<Camera3d>>>,
+    gpu_preprocessing_support: Res<GpuPreprocessingSupport>,
 ) {
-    for (entity, camera) in &cameras_3d {
+    for (entity, camera, no_indirect_drawing) in &cameras_3d {
         if !camera.is_active {
             continue;
         }
-        shine_phases.insert_or_clear(entity);
+        // If GPU culling is in use, use it (and indirect mode); otherwise, just
+        // preprocess the meshes.
+        let gpu_preprocessing_mode = gpu_preprocessing_support.min(if !no_indirect_drawing {
+            GpuPreprocessingMode::Culling
+        } else {
+            GpuPreprocessingMode::PreprocessingOnly
+        });
+
+        let retained_view_entity = RetainedViewEntity::new(entity.into(), None, 0);
+
+        shine_phases.prepare_for_new_frame(retained_view_entity, gpu_preprocessing_mode);
     }
 }
 
@@ -317,16 +344,43 @@ impl SpecializedRenderPipeline for ShinePipeline {
     }
 }
 
+/// [0.16] refer ShaownBatchSetKey
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ShineBatchSetKey {
+    /// The identifier of the render pipeline
+    pub pipeline: CachedRenderPipelineId,
+
+    /// The function used to draw
+    pub draw_function: DrawFunctionId,
+
+    /// The ID of the slab of GPU Memory that contains vertex data.
+    ///
+    /// For non-mesh items, you can fill this with 0 if your items can be
+    /// multi-drawn, or with a unique value if they can't
+    pub index_slab: Option<SlabId>,
+}
+
+impl PhaseItemBatchSetKey for ShineBatchSetKey {
+    fn indexed(&self) -> bool {
+        self.index_slab.is_some()
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ShineBinKey {
-    pub pipeline: CachedRenderPipelineId,
-    pub draw_function: DrawFunctionId,
     pub asset_id: UntypedAssetId,
 }
 
+/// [0.16] refer ShadowPhase
 pub struct ShinePhase {
+    ///Determines which objects can be placed into a *batch set*.
+    ///
+    /// Objects in a single batch set can potentially be multi-drawn together,
+    /// if it's enabled and the current platform supports it.
+    pub batch_set_key: ShineBatchSetKey,
+
     /// The key, which determines which can be batched.
-    pub key: ShineBinKey,
+    pub bin_key: ShineBinKey,
     /// An entity from which data will be fetched, including the mesh if
     /// applicable.
     pub representative_entity: (Entity, MainEntity),
@@ -337,6 +391,7 @@ pub struct ShinePhase {
     pub extra_index: PhaseItemExtraIndex,
 }
 
+/// [0.16] refer Shadow
 impl PhaseItem for ShinePhase {
     #[inline]
     fn entity(&self) -> Entity {
@@ -350,7 +405,7 @@ impl PhaseItem for ShinePhase {
 
     #[inline]
     fn draw_function(&self) -> DrawFunctionId {
-        self.key.draw_function
+        self.batch_set_key.draw_function
     }
 
     #[inline]
@@ -364,7 +419,7 @@ impl PhaseItem for ShinePhase {
     }
 
     fn extra_index(&self) -> PhaseItemExtraIndex {
-        self.extra_index
+        self.extra_index.clone()
     }
 
     fn batch_range_and_extra_index_mut(&mut self) -> (&mut Range<u32>, &mut PhaseItemExtraIndex) {
@@ -373,17 +428,20 @@ impl PhaseItem for ShinePhase {
 }
 
 impl BinnedPhaseItem for ShinePhase {
+    type BatchSetKey = ShineBatchSetKey;
     type BinKey = ShineBinKey;
 
     #[inline]
     fn new(
-        key: Self::BinKey,
+        batch_set_key: Self::BatchSetKey,
+        bin_key: Self::BinKey,
         representative_entity: (Entity, MainEntity),
         batch_range: Range<u32>,
         extra_index: PhaseItemExtraIndex,
     ) -> Self {
         Self {
-            key,
+            batch_set_key,
+            bin_key,
             representative_entity,
             batch_range,
             extra_index,
@@ -394,7 +452,7 @@ impl BinnedPhaseItem for ShinePhase {
 impl CachedRenderPipelinePhaseItem for ShinePhase {
     #[inline]
     fn cached_pipeline(&self) -> CachedRenderPipelineId {
-        self.key.pipeline
+        self.batch_set_key.pipeline
     }
 }
 
@@ -430,7 +488,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawShine {
         let meshes = meshes.into_inner();
         let mesh_instances = mesh_instances.into_inner();
 
-        // get mesh info, but how to set the 
+        // get mesh info, but how to set the
         if let Some(mesh_instance) = mesh_instances.render_mesh_queue_data(item.main_entity()) {
             info!(
                 "get mesh instance success: {:?}",
@@ -454,6 +512,7 @@ impl ViewNode for ShineNode {
     type ViewQuery = (
         Entity,
         &'static ExtractedCamera,
+        &'static ExtractedView,
         &'static ViewTarget,
         // &'static ShineUniform,
     );
@@ -463,7 +522,10 @@ impl ViewNode for ShineNode {
         graph: &mut bevy::render::render_graph::RenderGraphContext,
         render_context: &mut bevy::render::renderer::RenderContext<'w>,
         // (view, camera, view_target, _shine_uniform): bevy::ecs::query::QueryItem<
-        (view, camera, view_target): bevy::ecs::query::QueryItem<'w, Self::ViewQuery>,
+        (_view, camera, extracted_view, view_target): bevy::ecs::query::QueryItem<
+            'w,
+            Self::ViewQuery,
+        >,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
         let view_entity = graph.view_entity();
@@ -474,7 +536,7 @@ impl ViewNode for ShineNode {
             panic!("shine phases not exists");
         };
 
-        let Some(shine_phase) = shine_phases.get(&view) else {
+        let Some(shine_phase) = shine_phases.get(&extracted_view.retained_view_entity) else {
             panic!("shine phase not exists");
         };
 
