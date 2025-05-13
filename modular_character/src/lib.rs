@@ -26,6 +26,7 @@ impl Plugin for ModularCharacterPlugin {
         app.insert_resource(AmbientLight {
             color: Color::default(),
             brightness: 1000.0,
+            ..default()
         });
 
         // Systems
@@ -146,14 +147,14 @@ fn animation_player_added(
 
     transitions
         .play(
-            &mut players.get_mut(trigger.entity()).unwrap(),
+            &mut players.get_mut(trigger.target()).unwrap(),
             graph_cache.animations[0],
             Duration::ZERO,
         )
         .resume();
 
     commands
-        .entity(trigger.entity())
+        .entity(trigger.target())
         .insert(transitions)
         .insert(AnimationGraphHandle(graph_cache.graph.clone()));
 }

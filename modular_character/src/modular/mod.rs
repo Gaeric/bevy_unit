@@ -89,7 +89,7 @@ impl Plugin for ModularPlugin {
 }
 
 type MeshPrimitiveParamSet = (
-    &'static Parent,
+    &'static ChildOf,
     &'static Name,
     &'static SkinnedMesh,
     &'static Mesh3d,
@@ -125,7 +125,7 @@ fn update_modular<T: components::ModularCharacter>(
             }
             for entity in modular.entities_mut().drain(..) {
                 trace!("despawn entities children.");
-                commands.entity(entity).despawn_recursive();
+                commands.entity(entity).despawn();
             }
 
             // Get MeshPrimitives
@@ -140,9 +140,9 @@ fn update_modular<T: components::ModularCharacter>(
             let mut meshes = BTreeMap::new();
             for mesh_primitive in mesh_primitives {
                 match mesh_primitives_query.get(mesh_primitive) {
-                    Ok((parent, _, _, _, _, _)) => {
+                    Ok((childof, _, _, _, _, _)) => {
                         meshes
-                            .entry(parent.get())
+                            .entry(childof.parent())
                             .and_modify(|v: &mut Vec<_>| v.push(mesh_primitive))
                             .or_insert(vec![mesh_primitive]);
                     }
@@ -227,7 +227,7 @@ fn update_modular<T: components::ModularCharacter>(
                 scene_spawner.despawn_instance(instance);
             }
         } else {
-            writer.send(ResetChanged(entity));
+            writer.write(ResetChanged(entity));
         }
     }
 }
@@ -246,7 +246,7 @@ fn cycle_modular_segment<T: ModularCharacter, const ID: usize>(
     ];
 
     const MODULES: [&[&str]; 4] = [&HEADS, &BODIES, &LEGS, &FEET];
-    let Ok(mut module) = modular.get_single_mut() else {
+    let Ok(mut module) = modular.single_mut() else {
         bevy::log::error!("Couldn't get single module.");
         return;
     };
