@@ -27,9 +27,7 @@ use bevy::{
         render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraph, RenderGraphContext, RenderLabel},
         render_resource::{
-            Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d,
-            ImageCopyBuffer, ImageDataLayout, Maintain, MapMode, TextureDimension, TextureFormat,
-            TextureUsages,
+            Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, Maintain, MapMode, TexelCopyBufferInfo, TexelCopyBufferLayout, TextureDimension, TextureFormat, TextureUsages
         },
         renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::GpuImage,
@@ -132,7 +130,7 @@ impl ImageCopier {
 impl Node for ImageCopyDriver {
     fn run<'w>(
         &self,
-        graph: &mut RenderGraphContext,
+        _graph: &mut RenderGraphContext,
         render_context: &mut RenderContext<'w>,
         world: &'w World,
     ) -> std::result::Result<(), NodeRunError> {
@@ -157,20 +155,14 @@ impl Node for ImageCopyDriver {
             // That's why image in buffer can be little bit wider
             // This should be taken into account at copy from buffer stage
             let padded_bytes_per_row = RenderDevice::align_copy_bytes_per_row(
-                (src_image.size.x as usize / block_dimensions.0 as usize) * block_size as usize,
+                (src_image.size.width as usize / block_dimensions.0 as usize) * block_size as usize,
             );
-
-            let texture_extent = Extent3d {
-                width: src_image.size.x,
-                height: src_image.size.y,
-                depth_or_array_layers: 1,
-            };
 
             encoder.copy_texture_to_buffer(
                 src_image.texture.as_image_copy(),
-                ImageCopyBuffer {
+                TexelCopyBufferInfo {
                     buffer: &image_copier.buffer,
-                    layout: ImageDataLayout {
+                    layout: TexelCopyBufferLayout {
                         offset: 0,
                         bytes_per_row: Some(
                             std::num::NonZero::<u32>::new(padded_bytes_per_row as u32)
@@ -180,7 +172,7 @@ impl Node for ImageCopyDriver {
                         rows_per_image: None,
                     },
                 },
-                texture_extent,
+                src_image.size,
             );
 
             let render_queue = world.get_resource::<RenderQueue>().unwrap();
@@ -329,15 +321,17 @@ fn update(
                         * img_bytes.texture_descriptor.format.pixel_size();
                     let aligned_row_bytes = RenderDevice::align_copy_bytes_per_row(row_bytes);
                     if row_bytes == aligned_row_bytes {
-                        img_bytes.data.clone_from(&image_data);
+                        img_bytes.data.as_mut().unwrap().clone_from(&image_data);
                     } else {
                         // shrink data to original image size
-                        img_bytes.data = image_data
-                            .chunks(aligned_row_bytes)
-                            .take(img_bytes.height() as usize)
-                            .flat_map(|row| &row[..row_bytes.min(row.len())])
-                            .cloned()
-                            .collect();
+                        img_bytes.data = Some(
+                            image_data
+                                .chunks(aligned_row_bytes)
+                                .take(img_bytes.height() as usize)
+                                .flat_map(|row| &row[..row_bytes.min(row.len())])
+                                .cloned()
+                                .collect(),
+                        );
                     }
 
                     // Create RBGA Image Buffer
@@ -363,7 +357,7 @@ fn update(
                     };
                 }
                 if scene_controller.single_image {
-                    app_exit_writer.send(AppExit::Success);
+                    app_exit_writer.write(AppExit::Success);
                 }
             }
         } else {
@@ -434,7 +428,7 @@ fn setup_render_target(
 
     scene_controller.state = SceneState::Render(pre_roll_frames);
     scene_controller.name = scene_name;
-    RenderTarget::Image(render_target_image_handle)
+    RenderTarget::Image(render_target_image_handle.into())
 }
 
 fn setup(

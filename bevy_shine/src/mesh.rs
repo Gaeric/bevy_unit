@@ -2,7 +2,7 @@ use bevy::{
     prelude::*,
     render::{
         mesh::{PrimitiveTopology, VertexAttributeValues},
-        render_resource::{ShaderType, StorageBuffer},
+        render_resource::ShaderType,
     },
 };
 use itertools::Itertools;
@@ -21,10 +21,10 @@ pub struct GpuVertexBuffer {
     pub data: Vec<GpuVertex>,
 }
 
-#[derive(Debug)]
-pub struct GpuMesh {
-    pub vertices: Vec<GpuVertex>,
-}
+// #[derive(Debug)]
+// pub struct GpuMesh {
+//     pub vertices: Vec<GpuVertex>,
+// }
 
 #[derive(Debug, ShaderType)]
 pub struct GpuTriangle {
@@ -37,10 +37,10 @@ pub struct GpuTriangles {
     pub triangles: Vec<GpuTriangle>,
 }
 
-#[derive(Default, Resource)]
-pub struct ShineTriangleAssets {
-    pub trangle_buffer: StorageBuffer<GpuTriangles>,
-}
+// #[derive(Default, Resource)]
+// pub struct ShineTriangleAssets {
+//     pub trangle_buffer: StorageBuffer<GpuTriangles>,
+// }
 
 #[derive(Debug)]
 pub enum ExtractMeshResult {
@@ -132,11 +132,7 @@ impl GpuTriangles {
     }
 }
 
-fn collect_mesh_triangles(
-    mut command: Commands,
-    mut events: EventReader<AssetEvent<Mesh>>,
-    assets: Res<Assets<Mesh>>,
-) {
+fn collect_mesh_triangles(mut events: EventReader<AssetEvent<Mesh>>, assets: Res<Assets<Mesh>>) {
     for event in events.read() {
         info!("mesh event: {:?}", event);
 
