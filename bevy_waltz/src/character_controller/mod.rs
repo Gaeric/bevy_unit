@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+mod action_demo;
 pub(crate) mod actions;
 pub(crate) mod camera;
 pub(crate) mod character_embodiment;
@@ -14,5 +15,6 @@ pub(super) fn plugin(app: &mut App) {
         actions::plugin,
         camera::plugin,
         character_embodiment::plugin,
+        action_demo::plugin,
     ));
 }
