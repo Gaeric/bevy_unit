@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-mod action_demo;
+pub(crate) mod action_demo;
 pub(crate) mod actions;
 pub(crate) mod camera;
 pub(crate) mod character_embodiment;
