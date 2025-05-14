@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use modular_character::ModularCharacterPlugin;
 
 mod headless_renderer;
+use bevy_waltz::WaltzPlugin;
 
 // mod animation_demo;
 // mod bone_demo;
@@ -18,7 +19,8 @@ fn main() -> AppExit {
         // .add_plugins(animation_demo::plugin)
         // .add_plugins(bone_demo::plugin)
         // .add_plugins(ui::plugin)
-        .add_plugins(ModularCharacterPlugin)
+        // .add_plugins(ModularCharacterPlugin)
+        .add_plugins(WaltzPlugin)
         // .add_plugins(dev::plugin)
         // .add_plugins(cloth_demo::plugin)
         // .add_plugins(BlenvyPlugin::default())
