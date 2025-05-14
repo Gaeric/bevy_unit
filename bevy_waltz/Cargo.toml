@@ -4,3 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bevy = { path = "../../bevy_engines/bevy_0.16/", features = ["wayland", "dynamic_linking"] }

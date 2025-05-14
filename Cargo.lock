@@ -1923,6 +1923,9 @@ dependencies = [
 [[package]]
 name = "bevy_waltz"
 version = "0.1.0"
+dependencies = [
+ "bevy",
+]
 
 [[package]]
 name = "bevy_window"
