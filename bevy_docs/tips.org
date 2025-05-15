@@ -108,3 +108,64 @@
     在一个工作区中，只需要在工作区的根路径中指定crate的patch，工作区中所有子crate都会使用该patch版本进行编译，包括crate的依赖项
 
     修改完成后，可使用cargo tree检查依赖关系，或直接查看cargo.lock
+    #+begin_example
+      # 不使用patch指定本地版本
+      cargo tree | grep bevy_platform
+      │       │   │   │   ├── bevy_platform v0.16.0
+      │       │   │   │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   │   │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   ├── bevy_platform v0.16.0 (*)
+      │       │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   ├── bevy_platform v0.16.0 (*)
+      │       │   ├── bevy_platform v0.16.0 (*)
+      │       │   │   ├── bevy_platform v0.16.0 (*)
+      │       ├── bevy_platform v0.16.0 (*)
+      │       │   ├── bevy_platform v0.16.0 (*)
+      │       │   ├── bevy_platform v0.16.0 (*)
+      │       │   ├── bevy_platform v0.16.0 (*)
+      │           ├── bevy_platform v0.16.0 (*)
+
+      使用patch指定本地版本
+
+      zero@work ~/d/b/action_demo > cargo tree | grep bevy_platform
+      │       │   │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform)
+      │       │   │   │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   │   │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │       │   ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+      │           ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
+    #+end_example
+
