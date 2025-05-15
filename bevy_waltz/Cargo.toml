@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { path = "../../bevy_engines/bevy_0.16/", features = ["wayland", "dynamic_linking"] }
+bevy = "0.16.0"
 leafwing-input-manager = "0.17.0"
 serde = { version = "1", features = ["derive"] }
