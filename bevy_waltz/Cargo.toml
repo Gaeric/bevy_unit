@@ -7,3 +7,7 @@ edition = "2024"
 bevy = "0.16.0"
 leafwing-input-manager = "0.17.0"
 serde = { version = "1", features = ["derive"] }
+
+[dependencies.bevy_dolly]
+git = "https://github.com/BlackPhlox/bevy_dolly/"
+branch = "bevy_0.16"
