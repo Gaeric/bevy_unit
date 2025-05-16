@@ -169,3 +169,4 @@
       │           ├── bevy_platform v0.16.0 (/home/**/**/bevy_0.16/crates/bevy_platform) (*)
     #+end_example
 
+    在使用crate时，如果某个crate仅指定了使用bevy的子crate，这个子crate需要单独设置patch

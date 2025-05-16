@@ -15,4 +15,6 @@ crossbeam-channel = "0.5.15"
 
 [patch.crates-io]
 bevy = { path = "../bevy_engines/bevy_0.16/" }
+bevy_math = { path = "../bevy_engines/bevy_0.16/crates/bevy_math" }
+bevy_transform = { path = "../bevy_engines/bevy_0.16/crates/bevy_transform" }
 
