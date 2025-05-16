@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 mod character_controller;
+mod config;
 
 pub struct WaltzPlugin;
 
