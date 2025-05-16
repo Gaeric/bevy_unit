@@ -17,6 +17,8 @@
    需要使用第三人称控制时，使用bevy_dolly插件
 
    需要使用第一人称控制时，使用bevy_fps_controller插件
+** 1.1.3 物理引擎
+   使用avian3d做为物理引擎
 * Archive
 * Plugins
 * Reference
