@@ -1,7 +1,14 @@
+use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
+
+#[derive(Resource, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
+#[reflect(Serialize, Deserialize)]
 pub(crate) struct WaltzConfig {
     pub(crate) camera_config: CameraConfig,
 }
 
+#[derive(Resource, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
+#[reflect(Serialize, Deserialize)]
 pub(crate) struct CameraConfig {
     pub(crate) fixed_angle: FixedAngle,
     pub(crate) third_person: ThirdPersion,
@@ -9,6 +16,8 @@ pub(crate) struct CameraConfig {
     pub(crate) mouse_sensitivity_y: f32,
 }
 
+#[derive(Resource, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
+#[reflect(Serialize, Deserialize)]
 pub(crate) struct FixedAngle {
     pub(crate) min_distance: f32,
     pub(crate) max_distance: f32,
@@ -20,6 +29,8 @@ pub(crate) struct FixedAngle {
     pub(crate) pitch: f32,
 }
 
+#[derive(Resource, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
+#[reflect(Serialize, Deserialize)]
 pub(crate) struct ThirdPersion {
     pub(crate) translation_smoothing: f32,
     pub(crate) rotation_smoothing: f32,
