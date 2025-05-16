@@ -3,6 +3,7 @@ use bevy::prelude::*;
 pub(crate) mod actions;
 pub(crate) mod camera;
 pub(crate) mod character_embodiment;
+pub(crate) mod physics;
 
 /// Handles systems exclusive to the character's control. Is split into the following sub-plugins:
 /// - [`actions::plugin`]: Handles character input such as mouse and keyboard and neatly packs it into a [`leafwing_input_manager:Actionlike`].
