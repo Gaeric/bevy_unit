@@ -26,7 +26,7 @@ impl ActionsFrozen {
         self.freeze_count -= 1;
     }
 
-    pub(crate) fn is_frozen(&mut self) -> bool {
+    pub(crate) fn is_frozen(&self) -> bool {
         self.freeze_count > 0
     }
 }
