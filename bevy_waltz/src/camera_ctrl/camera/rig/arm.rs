@@ -1,6 +1,6 @@
-use crate::character_controller::camera::IngameCameraKind;
-use crate::character_controller::physics::CollisionLayer;
-use crate::{character_controller::camera::IngameCamera, config::WaltzConfig};
+use crate::camera_ctrl::camera::IngameCameraKind;
+use crate::camera_ctrl::physics::CollisionLayer;
+use crate::{camera_ctrl::camera::IngameCamera, config::WaltzConfig};
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy_dolly::prelude::*;

@@ -5,7 +5,7 @@ use bevy_dolly::prelude::{LookAt, Position, Rig, Smooth, YawPitch};
 use leafwing_input_manager::prelude::ActionState;
 
 use crate::{
-    character_controller::actions::{ActionsFrozen, CameraAction},
+    camera_ctrl::actions::{ActionsFrozen, CameraAction},
     config::WaltzConfig,
     utils::Vec2Ext,
 };

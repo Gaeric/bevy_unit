@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_dolly::prelude::{Arm, LookAt, Rig, RigDriverTraits};
 use leafwing_input_manager::prelude::ActionState;
 
-use crate::{character_controller::actions::CameraAction, config::WaltzConfig};
+use crate::{camera_ctrl::actions::CameraAction, config::WaltzConfig};
 
 use super::{IngameCamera, IngameCameraKind};
 
