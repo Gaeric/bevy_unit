@@ -710,5 +710,8 @@
    #+end_example
 ** waltz
    1. 使用leafwing-input-manager控制输入和action之间的映射，包括character的动作控制，camera的orbit和zoom，以及全局pause
-   2. 使用bevy_atmosphere构建了一个skybox
-   3. 使用bevy_dolly构建了相机的移动
+   2. 使用avian做为物理引擎
+   3. 使用bevy_atmosphere构建了一个skybox
+   4. 使用bevy_dolly构建了相机的移动
+   5. 使用egui和bevy_egui技术构建UI
+   6. 使用bevy-tnua，基于avian来控制角色的移动
