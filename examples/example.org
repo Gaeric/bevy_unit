@@ -21,6 +21,9 @@
    使用leafwing-input-manager或bevy_enhanced_input做为输入到事件的映射关系
 * Crates
   本节记录一些crate的笔记
+** avian
+** tnua
+** bevy_enhandced_input
 ** dolly
 * Archive
 * Plugins
