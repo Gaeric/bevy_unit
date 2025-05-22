@@ -18,4 +18,17 @@ bevy = { path = "../bevy_engines/bevy_0.16/" }
 bevy_math = { path = "../bevy_engines/bevy_0.16/crates/bevy_math" }
 bevy_transform = { path = "../bevy_engines/bevy_0.16/crates/bevy_transform" }
 bevy_reflect = { path = "../bevy_engines/bevy_0.16/crates/bevy_reflect" }
+bevy_app = { path = "../bevy_engines/bevy_0.16/crates/bevy_app" }
+bevy_platform = { path = "../bevy_engines/bevy_0.16/crates/bevy_platform" }
+bevy_asset = { path = "../bevy_engines/bevy_0.16/crates/bevy_asset" }
+bevy_derive = { path = "../bevy_engines/bevy_0.16/crates/bevy_derive" }
+bevy_ecs = { path = "../bevy_engines/bevy_0.16/crates/bevy_ecs" }
+bevy_render = { path = "../bevy_engines/bevy_0.16/crates/bevy_render" }
+bevy_window = { path = "../bevy_engines/bevy_0.16/crates/bevy_window" }
+bevy_image = { path = "../bevy_engines/bevy_0.16/crates/bevy_image" }
+bevy_input = { path = "../bevy_engines/bevy_0.16/crates/bevy_input" }
+bevy_log = { path = "../bevy_engines/bevy_0.16/crates/bevy_log" }
+bevy_picking = { path = "../bevy_engines/bevy_0.16/crates/bevy_picking" }
+bevy_time = { path = "../bevy_engines/bevy_0.16/crates/bevy_time" }
+bevy_winit = { path = "../bevy_engines/bevy_0.16/crates/bevy_winit" }
 
