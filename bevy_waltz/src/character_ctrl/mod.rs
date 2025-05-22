@@ -16,4 +16,27 @@ pub(super) fn plugin(app: &mut App) {
     app.add_plugins(TnuaCrouchEnforcerPlugin::new(FixedUpdate));
 
     app.add_systems(Update, character_control_radar_visualization_system);
+
+    // CharacterMotionConfig
+    // app.add_plugins();
+
+    app.add_systems(Startup, setup_camera_and_lights);
+}
+
+fn setup_camera_and_lights(mut commands: Commands) {
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(0.0, 16.0, 40.0).looking_at(Vec3::new(0.0, 10.0, 0.0), Vec3::Y),
+    ));
+
+    commands.spawn((PointLight::default(), Transform::from_xyz(5.0, 5.0, 5.0)));
+
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 4000.0,
+            shadows_enabled: true,
+            ..Default::default()
+        },
+        Transform::default().looking_at(-Vec3::Y, Vec3::Z),
+    ));
 }
