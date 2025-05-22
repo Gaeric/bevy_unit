@@ -21,6 +21,7 @@ pub(super) fn plugin(app: &mut App) {
     // app.add_plugins();
 
     app.add_systems(Startup, setup_camera_and_lights);
+    app.add_systems(Startup, setup_sphere);
 }
 
 fn setup_camera_and_lights(mut commands: Commands) {
@@ -39,4 +40,15 @@ fn setup_camera_and_lights(mut commands: Commands) {
         },
         Transform::default().looking_at(-Vec3::Y, Vec3::Z),
     ));
+}
+
+fn setup_sphere(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let sphere = meshes.add(Sphere::new(5.0));
+    let material = materials.add(StandardMaterial::default());
+
+    commands.spawn((Mesh3d(sphere), MeshMaterial3d(material)));
 }
