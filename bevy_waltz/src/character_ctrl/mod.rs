@@ -5,11 +5,12 @@ use bevy::{
     prelude::*,
     window::{CursorGrabMode, PrimaryWindow},
 };
-use bevy_egui::EguiContexts;
+
 use bevy_tnua::{control_helpers::TnuaCrouchEnforcerPlugin, prelude::TnuaControllerPlugin};
 use bevy_tnua_avian3d::*;
 
 mod ctrl_systems;
+mod level_switch;
 
 use ctrl_systems::info_system::*;
 
