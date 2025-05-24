@@ -1,4 +1,4 @@
-use avian3d::prelude::{Collider, RigidBody};
+use avian3d::prelude::{AngularVelocity, Collider, LinearVelocity, RigidBody, Sensor};
 use bevy::{ecs::system::SystemParam, prelude::*};
 use bevy_tnua::math::{AsF32, Float, Quaternion, Vector3};
 
@@ -187,5 +187,35 @@ impl LevelSetupHelperWithMaterial<'_, '_, '_> {
         cmd.insert((RigidBody::Dynamic, Collider::sphere(radius)));
 
         cmd
+    }
+}
+
+pub trait LevelSetupHelperEntityCommandsExtension {
+    fn make_kinematic(&mut self) -> &mut Self;
+    fn make_kinematic_with_linear_velocity(&mut self, velocity: Vector3) -> &mut Self;
+    fn make_kinematic_with_angular_velocity(&mut self, angvel: Vector3) -> &mut Self;
+    fn add_ball_collider(&mut self, radius: Float) -> &mut Self;
+    fn make_sensor(&mut self) -> &mut Self;
+}
+
+impl LevelSetupHelperEntityCommandsExtension for EntityCommands<'_> {
+    fn make_kinematic(&mut self) -> &mut Self {
+        self.insert(RigidBody::Kinematic)
+    }
+
+    fn make_kinematic_with_linear_velocity(&mut self, velocity: Vector3) -> &mut Self {
+        self.insert((LinearVelocity(velocity), RigidBody::Kinematic))
+    }
+
+    fn make_kinematic_with_angular_velocity(&mut self, angvel: Vector3) -> &mut Self {
+        self.insert((AngularVelocity(angvel), RigidBody::Kinematic))
+    }
+
+    fn add_ball_collider(&mut self, radius: Float) -> &mut Self {
+        self.insert(Collider::sphere(radius))
+    }
+
+    fn make_sensor(&mut self) -> &mut Self {
+        self.insert(Sensor)
     }
 }
