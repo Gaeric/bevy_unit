@@ -61,6 +61,9 @@ impl SwitchableLevel {
     }
 }
 
+#[derive(Event)]
+pub struct SwitchToLevel(pub usize);
+
 #[derive(Resource)]
 pub struct SwitchableLevels {
     pub current: usize,
@@ -75,4 +78,31 @@ impl SwitchableLevels {
     pub fn iter(&self) -> impl Iterator<Item = &SwitchableLevel> {
         self.levels.iter()
     }
+}
+
+#[derive(Component)]
+pub struct LevelObject;
+
+#[derive(Component)]
+pub struct PositionPlayer {
+    position: Vec3,
+    ttl: Timer,
+}
+
+// Observer maybe suitable for this function
+fn handle_level_switch(
+    mut reader: EventReader<SwitchToLevel>,
+    mut switchable_levels: ResMut<SwitchableLevels>,
+    query: Query<Entity, Or<(With<LevelObject>, With<PositionPlayer>)>>,
+    mut commands: Commands,
+) {
+    let Some(SwitchToLevel(new_level_index)) = reader.read().last() else {
+        return;
+    };
+
+    switchable_levels.current = *new_level_index;
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
+    }
+    commands.run_system(switchable_levels.current().level);
 }
