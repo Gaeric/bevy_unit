@@ -56,4 +56,22 @@ impl<'w, 's> LevelSetupHelper<'w, 's> {
     ) -> LevelSetupHelperWithMaterial<'a, 'w, 's> {
         self.with_material(color.into())
     }
+
+    pub fn spawn_scene_cuboid(
+        &mut self,
+        name: impl ToString,
+        path: impl ToString,
+        transform: Transform,
+        size: Vector3,
+    ) -> EntityCommands {
+        let scene = self.asset_server.load(path.to_string());
+        let mut cmd = self.spawn_named(name);
+
+        cmd.insert((SceneRoot(scene), transform));
+
+        cmd.insert(RigidBody::Static);
+        cmd.insert(Collider::cuboid(size.x, size.y, size.z));
+
+        cmd
+    }
 }
