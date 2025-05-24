@@ -60,3 +60,19 @@ impl SwitchableLevel {
         &self.name
     }
 }
+
+#[derive(Resource)]
+pub struct SwitchableLevels {
+    pub current: usize,
+    pub levels: Vec<SwitchableLevel>,
+}
+
+impl SwitchableLevels {
+    pub fn current(&self) -> &SwitchableLevel {
+        &self.levels[self.current]
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &SwitchableLevel> {
+        self.levels.iter()
+    }
+}
