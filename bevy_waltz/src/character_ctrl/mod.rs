@@ -13,6 +13,7 @@ mod ctrl_systems;
 mod level_switch;
 
 use ctrl_systems::info_system::*;
+use level_switch::{LevelSwitchPlugin, jungle_gym};
 
 pub(super) fn plugin(app: &mut App) {
     app.add_plugins(PhysicsPlugins::new(FixedPostUpdate));
@@ -28,6 +29,7 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(Startup, setup_camera_and_lights);
     app.add_systems(Startup, setup_sphere);
 
+    app.add_plugins(LevelSwitchPlugin::new(Some("jungle_gym")).with("jungle_gym", jungle_gym::setup_level));
     // level switching
     // app.add_plugins();
 

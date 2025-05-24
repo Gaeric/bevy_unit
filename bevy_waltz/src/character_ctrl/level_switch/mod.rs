@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use avian3d::prelude::{AngularVelocity, LinearVelocity};
 use bevy::{
     ecs::{query::QueryData, system::SystemId},
@@ -10,6 +12,7 @@ pub struct LevelSwitchPlugin {
 }
 
 mod helper;
+pub mod jungle_gym;
 
 impl LevelSwitchPlugin {
     pub fn new(default_level: Option<impl ToString>) -> Self {
@@ -100,6 +103,15 @@ pub struct LevelObject;
 pub struct PositionPlayer {
     position: Vec3,
     ttl: Timer,
+}
+
+impl From<Vec3> for PositionPlayer {
+    fn from(position: Vec3) -> Self {
+        Self {
+            position,
+            ttl: Timer::new(Duration::from_millis(500), TimerMode::Once),
+        }
+    }
 }
 
 #[derive(Component)]
