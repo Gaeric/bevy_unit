@@ -14,6 +14,9 @@ pub struct LevelSwitchPlugin {
 mod helper;
 pub mod jungle_gym;
 
+#[derive(Component)]
+pub struct Climable;
+
 impl LevelSwitchPlugin {
     pub fn new(default_level: Option<impl ToString>) -> Self {
         Self {
