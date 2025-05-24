@@ -50,6 +50,13 @@ impl Plugin for LevelSwitchPlugin {
         } else {
             0
         };
+
+        app.insert_resource(SwitchableLevels { current: 0, levels });
+        app.add_event::<SwitchToLevel>();
+        app.add_systems(Update, (handle_level_switch, handle_player_position));
+        app.add_systems(Startup, move |mut writer: EventWriter<SwitchToLevel>| {
+            writer.write(SwitchToLevel(level_index));
+        });
     }
 }
 
