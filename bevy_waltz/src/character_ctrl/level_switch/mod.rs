@@ -9,6 +9,8 @@ pub struct LevelSwitchPlugin {
     default_level: Option<String>,
 }
 
+mod helper;
+
 impl LevelSwitchPlugin {
     pub fn new(default_level: Option<impl ToString>) -> Self {
         Self {
