@@ -1,4 +1,8 @@
-use bevy::{ecs::system::SystemId, prelude::*};
+use avian3d::prelude::{AngularVelocity, LinearVelocity};
+use bevy::{
+    ecs::{query::QueryData, system::SystemId},
+    prelude::*,
+};
 
 pub struct LevelSwitchPlugin {
     levels: Vec<(String, Box<dyn Send + Sync + Fn(&mut World) -> SystemId>)>,
@@ -89,6 +93,9 @@ pub struct PositionPlayer {
     ttl: Timer,
 }
 
+#[derive(Component)]
+pub struct IsPlayer;
+
 // Observer maybe suitable for this function
 fn handle_level_switch(
     mut reader: EventReader<SwitchToLevel>,
@@ -105,4 +112,39 @@ fn handle_level_switch(
         commands.entity(entity).despawn();
     }
     commands.run_system(switchable_levels.current().level);
+}
+
+#[derive(QueryData)]
+#[query_data(mutable)]
+struct PlayerQueryForPosition {
+    transform: &'static mut Transform,
+    avian3d_linear_velocity: Option<&'static mut LinearVelocity>,
+    avian3d_angular_velocity: Option<&'static mut AngularVelocity>,
+}
+
+fn handle_player_position(
+    time: Res<Time>,
+    mut player_query: Query<PlayerQueryForPosition, With<IsPlayer>>,
+    mut position_query: Query<(Entity, &mut PositionPlayer)>,
+    mut commands: Commands,
+) {
+    let Some((position_entity, mut position_player)) = position_query.iter_mut().next() else {
+        return;
+    };
+
+    for mut player in player_query.iter_mut() {
+        player.transform.translation = position_player.position;
+
+        if let Some(velocity) = player.avian3d_linear_velocity.as_mut() {
+            velocity.0 = Default::default()
+        }
+
+        if let Some(velocity) = player.avian3d_angular_velocity.as_mut() {
+            velocity.0 = Default::default()
+        }
+    }
+
+    if position_player.ttl.tick(time.delta()).finished() {
+        commands.entity(position_entity).despawn();
+    }
 }
