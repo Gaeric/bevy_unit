@@ -13,7 +13,7 @@ mod ctrl_systems;
 mod level_switch;
 
 use ctrl_systems::info_system::*;
-use level_switch::{LevelSwitchPlugin, jungle_gym};
+use level_switch::{IsPlayer, LevelSwitchPlugin, jungle_gym};
 
 pub(super) fn plugin(app: &mut App) {
     app.add_plugins(PhysicsPlugins::new(FixedPostUpdate));
@@ -27,14 +27,16 @@ pub(super) fn plugin(app: &mut App) {
     // app.add_plugins();
 
     app.add_systems(Startup, setup_camera_and_lights);
-    app.add_systems(Startup, setup_sphere);
+    // app.add_systems(Startup, setup_sphere);
 
-    app.add_plugins(LevelSwitchPlugin::new(Some("jungle_gym")).with("jungle_gym", jungle_gym::setup_level));
+    app.add_plugins(
+        LevelSwitchPlugin::new(Some("jungle_gym")).with("jungle_gym", jungle_gym::setup_level),
+    );
     // level switching
     // app.add_plugins();
 
     // spawn player
-    // app.add_systems(Startup, setup_player);
+    app.add_systems(Startup, setup_player);
 
     app.add_systems(Update, grab_ungrab_mouse);
 }
@@ -92,4 +94,9 @@ fn grab_ungrab_mouse(
         window.cursor_options.grab_mode = CursorGrabMode::None;
         window.cursor_options.visible = true;
     }
+}
+
+fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let mut cmd = commands.spawn(IsPlayer);
+    cmd.insert(SceneRoot(asset_server.load("waltz/scenes/library/Fox.glb#Scene0")));
 }
