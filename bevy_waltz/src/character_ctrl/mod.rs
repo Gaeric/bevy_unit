@@ -1,3 +1,4 @@
+use animating::GltfSceneHandler;
 /// character controller system
 /// forked from the tnua shooter_like demo
 use avian3d::prelude::*;
@@ -9,9 +10,9 @@ use bevy::{
 use bevy_tnua::{control_helpers::TnuaCrouchEnforcerPlugin, prelude::TnuaControllerPlugin};
 use bevy_tnua_avian3d::*;
 
+mod animating;
 mod ctrl_systems;
 mod level_switch;
-mod animating;
 
 use ctrl_systems::info_system::*;
 use level_switch::{IsPlayer, LevelSwitchPlugin, jungle_gym};
@@ -99,6 +100,12 @@ fn grab_ungrab_mouse(
 
 fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     let mut cmd = commands.spawn(IsPlayer);
-    cmd.insert(SceneRoot(asset_server.load("waltz/scenes/library/Fox.glb#Scene0")));
+    cmd.insert(SceneRoot(
+        asset_server.load("waltz/scenes/library/Fox.glb#Scene0"),
+    ));
+    cmd.insert(GltfSceneHandler {
+        names_from: asset_server.load("waltz/scenes/library/Fox.glb"),
+    });
+
 
 }
