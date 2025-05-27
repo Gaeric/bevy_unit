@@ -107,5 +107,7 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
         names_from: asset_server.load("waltz/scenes/library/Fox.glb"),
     });
 
+    cmd.insert(RigidBody::Dynamic);
+    cmd.insert(Collider::capsule(0.5, 1.0));
 
 }
