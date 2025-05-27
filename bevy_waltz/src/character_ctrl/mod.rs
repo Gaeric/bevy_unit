@@ -7,7 +7,7 @@ use bevy::{
     window::{CursorGrabMode, PrimaryWindow},
 };
 
-use bevy_tnua::{control_helpers::TnuaCrouchEnforcerPlugin, prelude::TnuaControllerPlugin};
+use bevy_tnua::{control_helpers::TnuaCrouchEnforcerPlugin, prelude::{TnuaController, TnuaControllerPlugin}};
 use bevy_tnua_avian3d::*;
 
 mod animating;
@@ -110,4 +110,6 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     cmd.insert(RigidBody::Dynamic);
     cmd.insert(Collider::capsule(0.5, 1.0));
 
+    // Tnua's main iterface with the user code
+    cmd.insert(TnuaController::default());
 }
