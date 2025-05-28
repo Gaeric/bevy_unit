@@ -21,7 +21,7 @@ mod ctrl_systems;
 mod level_switch;
 
 use ctrl_systems::{
-    CharacterMotionConfig, Dimensionality, FallingThroughControlScheme, info_system::*,
+    info_system::*, CharacterMotionConfig, Dimensionality, FallingThroughControlScheme, ForwardFromCamera
 };
 use level_switch::{IsPlayer, LevelSwitchPlugin, jungle_gym};
 
@@ -154,4 +154,6 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
         climb: Default::default(),
         climb_speed: 10.0,
     });
+
+    cmd.insert(ForwardFromCamera::default());
 }

@@ -4,7 +4,7 @@ use bevy_tnua::{
         TnuaBuiltinClimb, TnuaBuiltinCrouch, TnuaBuiltinDash, TnuaBuiltinKnockback,
         TnuaBuiltinWallSlide,
     },
-    math::Float,
+    math::{Float, Vector3},
     prelude::{TnuaBuiltinJump, TnuaBuiltinWalk},
 };
 
@@ -42,4 +42,19 @@ pub struct CharacterMotionConfig {
     pub wall_slide: TnuaBuiltinWallSlide,
     pub climb_speed: Float,
     pub climb: TnuaBuiltinClimb,
+}
+
+#[derive(Component)]
+pub struct ForwardFromCamera {
+    pub forward: Vector3,
+    pub pitch_angle: Float,
+}
+
+impl Default for ForwardFromCamera {
+    fn default() -> Self {
+        Self {
+            forward: Vector3::NEG_Z,
+            pitch_angle: 0.0,
+        }
+    }
 }
