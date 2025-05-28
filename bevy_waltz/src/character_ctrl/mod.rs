@@ -8,10 +8,7 @@ use bevy::{
 };
 
 use bevy_tnua::{
-    TnuaObstacleRadar,
-    control_helpers::{TnuaBlipReuseAvoidance, TnuaCrouchEnforcerPlugin},
-    math::Float,
-    prelude::{TnuaBuiltinWalk, TnuaController, TnuaControllerPlugin},
+    control_helpers::{TnuaBlipReuseAvoidance, TnuaCrouchEnforcerPlugin}, math::Float, prelude::{TnuaBuiltinWalk, TnuaController, TnuaControllerPlugin}, TnuaObstacleRadar, TnuaToggle
 };
 use bevy_tnua::{builtins::TnuaBuiltinCrouch, math::float_consts, prelude::TnuaBuiltinJump};
 use bevy_tnua_avian3d::*;
@@ -156,4 +153,7 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     });
 
     cmd.insert(ForwardFromCamera::default());
+
+    // An entity's Tnua behavior can be toggled individually with this component
+    cmd.insert(TnuaToggle::default());
 }
