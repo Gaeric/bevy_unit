@@ -7,7 +7,11 @@ use bevy::{
     window::{CursorGrabMode, PrimaryWindow},
 };
 
-use bevy_tnua::{control_helpers::TnuaCrouchEnforcerPlugin, prelude::{TnuaController, TnuaControllerPlugin}};
+use bevy_tnua::{
+    TnuaObstacleRadar,
+    control_helpers::{TnuaBlipReuseAvoidance, TnuaCrouchEnforcerPlugin},
+    prelude::{TnuaController, TnuaControllerPlugin},
+};
 use bevy_tnua_avian3d::*;
 
 mod animating;
@@ -112,4 +116,10 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     // Tnua's main iterface with the user code
     cmd.insert(TnuaController::default());
+
+    // detect obstacles around the player that the player can use for env actions.
+    cmd.insert(TnuaObstacleRadar::new(1.0, 3.0));
+
+    // use TnuaBlipReuseAvoidance to avoid initiating actions
+    cmd.insert(TnuaBlipReuseAvoidance::default());
 }
