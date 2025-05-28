@@ -40,6 +40,6 @@ pub struct CharacterMotionConfig {
     pub falling_through: FallingThroughControlScheme,
     pub knockback: TnuaBuiltinKnockback,
     pub wall_slide: TnuaBuiltinWallSlide,
-    pub climp_speed: Float,
+    pub climb_speed: Float,
     pub climb: TnuaBuiltinClimb,
 }

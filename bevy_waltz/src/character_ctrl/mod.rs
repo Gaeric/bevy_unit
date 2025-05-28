@@ -10,15 +10,19 @@ use bevy::{
 use bevy_tnua::{
     TnuaObstacleRadar,
     control_helpers::{TnuaBlipReuseAvoidance, TnuaCrouchEnforcerPlugin},
-    prelude::{TnuaController, TnuaControllerPlugin},
+    math::Float,
+    prelude::{TnuaBuiltinWalk, TnuaController, TnuaControllerPlugin},
 };
+use bevy_tnua::{builtins::TnuaBuiltinCrouch, math::float_consts, prelude::TnuaBuiltinJump};
 use bevy_tnua_avian3d::*;
 
 mod animating;
 mod ctrl_systems;
 mod level_switch;
 
-use ctrl_systems::info_system::*;
+use ctrl_systems::{
+    CharacterMotionConfig, Dimensionality, FallingThroughControlScheme, info_system::*,
+};
 use level_switch::{IsPlayer, LevelSwitchPlugin, jungle_gym};
 
 pub(super) fn plugin(app: &mut App) {
@@ -122,4 +126,32 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     // use TnuaBlipReuseAvoidance to avoid initiating actions
     cmd.insert(TnuaBlipReuseAvoidance::default());
+
+    cmd.insert(CharacterMotionConfig {
+        dimensionality: Dimensionality::Dim3,
+        speed: 20.0,
+        walk: TnuaBuiltinWalk {
+            float_height: 2.0,
+            max_slope: float_consts::FRAC_PI_4,
+            turning_angvel: Float::INFINITY,
+            ..Default::default()
+        },
+        actions_in_air: 1,
+        jump: TnuaBuiltinJump {
+            height: 4.0,
+            ..Default::default()
+        },
+        crouch: TnuaBuiltinCrouch {
+            float_offset: -0.9,
+            ..Default::default()
+        },
+        dash_distance: 10.0,
+        dash: Default::default(),
+        one_way_platforms_min_proximity: 1.0,
+        falling_through: FallingThroughControlScheme::SingleFall,
+        knockback: Default::default(),
+        wall_slide: Default::default(),
+        climb: Default::default(),
+        climb_speed: 10.0,
+    });
 }
