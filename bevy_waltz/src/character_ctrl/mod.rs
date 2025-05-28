@@ -1,4 +1,4 @@
-use animating::GltfSceneHandler;
+use animating::{AnimationState, GltfSceneHandler};
 /// character controller system
 /// forked from the tnua shooter_like demo
 use avian3d::prelude::*;
@@ -8,7 +8,10 @@ use bevy::{
 };
 
 use bevy_tnua::{
-    control_helpers::{TnuaBlipReuseAvoidance, TnuaCrouchEnforcerPlugin}, math::Float, prelude::{TnuaBuiltinWalk, TnuaController, TnuaControllerPlugin}, TnuaObstacleRadar, TnuaToggle
+    TnuaAnimatingState, TnuaObstacleRadar, TnuaToggle,
+    control_helpers::{TnuaBlipReuseAvoidance, TnuaCrouchEnforcerPlugin},
+    math::Float,
+    prelude::{TnuaBuiltinWalk, TnuaController, TnuaControllerPlugin},
 };
 use bevy_tnua::{builtins::TnuaBuiltinCrouch, math::float_consts, prelude::TnuaBuiltinJump};
 use bevy_tnua_avian3d::*;
@@ -18,7 +21,8 @@ mod ctrl_systems;
 mod level_switch;
 
 use ctrl_systems::{
-    info_system::*, CharacterMotionConfig, Dimensionality, FallingThroughControlScheme, ForwardFromCamera
+    CharacterMotionConfig, Dimensionality, FallingThroughControlScheme, ForwardFromCamera,
+    info_system::*,
 };
 use level_switch::{IsPlayer, LevelSwitchPlugin, jungle_gym};
 
@@ -156,4 +160,6 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     // An entity's Tnua behavior can be toggled individually with this component
     cmd.insert(TnuaToggle::default());
+
+    cmd.insert(TnuaAnimatingState::<AnimationState>::default());
 }

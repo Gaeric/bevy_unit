@@ -1,4 +1,5 @@
 use bevy::{log, platform::collections::HashMap, prelude::*};
+use bevy_tnua::math::Float;
 
 #[derive(Component)]
 pub struct GltfSceneHandler {
@@ -54,4 +55,19 @@ pub fn animation_patcher_system(
             };
         }
     }
+}
+
+#[derive(Debug)]
+pub enum AnimationState {
+    Standing,
+    Running(Float),
+    Jumping,
+    Falling,
+    Crouching,
+    Crawling(Float),
+    Dashing,
+    KnockedBack,
+    WallSliding,
+    WallJumping,
+    Climbing(Float),
 }
