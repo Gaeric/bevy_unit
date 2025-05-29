@@ -1,4 +1,4 @@
-use animating::{AnimationState, GltfSceneHandler};
+use animating::{AnimationState, GltfSceneHandler, animation_patcher_system};
 /// character controller system
 /// forked from the tnua shooter_like demo
 use avian3d::{math::AdjustPrecision, prelude::*};
@@ -55,6 +55,8 @@ pub(super) fn plugin(app: &mut App) {
         PostUpdate,
         apply_camera_controls.before(TransformSystem::TransformPropagate),
     );
+
+    app.add_systems(Update, animation_patcher_system);
 }
 
 fn setup_camera_and_lights(mut commands: Commands) {
