@@ -1,8 +1,9 @@
 use animating::{AnimationState, GltfSceneHandler};
 /// character controller system
 /// forked from the tnua shooter_like demo
-use avian3d::prelude::*;
+use avian3d::{math::AdjustPrecision, prelude::*};
 use bevy::{
+    input::mouse::MouseMotion,
     prelude::*,
     window::{CursorGrabMode, PrimaryWindow},
 };
@@ -10,7 +11,7 @@ use bevy::{
 use bevy_tnua::{
     TnuaAnimatingState, TnuaGhostSensor, TnuaObstacleRadar, TnuaToggle,
     control_helpers::{TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaCrouchEnforcerPlugin},
-    math::{Float, Vector3},
+    math::{AsF32, Float, Quaternion, Vector3},
     prelude::{TnuaBuiltinWalk, TnuaController, TnuaControllerPlugin},
 };
 use bevy_tnua::{builtins::TnuaBuiltinCrouch, math::float_consts, prelude::TnuaBuiltinJump};
@@ -50,6 +51,10 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(Startup, setup_player);
 
     app.add_systems(Update, grab_ungrab_mouse);
+    app.add_systems(
+        PostUpdate,
+        apply_camera_controls.before(TransformSystem::TransformPropagate),
+    );
 }
 
 fn setup_camera_and_lights(mut commands: Commands) {
@@ -173,4 +178,46 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     // forces based on it) and marked with the `TnuaGhostPlatform` component. These can then be
     // used as one-way platforms.
     cmd.insert(TnuaGhostSensor::default());
+}
+
+fn apply_camera_controls(
+    mut primary_window_query: Query<&mut Window, With<PrimaryWindow>>,
+    mut mouse_motion: EventReader<MouseMotion>,
+    mut player_character_query: Query<(&GlobalTransform, &mut ForwardFromCamera)>,
+    mut camera_query: Query<&mut Transform, With<Camera>>,
+) {
+    let mouse_controls_camera = primary_window_query
+        .single()
+        .is_ok_and(|w| !w.cursor_options.visible);
+
+    let total_delta = if mouse_controls_camera {
+        mouse_motion.read().map(|event| event.delta).sum()
+    } else {
+        mouse_motion.clear();
+        Vec2::ZERO
+    };
+
+    let Ok((player_transform, mut forward_from_camera)) = player_character_query.single_mut()
+    else {
+        return;
+    };
+
+    let yaw = Quaternion::from_rotation_y(-0.01 * total_delta.x.adjust_precision());
+    forward_from_camera.forward = yaw.mul_vec3(forward_from_camera.forward);
+
+    let pitch = 0.005 * total_delta.y.adjust_precision();
+    forward_from_camera.pitch_angle = (forward_from_camera.pitch_angle + pitch)
+        .clamp(-float_consts::FRAC_PI_2, float_consts::FRAC_PI_2);
+
+    // todo: make camera move smooth
+    for mut camera in camera_query.iter_mut() {
+        camera.translation =
+            player_transform.translation() + -5.0 * forward_from_camera.forward.f32() + Vec3::Y;
+        camera.look_to(forward_from_camera.forward.f32(), Vec3::Y);
+        let pitch_axis = camera.left();
+        camera.rotate_around(
+            player_transform.translation(),
+            Quat::from_axis_angle(*pitch_axis, forward_from_camera.pitch_angle.f32()),
+        );
+    }
 }
