@@ -187,12 +187,93 @@ pub fn animate_character(
         }) {
             // `Maintain` means that the same animation state continues from the previous frame, so
             // we shouldn't switch the animation.
-            TnuaAnimatingStateDirective::Maintain { state } => {}
+            TnuaAnimatingStateDirective::Maintain { state } => match state {
+                // Some animation states have paremeters, that we may want to use to control the
+                // animation (without necessarily replacing it). In this case - control the speed
+                //  of the animation based on the speed of the movement.
+                AnimationState::Running(speed)
+                | AnimationState::Crawling(speed)
+                | AnimationState::Climbing(speed) => {
+                    for (_, active_animation) in player.playing_animations_mut() {
+                        active_animation.set_speed(*speed as f32);
+                    }
+                }
+                // Jumping and dashing can be chained, we want to start a new jump/dash animation
+                // when one jump/dash is chained to another.
+                AnimationState::Jumping | AnimationState::Dashing => {
+                    if controller.action_flow_status().just_starting().is_some() {
+                        player.seek_all_by(0.0);
+                    }
+                }
+                // For other animations we don't have anything special to do - so we just let them
+                // continue.
+                _ => {}
+            },
             // `Alter` means that the character animation state has changed, and tus we need to
             // start a new animation. The actual implementation for each possiable animation state
             // is straightforward - we start the animation, set its speed if the state has a
             // variable speed, and set it to repeat if it's something that needs to repeat.
-            TnuaAnimatingStateDirective::Alter { old_state, state } => {}
+            TnuaAnimatingStateDirective::Alter { old_state, state } => {
+                player.stop_all();
+                match state {
+                    AnimationState::Standing => {
+                        player
+                            .start(handler.animations["Standing"])
+                            .set_speed(1.0)
+                            .repeat();
+                    }
+                    AnimationState::Running(speed) => {
+                        player
+                            .start(handler.animations["Running"])
+                            .set_speed(*speed as f32)
+                            .repeat();
+                    }
+                    AnimationState::Jumping => {
+                        player.start(handler.animations["Jumping"]).set_speed(2.0);
+                    }
+                    AnimationState::Falling => {
+                        player.start(handler.animations["Falling"]).set_speed(1.0);
+                    }
+                    AnimationState::Crouching => {
+                        player
+                            .start(handler.animations["Crouching"])
+                            .set_speed(1.0)
+                            .repeat();
+                    }
+                    AnimationState::Crawling(speed) => {
+                        player
+                            .start(handler.animations["Crawling"])
+                            .set_speed(*speed as f32)
+                            .repeat();
+                    }
+                    AnimationState::Dashing => {
+                        player.start(handler.animations["Dashing"]).set_speed(10.0);
+                    }
+                    AnimationState::KnockedBack => {
+                        player
+                            .start(handler.animations["KnockedBack"])
+                            .set_speed(1.0);
+                    }
+                    AnimationState::WallSliding => {
+                        player
+                            .start(handler.animations["WallSliding"])
+                            .set_speed(1.0)
+                            .repeat();
+                    }
+                    AnimationState::WallJumping => {
+                        player
+                            .start(handler.animations["WallJumping"])
+                            .set_speed(2.0);
+                    }
+                    AnimationState::Climbing(speed) => {
+                        player
+                            .start(handler.animations["VineClimbing"])
+                            .set_speed(*speed as f32)
+                            .repeat()
+                            .set_speed(1.0);
+                    }
+                }
+            }
         }
     }
 }
