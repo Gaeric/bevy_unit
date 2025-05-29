@@ -8,9 +8,9 @@ use bevy::{
 };
 
 use bevy_tnua::{
-    TnuaAnimatingState, TnuaObstacleRadar, TnuaToggle,
-    control_helpers::{TnuaBlipReuseAvoidance, TnuaCrouchEnforcerPlugin},
-    math::Float,
+    TnuaAnimatingState, TnuaGhostSensor, TnuaObstacleRadar, TnuaToggle,
+    control_helpers::{TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaCrouchEnforcerPlugin},
+    math::{Float, Vector3},
     prelude::{TnuaBuiltinWalk, TnuaController, TnuaControllerPlugin},
 };
 use bevy_tnua::{builtins::TnuaBuiltinCrouch, math::float_consts, prelude::TnuaBuiltinJump};
@@ -162,4 +162,15 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     cmd.insert(TnuaToggle::default());
 
     cmd.insert(TnuaAnimatingState::<AnimationState>::default());
+
+    // `TnuaCrouchEnforcer` can be used to prevent the character from standing up when obstructed.
+    cmd.insert(TnuaCrouchEnforcer::new(0.5 * Vector3::Y, |cmd| {
+        cmd.insert(TnuaAvian3dSensorShape(Collider::cylinder(0.5, 0.0)));
+    }));
+
+    // The ghost sensor is used for detecting ghost platforms - platforms configured in the physics
+    // backend to not contact with the character (or detect the contact but not apply physical
+    // forces based on it) and marked with the `TnuaGhostPlatform` component. These can then be
+    // used as one-way platforms.
+    cmd.insert(TnuaGhostSensor::default());
 }
