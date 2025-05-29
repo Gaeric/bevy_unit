@@ -2,11 +2,11 @@ use bevy::{log, platform::collections::HashMap, prelude::*};
 use bevy_tnua::{
     TnuaAction, TnuaAnimatingState, TnuaAnimatingStateDirective,
     builtins::{
-        TnuaBuiltinClimb, TnuaBuiltinCrouch, TnuaBuiltinDash, TnuaBuiltinKnockback,
-        TnuaBuiltinWallSlide,
+        TnuaBuiltinClimb, TnuaBuiltinClimbState, TnuaBuiltinCrouch, TnuaBuiltinDash,
+        TnuaBuiltinJumpState, TnuaBuiltinKnockback, TnuaBuiltinWallSlide,
     },
-    math::Float,
-    prelude::{TnuaBuiltinJump, TnuaController},
+    math::{Float, Vector3},
+    prelude::{TnuaBuiltinJump, TnuaBuiltinWalk, TnuaController},
 };
 
 #[derive(Component)]
@@ -110,19 +110,79 @@ pub fn animate_character(
             // action-specific data.
             match controller.action_name() {
                 // For builtin actions, prefer susing the `NAME` const from the `TnuaAction` trait.
-                Some(TnuaBuiltinJump::NAME) => {}
-                Some(TnuaBuiltinCrouch::NAME) => {}
+                Some(TnuaBuiltinJump::NAME) => {
+                    // In case of jump, we want to cast it so that we can get the concrete jump
+                    // state.
+                    let (_, jump_state) = controller
+                        .concrete_action::<TnuaBuiltinJump>()
+                        .expect("action name mismatch");
+                    // Depending on the state of the jump, we need to decide if we want to play the
+                    // jump animation or the fall animation.
+                    match jump_state {
+                        TnuaBuiltinJumpState::NoJump => continue,
+                        TnuaBuiltinJumpState::StartingJump { .. } => AnimationState::Jumping,
+                        TnuaBuiltinJumpState::SlowDownTooFastSlopeJump { .. } => {
+                            AnimationState::Jumping
+                        }
+                        TnuaBuiltinJumpState::MaintainingJump { .. } => AnimationState::Jumping,
+                        TnuaBuiltinJumpState::StoppedMaintainingJump => AnimationState::Jumping,
+                        TnuaBuiltinJumpState::FallSection => AnimationState::Falling,
+                    }
+                }
+                Some(TnuaBuiltinCrouch::NAME) => {
+                    // In case of crouch, we need the state of the basis to determine - based on
+                    // the speed - if the character is just crouching or also crawling.
+                    let Some((_, basis_state)) = controller.concrete_basis::<TnuaBuiltinWalk>()
+                    else {
+                        continue;
+                    };
 
+                    let speed =
+                        Some(basis_state.running_velocity.length()).filter(|speed| 0.01 < *speed);
+                    let is_crouching = basis_state.standing_offset.y < -0.4;
+                    match (speed, is_crouching) {
+                        (None, false) => AnimationState::Standing,
+                        (None, true) => AnimationState::Crouching,
+                        (Some(speed), false) => AnimationState::Running(0.1 * speed),
+                        (Some(speed), true) => AnimationState::Crawling(0.1 * speed),
+                    }
+                }
                 // For the dash, we don't need the internal state of the dash action to determine
                 // the action - so there is no need to downcast.
-                Some(TnuaBuiltinDash::NAME) => {}
-                Some(TnuaBuiltinKnockback::NAME) => {}
-                Some(TnuaBuiltinWallSlide::NAME) => {}
+                Some(TnuaBuiltinDash::NAME) => AnimationState::Dashing,
+                Some(TnuaBuiltinKnockback::NAME) => AnimationState::KnockedBack,
+                Some(TnuaBuiltinWallSlide::NAME) => AnimationState::WallSliding,
                 // todo
                 // Some("walljump") => AnimationState::WallJumping,
-                Some(TnuaBuiltinClimb::NAME) => {}
+                Some(TnuaBuiltinClimb::NAME) => {
+                    let Some((_, action_state)) = controller.concrete_action::<TnuaBuiltinClimb>()
+                    else {
+                        continue;
+                    };
+                    let TnuaBuiltinClimbState::Climbing { climbing_velocity } = action_state else {
+                        continue;
+                    };
+                    AnimationState::Climbing(0.3 * climbing_velocity.dot(Vector3::Y))
+                }
                 Some(other) => panic!("Unknown action {other}"),
-                None => {}
+                None => {
+                    // If there is no action going on, we'll base the animation on the state of the
+                    // basis.
+                    let Some((_, basis_state)) = controller.concrete_basis::<TnuaBuiltinWalk>()
+                    else {
+                        continue;
+                    };
+                    if basis_state.standing_on_entity().is_none() {
+                        AnimationState::Falling
+                    } else {
+                        let speed = basis_state.running_velocity.length();
+                        if 0.01 < speed {
+                            AnimationState::Running(0.1 * speed)
+                        } else {
+                            AnimationState::Standing
+                        }
+                    }
+                }
             }
         }) {
             // `Maintain` means that the same animation state continues from the previous frame, so
