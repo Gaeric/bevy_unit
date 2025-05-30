@@ -79,6 +79,15 @@ pub struct ObstacleQueryHelper {
     pub climbable: Has<Climable>,
 }
 
+const CROUCH_BUTTONS_2D: &[KeyCode] = &[
+    KeyCode::ControlLeft,
+    KeyCode::ControlRight,
+    KeyCode::ArrowDown,
+    KeyCode::KeyS,
+];
+
+const CROUCH_BUTOONS_3D: &[KeyCode] = &[KeyCode::ControlLeft, KeyCode::ControlRight];
+
 pub fn apply_character_control(
     keyboard: Res<ButtonInput<KeyCode>>,
     // todo
@@ -173,6 +182,24 @@ pub fn apply_character_control(
                     .adjust_precision()
             } else {
                 screen_space_direction
+            };
+
+            let jump = match (config.dimensionality, is_climbing) {
+                (Dimensionality::Dim2, true) => keyboard.any_pressed([KeyCode::Space]),
+                (Dimensionality::Dim2, false) => {
+                    keyboard.any_pressed([KeyCode::Space, KeyCode::ArrowUp, KeyCode::KeyW])
+                }
+                (Dimensionality::Dim3, _) => keyboard.any_pressed([KeyCode::Space]),
+            };
+
+            let dash = keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::AltRight]);
+            let turn_in_place = forward_from_camera.is_none()
+                && keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
+
+            let crouch_buttons = match (config.dimensionality, is_climbing) {
+                (Dimensionality::Dim2, true) => CROUCH_BUTOONS_3D.iter().copied(),
+                (Dimensionality::Dim2, false) => CROUCH_BUTTONS_2D.iter().copied(),
+                (Dimensionality::Dim3, _) => CROUCH_BUTOONS_3D.iter().copied(),
             };
         }
     }
