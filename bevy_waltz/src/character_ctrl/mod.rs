@@ -9,7 +9,7 @@ use bevy::{
 };
 
 use bevy_tnua::{
-    TnuaAnimatingState, TnuaGhostSensor, TnuaObstacleRadar, TnuaToggle,
+    TnuaAnimatingState, TnuaGhostSensor, TnuaObstacleRadar, TnuaToggle, TnuaUserControlsSystemSet,
     control_helpers::{TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaCrouchEnforcerPlugin},
     math::{AsF32, Float, Quaternion, Vector3},
     prelude::{TnuaBuiltinWalk, TnuaController, TnuaControllerPlugin},
@@ -23,7 +23,7 @@ mod level_switch;
 
 use ctrl_systems::{
     CharacterMotionConfig, Dimensionality, FallingThroughControlScheme, ForwardFromCamera,
-    info_system::*,
+    apply_character_control, info_system::*,
 };
 use level_switch::{IsPlayer, LevelSwitchPlugin, jungle_gym};
 
@@ -56,6 +56,10 @@ pub(super) fn plugin(app: &mut App) {
         apply_camera_controls.before(TransformSystem::TransformPropagate),
     );
 
+    app.add_systems(
+        FixedUpdate,
+        apply_character_control.in_set(TnuaUserControlsSystemSet),
+    );
     app.add_systems(Update, animation_patcher_system);
 }
 
