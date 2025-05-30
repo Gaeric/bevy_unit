@@ -1,3 +1,4 @@
+use avian3d::math::AdjustPrecision;
 use bevy::ecs::query::QueryData;
 use bevy::prelude::*;
 use bevy::{
@@ -6,8 +7,10 @@ use bevy::{
 };
 use bevy_tnua::control_helpers::{
     TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaSimpleAirActionsCounter,
+    TnuaSimpleFallThroughPlatformsHelper,
 };
-use bevy_tnua::{TnuaGhostSensor, TnuaObstacleRadar, TnuaProximitySensor};
+use bevy_tnua::math::AsF32;
+use bevy_tnua::{TnuaAction, TnuaGhostSensor, TnuaObstacleRadar, TnuaProximitySensor};
 use bevy_tnua::{
     builtins::{
         TnuaBuiltinClimb, TnuaBuiltinCrouch, TnuaBuiltinDash, TnuaBuiltinKnockback,
@@ -101,6 +104,11 @@ pub fn apply_character_control(
         // manipulate the proximity sensor.
         &TnuaGhostSensor,
         // This is and helper for implementing one-way platforms.
+        &mut TnuaSimpleFallThroughPlatformsHelper,
+        // This is an helper for implementing air actions. It counts all the air actions using a
+        // single counter, so it cannot be used to implement, for example, one double jump and one
+        // air dash per jump - only a single "pool" of air action "energy" shared by all air
+        // actions.
         &mut TnuaSimpleAirActionsCounter,
         // This is used in the shooter-like demo to control the forward direction of the
         // character.
@@ -120,7 +128,52 @@ pub fn apply_character_control(
     // climbable)
     obstacle_query: Query<ObstacleQueryHelper>,
 ) {
-
     // todo: egui
 
+    for (
+        config,
+        mut controller,
+        mut crouch_enforcer,
+        mut sensor,
+        ghost_sensor,
+        mut fall_through_helper,
+        mut air_actions_counter,
+        forward_from_camera,
+        obstacle_radar,
+        mut blip_reuse_avoidance,
+    ) in query.iter_mut()
+    {
+        // This part is just keyboard input processing. In a real game this would probably be done
+        // with a third party plugin.
+
+        let mut direction = Vector3::ZERO;
+
+        let is_climbing = controller.action_name() == Some(TnuaBuiltinClimb::NAME);
+
+        if config.dimensionality == Dimensionality::Dim3 || is_climbing {
+            if keyboard.any_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) {
+                direction -= Vector3::Z;
+            }
+            if keyboard.any_pressed([KeyCode::ArrowDown, KeyCode::KeyS]) {
+                direction += Vector3::Z;
+            }
+            if keyboard.any_pressed([KeyCode::ArrowLeft, KeyCode::KeyA]) {
+                direction -= Vector3::X;
+            }
+            if keyboard.any_pressed([KeyCode::ArrowRight, KeyCode::KeyD]) {
+                direction += Vector3::X;
+            }
+
+            let screen_space_direction = direction.clamp_length_max(1.0);
+
+            let direction = if let Some(forward_from_camera) = forward_from_camera {
+                Transform::default()
+                    .looking_to(forward_from_camera.forward.f32(), Vec3::Y)
+                    .transform_point(screen_space_direction.f32())
+                    .adjust_precision()
+            } else {
+                screen_space_direction
+            };
+        }
+    }
 }
