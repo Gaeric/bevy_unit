@@ -219,6 +219,53 @@ pub fn apply_character_control(
             // blocked - e.g. because we've just finished an action one them and we don't want to
             // reinitiate the action.
             blip_reuse_avoidance.update(controller.as_ref(), obstacle_radar);
+
+            // Here we will handle one-way platforms. It looks long and complex, but it's actual
+            // several schemes with observable changes in behavior, and each implementation is rather
+            // short and simple.
+            let crouch;
+            match config.falling_through {
+                // With this scheme, the player cannot make their character fall through by pressing
+                // the crouch button - the platforms are jump-through only.
+                FallingThroughControlScheme::JumpThroughOnly => {
+                    crouch = crouch_pressed;
+                    // To achieve this, we simply take the first platform detected by the ghost sensor,
+                    // and treat it like a "real" platform.
+                    for ghost_platform in ghost_sensor.iter() {
+                        // Because the ghost platforms don't interact with the character through the
+                        // physics engine, and because the ray that detected them starts from the
+                        // cneter of the character, we ussually want to only look at platforms that
+                        // are at least a certain distance lower than that - to limit the point from
+                        // which the character climbs when they dcollide with the platform.
+                        if config.one_way_platforms_min_proximity <= ghost_platform.proximity {
+                            // By overriding the sensor's output, we make it pretend the ghost platform
+                            // is a real one - which makes Tnua make the character stand on it even
+                            // though the physics engine will not consider them colliding with each
+                            // other.
+                            sensor.output = Some(ghost_platform.clone());
+                            break;
+                        }
+                    }
+                }
+                // With this sheme, the player can drop down one-way platforms by pressing the crouch
+                // button. Because it dones not use `TnuaSimpleFallThroughPlatformsHelper`, it has
+                // certain limitations:
+                //
+                // 1. If the player releases the crouch button before the character has passed a
+                // certain distance it'll climb back up on the platform.
+                // 2. If a ghost platform is too close above another platform (eigher ghost or solid),
+                //    such that when the character floats above the lower platform the higher platform
+                //    is detected at above-minimal proximity, the character will climb up to the higher
+                //    platform - even after explicitly dropping down from it to the lower one.
+                //
+                // Both limitations are greatly affected by the min proximity, but setting it tightly
+                // to minimize them may cause the character to sometimes fall through a ghost platform
+                // without explicitly being told to. To properly overcome these limitations - use
+                // `TnuaSimpleFallThroughPlatformsHelper`.
+                FallingThroughControlScheme::WithoutHelper => {}
+                FallingThroughControlScheme::SingleFall => {}
+                FallingThroughControlScheme::KeepFalling => {}
+            }
         }
     }
 }
