@@ -201,6 +201,24 @@ pub fn apply_character_control(
                 (Dimensionality::Dim2, false) => CROUCH_BUTTONS_2D.iter().copied(),
                 (Dimensionality::Dim3, _) => CROUCH_BUTOONS_3D.iter().copied(),
             };
+            let crouch_pressed = keyboard.any_pressed(crouch_buttons);
+
+            // todo: just_pressed
+            // let crouch_just_pressed = just_pressed.crouch;
+            //
+
+            // This needs to be called once per frame. It lets the air actions counter know about the
+            // air status of the character. Specifically:
+            // * Is it grounded or is it midair
+            // * Did any air action just start?
+            // * Did any air action just finished?
+            // * Is any air action currently ongoing?
+            air_actions_counter.update(controller.as_ref());
+
+            // This also needs to be called once per frame. It checks which obstacles needs to be
+            // blocked - e.g. because we've just finished an action one them and we don't want to
+            // reinitiate the action.
+            blip_reuse_avoidance.update(controller.as_ref(), obstacle_radar);
         }
     }
 }
