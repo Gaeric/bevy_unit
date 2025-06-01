@@ -306,7 +306,36 @@ pub fn apply_character_control(
                 // * If the player drops from a ghost platform to a platform too close to it - the
                 //   character will not climb back up. The player can still climb back up by jumping,
                 //   of course.
-                FallingThroughControlScheme::SingleFall => {}
+                FallingThroughControlScheme::SingleFall => {
+                    // The fall through helper is operated by creating an handler.
+                    let mut handler = fall_through_helper.with(
+                        &mut sensor,
+                        ghost_sensor,
+                        config.one_way_platforms_min_proximity,
+                    );
+                    if crouch_pressed {
+                        // Use 'try_falling` to fall though the first ghost platform. It'll return
+                        // `true` if there really was a ghost platform to fall through - in which case
+                        // we want to cancel the crouch. If there was no ghost platform to fall
+                        // throuch, it returns `false` - in which case we do want to crouch.
+                        //
+                        // The boolean argument to `try_falling` determines if the character should
+                        // crouch button, we pass `true` so that the fall can begin. But in the
+                        // following frames we pass `false` so that if there are more ghost platforms
+                        // bellow the character will not fall through them.
+                        todo!("just pressed cache todo")
+                        // crouch = !handler.try_falling(crouch_just_pressed);
+                    } else {
+                        crouch = false;
+                        // Use 'dont_fall` to not fall. If there are platforms that the character
+                        // already stared falling through, it'll continue the fall through and not
+                        // climb back up (like it would with the `WithoutHelper` scheme). Otherwise, it
+                        // will just copy the first ghost platform (above the min proximity) from the
+                        // ghost sensor to the proximity sensor.
+                        handler.dont_fall();
+                    }
+                }
+
                 FallingThroughControlScheme::KeepFalling => {}
             }
         }
