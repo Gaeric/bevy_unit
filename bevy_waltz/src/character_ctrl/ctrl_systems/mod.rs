@@ -262,7 +262,50 @@ pub fn apply_character_control(
                 // to minimize them may cause the character to sometimes fall through a ghost platform
                 // without explicitly being told to. To properly overcome these limitations - use
                 // `TnuaSimpleFallThroughPlatformsHelper`.
-                FallingThroughControlScheme::WithoutHelper => {}
+                FallingThroughControlScheme::WithoutHelper => {
+                    // With this sheme we only care about the first ghost platform the ghost sensor
+                    // finds with a proximity higher than the defined minimum. We either treat it as a
+                    // real platform, or ignore it and any other platform the sensor has found.
+                    let relevant_platform = ghost_sensor.iter().find(|ghost_platform| {
+                        config.one_way_platforms_min_proximity <= ghost_platform.proximity
+                    });
+
+                    if crouch_pressed {
+                        // If there is a ghost platform, it means the player wants to fall through it -
+                        // so we "cancel" the crouch, and we don't pass any ghost platform to the
+                        // proximity sensor (because we want to chracter to fall through)
+                        //
+                        // If there is no ghost platform, it means the character is standing on a real
+                        // platform - so we make it crouch. We don't pass any ghost platform to the
+                        // proximity sensor here either - because there aren't any.
+                        crouch = relevant_platform.is_none();
+                    } else {
+                        crouch = false;
+                        if let Some(ghost_platform) = relevant_platform {
+                            // Ghost platforms can only be detected _before_ fully solid platforms, so
+                            // if we detect one we can safely replace the proximity sensor's output
+                            // with it.
+                            //
+                            //  Do take care to only do this when there is a ghost platform though -
+                            // otherwise it could replace an actual solid platform detection with a
+                            // `None`.
+                            sensor.output = Some(ghost_platform.clone());
+                        }
+                    }
+                }
+
+                // This shceme uses `TnuaSimpleFallThroughPlatformsHelper` to properly handle fall
+                // though:
+                //
+                // * Pressing the crouch button while tanding on a ghost platform will make the
+                //   character fall through it.
+                // * Even if the button is released immediately, the character will not climb back up.
+                //   It'll continue the fall.
+                // * Even if the button is held and there is another ghost platform below, the
+                //   character will only drop one "layer" of ghost platforms.
+                // * If the player drops from a ghost platform to a platform too close to it - the
+                //   character will not climb back up. The player can still climb back up by jumping,
+                //   of course.
                 FallingThroughControlScheme::SingleFall => {}
                 FallingThroughControlScheme::KeepFalling => {}
             }
