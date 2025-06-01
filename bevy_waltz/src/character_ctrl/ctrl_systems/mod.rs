@@ -5,6 +5,7 @@ use bevy::{
     ecs::{component::Component, system::ResMut},
     input::{ButtonInput, keyboard::KeyCode},
 };
+use bevy_tnua::builtins::TnuaBuiltinCrouchState;
 use bevy_tnua::control_helpers::{
     TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaSimpleAirActionsCounter,
     TnuaSimpleFallThroughPlatformsHelper,
@@ -139,6 +140,8 @@ pub fn apply_character_control(
 ) {
     // todo: egui
 
+    trace!("apply character control");
+
     for (
         config,
         mut controller,
@@ -152,6 +155,8 @@ pub fn apply_character_control(
         mut blip_reuse_avoidance,
     ) in query.iter_mut()
     {
+        trace!("control character motion");
+
         // This part is just keyboard input processing. In a real game this would probably be done
         // with a third party plugin.
 
@@ -354,7 +359,46 @@ pub fn apply_character_control(
                         handler.dont_fall()
                     }
                 }
-            }
+            };
+
+            // `TnuaController::concrete_action` can be used to determine if an action is currently
+            // running, and query its status. Here, we use it to check if the character is
+            // currently crouching, so that we can limit its speed.
+            let speed_factor =
+                if let Some((_, state)) = controller.concrete_action::<TnuaBuiltinCrouch>() {
+                    // If the crouch is finished (last stages of standing up) we don't need to slow the
+                    // character down.
+                    if matches!(state, TnuaBuiltinCrouchState::Rising) {
+                        1.0
+                    } else {
+                        0.2
+                    }
+                } else {
+                    1.0
+                };
+
+            //  The basis is Tnua's most fundamental control command, governing over the character's
+            // regular movement. The basis (and, to some extent, the actions as well) contains both
+            // configuration - which in this case we copy over from `config.walk` - and controls like
+            // `desired_velocity` or `desired_forward` which we compute here based on the current
+            // frame's input
+
+            controller.basis(TnuaBuiltinWalk {
+                desired_velocity: if turn_in_place {
+                    Vector3::ZERO
+                } else {
+                    direction * speed_factor * config.speed
+                },
+                desired_forward: if let Some(forward_from_camera) = forward_from_camera {
+                    // With shooters, we want the character model to follow the camera.
+                    Dir3::new(forward_from_camera.forward.f32()).ok()
+                } else {
+                    // For platformers, we only want to change direction when the charcter tries to
+                    // moves (or when the player explicitly wants to set the direction)
+                    Dir3::new(direction.f32()).ok()
+                },
+                ..config.walk.clone()
+            });
         }
     }
 }

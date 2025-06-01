@@ -10,7 +10,10 @@ use bevy::{
 
 use bevy_tnua::{
     TnuaAnimatingState, TnuaGhostSensor, TnuaObstacleRadar, TnuaToggle, TnuaUserControlsSystemSet,
-    control_helpers::{TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaCrouchEnforcerPlugin},
+    control_helpers::{
+        TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaCrouchEnforcerPlugin,
+        TnuaSimpleAirActionsCounter, TnuaSimpleFallThroughPlatformsHelper,
+    },
     math::{AsF32, Float, Quaternion, Vector3},
     prelude::{TnuaBuiltinWalk, TnuaController, TnuaControllerPlugin},
 };
@@ -184,6 +187,13 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     // forces based on it) and marked with the `TnuaGhostPlatform` component. These can then be
     // used as one-way platforms.
     cmd.insert(TnuaGhostSensor::default());
+
+    // This helper is used to operate the ghost sensor and ghost platforms and implement
+    // fall-through behavior where the player can intentionally fall through a one-way platform.
+    cmd.insert(TnuaSimpleFallThroughPlatformsHelper::default());
+
+    // This helper keeps track of air actions like jumps or air dashes.
+    cmd.insert(TnuaSimpleAirActionsCounter::default());
 }
 
 fn apply_camera_controls(
