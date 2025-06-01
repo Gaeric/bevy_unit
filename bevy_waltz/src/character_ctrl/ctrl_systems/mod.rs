@@ -336,7 +336,24 @@ pub fn apply_character_control(
                     }
                 }
 
-                FallingThroughControlScheme::KeepFalling => {}
+                // This scheme is similar to `SingleFall`, with the exception that as log as the
+                // crouch button is pressed the character will keep falling through hghost platforms.
+                FallingThroughControlScheme::KeepFalling => {
+                    let mut handler = fall_through_helper.with(
+                        &mut sensor,
+                        ghost_sensor,
+                        config.one_way_platforms_min_proximity,
+                    );
+
+                    if crouch_pressed {
+                        // This is done by passing `true` to `try_falling`, allowing it to keep falling
+                        // through new platforms even if the button was not _just_ pressed.
+                        crouch = !handler.try_falling(true);
+                    } else {
+                        crouch = false;
+                        handler.dont_fall()
+                    }
+                }
             }
         }
     }
