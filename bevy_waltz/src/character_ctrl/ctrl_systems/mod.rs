@@ -11,6 +11,7 @@ use bevy_tnua::control_helpers::{
     TnuaSimpleFallThroughPlatformsHelper,
 };
 use bevy_tnua::math::AsF32;
+use bevy_tnua::radar_lens::TnuaRadarLens;
 use bevy_tnua::{TnuaAction, TnuaGhostSensor, TnuaObstacleRadar, TnuaProximitySensor};
 use bevy_tnua::{
     builtins::{
@@ -399,6 +400,26 @@ pub fn apply_character_control(
                 },
                 ..config.walk.clone()
             });
+
+            let radar_lens = TnuaRadarLens::new(obstacle_radar, &spatial_ext);
+
+            let already_sliding_on = controller
+                .concrete_action::<TnuaBuiltinWallSlide>()
+                .and_then(|(action, _)| {
+                    action
+                        .wall_entity
+                        .filter(|entity| obstacle_radar.has_blip(*entity))
+                });
+
+            let already_climbing_on =
+                controller
+                    .concrete_action::<TnuaBuiltinClimb>()
+                    .and_then(|(action, _)| {
+                        let entity = action
+                            .climbable_entity
+                            .filter(|entity| obstacle_radar.has_blip(*entity))?;
+                        Some((entity, action.clone()))
+                    });
         }
     }
 }
