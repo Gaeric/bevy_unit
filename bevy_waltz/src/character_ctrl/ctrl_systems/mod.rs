@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use avian3d::math::AdjustPrecision;
 use bevy::ecs::query::QueryData;
 use bevy::prelude::*;
@@ -11,7 +13,7 @@ use bevy_tnua::control_helpers::{
     TnuaSimpleFallThroughPlatformsHelper,
 };
 use bevy_tnua::math::AsF32;
-use bevy_tnua::radar_lens::TnuaRadarLens;
+use bevy_tnua::radar_lens::{TnuaBlipSpatialRelation, TnuaRadarLens};
 use bevy_tnua::{TnuaAction, TnuaGhostSensor, TnuaObstacleRadar, TnuaProximitySensor};
 use bevy_tnua::{
     builtins::{
@@ -420,6 +422,170 @@ pub fn apply_character_control(
                             .filter(|entity| obstacle_radar.has_blip(*entity))?;
                         Some((entity, action.clone()))
                     });
+
+            let mut walljump_candidate = None;
+
+            'blips_loop: for blip in radar_lens.iter_blips() {
+                if !blip_reuse_avoidance.should_avoid(blip.entity())
+                    && obstacle_query
+                        .get(blip.entity())
+                        .expect("ObstacleQueryHelper has nothing that could fail when missing")
+                        .climbable
+                {
+                    if let Some((climbable_entity, action)) = already_climbing_on.as_ref() {
+                        if *climbable_entity != blip.entity() {
+                            continue 'blips_loop;
+                        }
+
+                        let dot_initiation = direction.dot(action.initiation_direction);
+                        let initiation_direction = if 0.5 < dot_initiation {
+                            action.initiation_direction
+                        } else {
+                            Vector3::ZERO
+                        };
+
+                        if initiation_direction == Vector3::ZERO {
+                            let right_left = screen_space_direction.dot(Vector3::X);
+                            if 0.5 <= right_left.abs() {
+                                continue 'blips_loop;
+                            }
+                        }
+
+                        let mut action = TnuaBuiltinClimb {
+                            climbable_entity: Some(blip.entity()),
+                            anchor: blip.closest_point().get(),
+                            desired_climb_velocity: config.climb_speed
+                                * screen_space_direction.dot(Vector3::NEG_Z)
+                                * Vector3::Y,
+                            initiation_direction,
+                            desired_vec_to_anchor: action.desired_vec_to_anchor,
+                            desired_forward: action.desired_forward,
+                            ..config.climb.clone()
+                        };
+
+                        const LOOK_ABOVE_OR_BELOW: Float = 5.0;
+                        match action
+                            .desired_climb_velocity
+                            .dot(Vector3::Y)
+                            .partial_cmp(&0.0)
+                            .unwrap()
+                        {
+                            Ordering::Less => {
+                                if controller.is_airborne().unwrap() {
+                                    let extent = blip.probe_extent_from_closest_point(
+                                        -Dir3::Y,
+                                        LOOK_ABOVE_OR_BELOW,
+                                    );
+                                    if extent < 0.9 * LOOK_ABOVE_OR_BELOW {
+                                        action.hard_stop_down =
+                                            Some(blip.closest_point().get() - extent * Vector3::Y);
+                                    }
+                                } else {
+                                    if initiation_direction == Vector3::ZERO {
+                                        continue 'blips_loop;
+                                    } else {
+                                        action.desired_climb_velocity = Vector3::ZERO;
+                                    }
+                                }
+                            }
+                            Ordering::Equal => {}
+                            // Climbing up
+                            Ordering::Greater => {
+                                let extent = blip
+                                    .probe_extent_from_closest_point(Dir3::Y, LOOK_ABOVE_OR_BELOW);
+                                if extent < 0.9 * LOOK_ABOVE_OR_BELOW {
+                                    action.hard_stop_up =
+                                        Some(blip.closest_point().get() + extent * Vector3::Y);
+                                }
+                            }
+                        }
+                        controller.action(action);
+                    } else if let TnuaBlipSpatialRelation::Aeside(blip_direction) =
+                        blip.spatial_relation(0.5)
+                    {
+                        if 0.5 < direction.dot(blip_direction.adjust_precision()) {
+                            let direction_to_anchor = match config.dimensionality {
+                                Dimensionality::Dim2 => Vector3::ZERO,
+                                Dimensionality::Dim3 => -blip
+                                    .normal_from_closest_point()
+                                    .reject_from_normalized(Vector3::Y),
+                            };
+
+                            controller.action(TnuaBuiltinClimb {
+                                climbable_entity: Some(blip.entity()),
+                                anchor: blip.closest_point().get(),
+                                desired_vec_to_anchor: 0. * direction_to_anchor,
+                                desired_forward: Dir3::new(direction_to_anchor.f32()).ok(),
+                                initiation_direction: direction.normalize_or_zero(),
+                                ..config.climb.clone()
+                            });
+                        }
+                    }
+                }
+                if !blip.is_interactable() {
+                    continue;
+                }
+
+                match blip.spatial_relation(0.5) {
+                    TnuaBlipSpatialRelation::Invalid => {}
+                    TnuaBlipSpatialRelation::Above => {}
+                    TnuaBlipSpatialRelation::Below => {}
+                    TnuaBlipSpatialRelation::Aeside(blip_direction) => {
+                        let dot_threshold = if already_sliding_on == Some(blip.entity()) {
+                            -0.1
+                        } else {
+                            0.0
+                        };
+
+                        if controller.is_airborne().unwrap() {
+                            let dot_direction = direction.dot(blip_direction.adjust_precision());
+                            if dot_direction <= -0.7 {
+                                if let Some((best_entity, best_dot, best_direction)) =
+                                    walljump_candidate.as_mut()
+                                {
+                                    if *best_dot < dot_direction {
+                                        *best_entity = blip.entity();
+                                        *best_dot = dot_direction;
+                                        *best_direction = blip_direction;
+                                    }
+                                } else {
+                                    walljump_candidate =
+                                        Some((blip.entity(), dot_direction, blip_direction));
+                                }
+                            }
+
+                            if dot_threshold < dot_direction
+                                && 0.8 < blip.flat_wall_score(Dir3::Y, &[-1.0, 1.0])
+                            {
+                                let Ok(normal) = Dir3::new(blip.normal_from_closest_point().f32())
+                                else {
+                                    continue;
+                                };
+
+                                controller.action(TnuaBuiltinWallSlide {
+                                    wall_entity: Some(blip.entity()),
+                                    contact_point_with_wall: blip.closest_point().get(),
+                                    normal,
+                                    force_forward: Some(blip_direction),
+                                    maintain_distance: Some(0.7),
+                                    ..config.wall_slide.clone()
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            let walljump_candidate =
+                walljump_candidate.map(|(entity, _, blip_direction)| (entity, -blip_direction));
+
+            if crouch {
+                // Crouching is an action. We either feed it or we don't - other than that there is
+                // nothing to set from the current frame's input. We do pass it through the crouch
+                // enforcer though, which makes sure the character does not stand up if below an
+                // obstacle.
+                controller.action(crouch_enforcer.enforcing(config.crouch.clone()));
+            }
         }
     }
 }
