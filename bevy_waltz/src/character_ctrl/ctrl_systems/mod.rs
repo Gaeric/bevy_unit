@@ -586,6 +586,55 @@ pub fn apply_character_control(
                 // obstacle.
                 controller.action(crouch_enforcer.enforcing(config.crouch.clone()));
             }
+
+            if jump {
+                let action_flow_status = controller.action_flow_status().clone();
+                if matches!(
+                    action_flow_status.ongoing(),
+                    Some(TnuaBuiltinJump::NAME | "walljump")
+                ) {
+                    controller.prolong_action();
+                } else if let Some((_, walljump_direction)) = walljump_candidate {
+                    controller.named_action(
+                        "walljump",
+                        TnuaBuiltinJump {
+                            vertical_displacement: Some(
+                                2.0 * walljump_direction.adjust_precision(),
+                            ),
+                            allow_in_air: true,
+                            takeoff_extra_gravity: 3.0 * config.jump.takeoff_extra_gravity,
+                            takeoff_above_velocity: 0.0,
+                            force_forward: Some(-walljump_direction),
+                            ..config.jump.clone()
+                        },
+                    );
+                } else {
+                    let current_action_name = controller.action_name();
+                    controller.action(TnuaBuiltinJump {
+                        // Jumping, like crouching, is an action that we either feed or don't. However,
+                        // because it can be used in midair, we want to set its `allow_in_air`. The air
+                        // counter helps us with that.
+                        //
+                        // The air actions counter is used to decide if the action is allowed midair by
+                        // determining how many actions were performed since the last time the character
+                        // was considered "grounded" - including the first jump (if it was done from the
+                        // ground) or the initiation of a free fall.
+                        //
+                        // `air_count_for` needs the name of the action to be performed (in this case
+                        // `TnuaBuiltinJump::NAME`) because if the player is still holding the jump button,
+                        // we want it to be considered as the same air action number. So, if the player
+                        // performs an air jump, before the air jump `air_count_for` will return 1 for any
+                        // action, but after it it'll return 1 only for `TnuaBuiltinJump::NAME`
+                        // (maintaining the jump) and 2 for any other action. Of course, if the player
+                        // releases the button and press it again it'll return 2.
+                        allow_in_air: air_actions_counter.air_count_for(TnuaBuiltinJump::NAME)
+                            <= config.actions_in_air
+                            // we also want to be able to jump from a climb
+                            || current_action_name == Some(TnuaBuiltinClimb::NAME),
+                        ..config.jump.clone()
+                    });
+                }
+            }
         }
     }
 }
