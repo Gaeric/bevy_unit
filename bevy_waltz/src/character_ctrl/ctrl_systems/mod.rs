@@ -635,6 +635,32 @@ pub fn apply_character_control(
                     });
                 }
             }
+
+            if dash {
+                controller.action(TnuaBuiltinDash {
+                    // Dashing is also an action, but because it has directions we need to provide said
+                    // directions. `displacement` is a vector that determines where the jump will bring
+                    // us. Note that even after reaching the displacement, the character may still have
+                    // some leftover velocity (configurable with the other parameters of the action)
+                    //
+                    // The displacement is "frozen" when the action starts - user code does not have to
+                    // worry about storing the original direction.
+                    displacement: direction.normalize() * config.dash_distance,
+                    // When set, the `desired_forward` of the dash action "overrides" the
+                    // `desired_forward` of the walk basis. Like the displacement, it gets "frozen" -
+                    // allowing to easily maintain a forward direction during the dash.
+                    desired_forward: if forward_from_camera.is_none() {
+                        Dir3::new(direction.f32()).ok()
+                    } else {
+                        // For shooters, we want to allow rotating mid-dash if the player moves the
+                        // mouse.
+                        None
+                    },
+                    allow_in_air: air_actions_counter.air_count_for(TnuaBuiltinDash::NAME)
+                        <= config.actions_in_air,
+                    ..config.dash.clone()
+                });
+            }
         }
     }
 }
