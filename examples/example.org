@@ -23,9 +23,15 @@
 * Crates
   本节记录一些crate的笔记
 ** avian
+   默认使用avian作为物理引擎
 ** tnua
+   使用对角色的控制的封装和处理
+
+   注意目前在foxtrot中发现，使用tnua控制时，角色的阴影发生形变
 ** bevy_enhandced_input
-** dolly
+   提供keyboard和gamepad到控制系统的映射的封装
+** bevy_dolly
+   这是一个平滑相机移动的crate，但是目前不确定是否需要在tps中使用他
 * Archive
 * Plugins
 * Reference
