@@ -15,7 +15,18 @@
    - programmer:
    - artists:
    - design:
-
+** 3c system
+   character-control-camera系统
+*** character部分
+    move
+*** control
+    control的反馈的过程非常重要
+*** camera
+    关注主观感受
+** ai system
+*** navigation
+**** world describle
+     walkable area
 * Bevy Functional
 ** reference
 ** Bevy
