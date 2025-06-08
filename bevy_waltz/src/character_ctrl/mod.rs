@@ -65,7 +65,7 @@ pub(super) fn plugin(app: &mut App) {
     );
     app.add_systems(Update, animation_patcher_system);
     // todo
-    // app.add_systems(Update, animate_character);
+    app.add_systems(Update, animate_character);
 }
 
 fn setup_camera_and_lights(mut commands: Commands) {
