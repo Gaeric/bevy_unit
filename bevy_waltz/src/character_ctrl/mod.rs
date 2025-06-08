@@ -35,6 +35,7 @@ pub(super) fn plugin(app: &mut App) {
     app.add_plugins(TnuaAvian3dPlugin::new(FixedUpdate));
     app.add_plugins(TnuaControllerPlugin::new(FixedUpdate));
     app.add_plugins(TnuaCrouchEnforcerPlugin::new(FixedUpdate));
+    app.add_plugins(PhysicsDebugPlugin::default());
 
     app.add_systems(Update, character_control_radar_visualization_system);
 
