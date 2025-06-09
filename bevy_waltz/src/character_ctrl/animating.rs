@@ -218,56 +218,56 @@ pub fn animate_character(
                 match state {
                     AnimationState::Standing => {
                         player
-                            .start(handler.animations["Idle"])
+                            .start(handler.animations["idle"])
                             .set_speed(1.0)
                             .repeat();
                     }
                     AnimationState::Running(speed) => {
                         player
-                            .start(handler.animations["Walk"])
+                            .start(handler.animations["walk"])
                             .set_speed(*speed as f32)
                             .repeat();
                     }
                     AnimationState::Jumping => {
-                        player.start(handler.animations["Run"]).set_speed(2.0);
+                        player.start(handler.animations["run"]).set_speed(2.0);
                     }
                     AnimationState::Falling => {
-                        player.start(handler.animations["Run"]).set_speed(1.0);
+                        player.start(handler.animations["run"]).set_speed(1.0);
                     }
                     AnimationState::Crouching => {
                         player
-                            .start(handler.animations["Run"])
+                            .start(handler.animations["run"])
                             .set_speed(1.0)
                             .repeat();
                     }
                     AnimationState::Crawling(speed) => {
                         player
-                            .start(handler.animations["Run"])
+                            .start(handler.animations["run"])
                             .set_speed(*speed as f32)
                             .repeat();
                     }
                     AnimationState::Dashing => {
-                        player.start(handler.animations["Run"]).set_speed(10.0);
+                        player.start(handler.animations["run"]).set_speed(10.0);
                     }
                     AnimationState::KnockedBack => {
                         player
-                            .start(handler.animations["Run"])
+                            .start(handler.animations["run"])
                             .set_speed(1.0);
                     }
                     AnimationState::WallSliding => {
                         player
-                            .start(handler.animations["Run"])
+                            .start(handler.animations["run"])
                             .set_speed(1.0)
                             .repeat();
                     }
                     AnimationState::WallJumping => {
                         player
-                            .start(handler.animations["Run"])
+                            .start(handler.animations["run"])
                             .set_speed(2.0);
                     }
                     AnimationState::Climbing(speed) => {
                         player
-                            .start(handler.animations["Run"])
+                            .start(handler.animations["run"])
                             .set_speed(*speed as f32)
                             .repeat()
                             .set_speed(1.0);
