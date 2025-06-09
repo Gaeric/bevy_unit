@@ -2,7 +2,6 @@ use bevy::prelude::*;
  // use blenvy::*;
 
 // use bevy_shine::ShinePlugin;
-use modular_character::ModularCharacterPlugin;
 
 mod headless_renderer;
 use bevy_waltz::WaltzPlugin;
