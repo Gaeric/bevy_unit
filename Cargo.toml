@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = [ "bevy_shine", "bevy_waltz", "modular_character" ]
+members = [ "bevy_shine", "bevy_waltz", "units/modular_character"]
 
 [dependencies]
 bevy = { version = "0.16.0", features = ["wayland", "dynamic_linking"] }
 bevy_shine = { path = "bevy_shine" }
-modular_character = { path = "modular_character" }
+# modular_character = { path = "modular_character" }
 bevy_waltz = { path = "bevy_waltz" }
 crossbeam-channel = "0.5.15"
 
