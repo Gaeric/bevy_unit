@@ -5,6 +5,10 @@
 #+HTML_HEAD: <link href="/static/css/worg.css" rel="stylesheet" type="text/css">
 #+OPTIONS: ^:{}
 * Intro
+  bevy_unit is not a standalone bevy plugin, but rather a collection of experimental demos showcasing techniques for other bevy plugins.
+
+  Partical examples can be found in the units direction, and bevy_waltz serves as an integration of multiple plugins demonstrating a tps implementation.
+* Note
   这个仓库用来记录我对bevy引擎和其相关示例的学习
 
   该项目分为几个部分：
