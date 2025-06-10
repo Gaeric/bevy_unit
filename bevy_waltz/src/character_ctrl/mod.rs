@@ -128,10 +128,10 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     let mut cmd = commands.spawn(IsPlayer);
     cmd.insert(SceneRoot(
         // asset_server.load("waltz/scenes/library/Fox.glb#Scene0"),
-        asset_server.load("ani_model_1.0_20250608.glb#Scene0"),
+        asset_server.load("waltz/ani_model_1.0_20250608.glb#Scene0"),
     ));
     cmd.insert(GltfSceneHandler {
-        names_from: asset_server.load("ani_model_1.0_20250608.glb"),
+        names_from: asset_server.load("waltz/ani_model_1.0_20250608.glb"),
     });
 
     cmd.insert(RigidBody::Dynamic);
