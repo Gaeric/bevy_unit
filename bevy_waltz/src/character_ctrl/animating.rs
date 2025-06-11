@@ -126,7 +126,7 @@ pub fn animate_character(
                         }
                         TnuaBuiltinJumpState::MaintainingJump { .. } => AnimationState::Jumping,
                         TnuaBuiltinJumpState::StoppedMaintainingJump => AnimationState::Jumping,
-                        TnuaBuiltinJumpState::FallSection => AnimationState::Falling,
+                        TnuaBuiltinJumpState::FallSection => AnimationState::Jumping,
                     }
                 }
                 Some(TnuaBuiltinCrouch::NAME) => {
@@ -229,7 +229,7 @@ pub fn animate_character(
                             .repeat();
                     }
                     AnimationState::Jumping => {
-                        player.start(handler.animations["run"]).set_speed(2.0);
+                        player.start(handler.animations["jump"]).set_speed(2.0);
                     }
                     AnimationState::Falling => {
                         player.start(handler.animations["run"]).set_speed(1.0);
