@@ -394,10 +394,12 @@ pub fn apply_character_control(
                 },
                 desired_forward: if let Some(forward_from_camera) = forward_from_camera {
                     // With shooters, we want the character model to follow the camera.
+                    info!("with forward_from_camera, forward {:?}", forward_from_camera.forward);
                     Dir3::new(forward_from_camera.forward.f32()).ok()
                 } else {
                     // For platformers, we only want to change direction when the charcter tries to
                     // moves (or when the player explicitly wants to set the direction)
+                    info!("without forward_from_camera, forward {:?}", direction);
                     Dir3::new(direction.f32()).ok()
                 },
                 ..config.walk.clone()
