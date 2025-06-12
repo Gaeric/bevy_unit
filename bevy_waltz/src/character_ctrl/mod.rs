@@ -1,7 +1,10 @@
-use animating::{animate_character, animation_patcher_system, AnimationState, GltfSceneHandler};
+use animating::{AnimationState, GltfSceneHandler, animate_character, animation_patcher_system};
 /// character controller system
 /// forked from the tnua shooter_like demo
-use avian3d::{math::AdjustPrecision, prelude::*};
+use avian3d::{
+    math::AdjustPrecision,
+    prelude::*,
+};
 use bevy::{
     input::mouse::MouseMotion,
     prelude::*,
@@ -87,17 +90,6 @@ fn setup_camera_and_lights(mut commands: Commands) {
     ));
 }
 
-fn setup_sphere(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let sphere = meshes.add(Sphere::new(5.0));
-    let material = materials.add(StandardMaterial::default());
-
-    commands.spawn((Mesh3d(sphere), MeshMaterial3d(material)));
-}
-
 fn grab_ungrab_mouse(
     // mut egui_context: EguiContexts,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
@@ -135,7 +127,7 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     });
 
     cmd.insert(RigidBody::Dynamic);
-    cmd.insert(Collider::capsule(0.5, 1.0));
+    cmd.insert(Collider::capsule(0.5, 10.0));
 
     // Tnua's main iterface with the user code
     cmd.insert(TnuaController::default());
