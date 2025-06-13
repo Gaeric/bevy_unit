@@ -1,12 +1,27 @@
 //! the example fork from avian kinematic_character_3d
 
-use avian3d::prelude::*;
+use avian3d::{math::Vector2, prelude::*};
 use bevy::prelude::*;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
+        // .add_systems(
+        //     Update,
+        //     (
+        //         keyboard_input,
+        //         update_grounded,
+        //         apply_gravity,
+        //         movement,
+        //         apply_movement_damping,
+        //     )
+        //         .chain(),
+        // )
+        // .add_systems(
+        //     PhysicsSchedule,
+        //     kinematic_controller_collisions.in_set(NarrowPhaseSet::Last),
+        // )
         .run();
 }
 
@@ -36,3 +51,14 @@ fn setup(
         Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
+
+/// An event sent for a movement input action.
+#[derive(Event)]
+pub enum MovementAction {
+    Move(Vector2),
+    Jump,
+}
+
+/// A marker component indicating that an entity is using a character controller.
+#[derive(Component, Debug)]
+pub struct CharacterController;
