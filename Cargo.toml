@@ -7,6 +7,7 @@ edition = "2024"
 members = [ "bevy_shine", "bevy_waltz", "units/modular_character"]
 
 [dependencies]
+avian3d = "0.3.1"
 bevy = { version = "0.16.0", features = ["wayland", "dynamic_linking"] }
 bevy_shine = { path = "bevy_shine" }
 # modular_character = { path = "modular_character" }
