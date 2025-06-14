@@ -5,7 +5,11 @@ use bevy::{math::VectorSpace, prelude::*};
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins((
+            DefaultPlugins,
+            PhysicsPlugins::default(),
+            PhysicsDebugPlugin::default(),
+        ))
         .add_systems(Startup, setup)
         .add_event::<MovementAction>()
         .add_systems(
