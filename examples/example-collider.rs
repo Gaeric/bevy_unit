@@ -1,10 +1,7 @@
 //! the example fork from avian kinematic_character_3d
 
-use avian3d::{
-    math::{AdjustPrecision, Scalar, Vector, Vector2},
-    prelude::*,
-};
-use bevy::prelude::*;
+use avian3d::{math::*, prelude::*};
+use bevy::{math::VectorSpace, prelude::*};
 
 fn main() {
     App::new()
@@ -35,6 +32,14 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     assets: Res<AssetServer>,
 ) {
+    commands.spawn((
+        Mesh3d(meshes.add(Capsule3d::new(0.4, 1.0))),
+        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
+        Transform::from_xyz(0.0, 1.5, 0.0),
+        CharacterControllerBundle::new(Collider::capsule(0.4, 1.0), Vector::NEG_Y * 9.81 * 2.0)
+            .with_movement(30.0, 0.92, 7.0, (30.0 as Scalar).to_radians()),
+    ));
+
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(50.0, 50.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.0, 0.0, 0.0))),
@@ -93,6 +98,83 @@ pub struct ControllerGravity(Vector);
 /// The damping factor used for slowing down movement
 #[derive(Component)]
 pub struct MovementDampingFactor(Scalar);
+
+/// A bundle that contains the components needed for a basic
+/// kinematic character controller.
+#[derive(Bundle)]
+pub struct CharacterControllerBundle {
+    character_controller: CharacterController,
+    body: RigidBody,
+    collider: Collider,
+    ground_caster: ShapeCaster,
+    gravity: ControllerGravity,
+    movement: MovementBundle,
+}
+
+/// A boundle that contains components for character movement.
+#[derive(Bundle)]
+pub struct MovementBundle {
+    acceleration: MovementAcceleration,
+    damping: MovementDampingFactor,
+    jump_impulse: JumpImpulse,
+    max_slope_angle: MaxSlopeAngle,
+}
+
+impl MovementBundle {
+    pub const fn new(
+        acceleration: Scalar,
+        damping: Scalar,
+        jump_impulse: Scalar,
+        max_slope_angle: Scalar,
+    ) -> Self {
+        Self {
+            acceleration: MovementAcceleration(acceleration),
+            damping: MovementDampingFactor(damping),
+            jump_impulse: JumpImpulse(jump_impulse),
+            max_slope_angle: MaxSlopeAngle(max_slope_angle),
+        }
+    }
+}
+
+impl Default for MovementBundle {
+    fn default() -> Self {
+        Self::new(30.0, 0.9, 7.0, PI * 0.45)
+    }
+}
+
+impl CharacterControllerBundle {
+    pub fn new(collider: Collider, gravity: Vector) -> Self {
+        // Create shape caster as a lightly smaller version of collider
+        let mut caster_shape = collider.clone();
+        caster_shape.set_scale(Vector::ONE * 0.99, 10);
+
+        Self {
+            character_controller: CharacterController,
+            body: RigidBody::Kinematic,
+            collider,
+            ground_caster: ShapeCaster::new(
+                caster_shape,
+                Vector::ZERO,
+                Quaternion::default(),
+                Dir3::NEG_Y,
+            )
+            .with_max_distance(0.2),
+            gravity: ControllerGravity(gravity),
+            movement: MovementBundle::default(),
+        }
+    }
+
+    pub fn with_movement(
+        mut self,
+        acceleration: Scalar,
+        damping: Scalar,
+        jump_impulse: Scalar,
+        max_slope_angle: Scalar,
+    ) -> Self {
+        self.movement = MovementBundle::new(acceleration, damping, jump_impulse, max_slope_angle);
+        self
+    }
+}
 
 /// Kinematic bodies do not get pushed by collisions by default,
 /// so it needs to be done manually.
