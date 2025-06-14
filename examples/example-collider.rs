@@ -10,17 +10,17 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
-        // .add_systems(
-        //     Update,
-        //     (
-        //         keyboard_input,
-        //         update_grounded,
-        //         apply_gravity,
-        //         movement,
-        //         apply_movement_damping,
-        //     )
-        //         .chain(),
-        // )
+        .add_systems(
+            Update,
+            (
+                keyboard_input,
+                update_grounded,
+                apply_gravity,
+                movement,
+                apply_movement_damping,
+            )
+                .chain(),
+        )
         .add_systems(
             PhysicsSchedule,
             kinematic_controller_collisions.in_set(NarrowPhaseSet::Last),
@@ -71,6 +71,27 @@ pub struct CharacterController;
 /// the character will slide down.
 #[derive(Component)]
 pub struct MaxSlopeAngle(Scalar);
+
+/// The acceleration used for character movement.
+#[derive(Component)]
+pub struct MovementAcceleration(Scalar);
+
+/// The strength of a jump.
+#[derive(Component)]
+pub struct JumpImpulse(Scalar);
+
+/// A marker component indicating that an entity is on the ground.
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+pub struct Grounded;
+
+/// The gravitational acceleration used for a character controller.
+#[derive(Component)]
+pub struct ControllerGravity(Vector);
+
+/// The damping factor used for slowing down movement
+#[derive(Component)]
+pub struct MovementDampingFactor(Scalar);
 
 /// Kinematic bodies do not get pushed by collisions by default,
 /// so it needs to be done manually.
@@ -210,5 +231,114 @@ fn kinematic_controller_collisions(
                 }
             }
         }
+    }
+}
+
+/// Sends [`MovementAction`] events based on keyboard input.
+fn keyboard_input(
+    mut movement_event_writer: EventWriter<MovementAction>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    let up = keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
+    let down = keyboard_input.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
+    let left = keyboard_input.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]);
+    let right = keyboard_input.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]);
+
+    let horizontal = right as i8 - left as i8;
+    let vertical = up as i8 - down as i8;
+
+    let direction = Vector2::new(horizontal as Scalar, vertical as Scalar).clamp_length_max(1.0);
+
+    if direction != Vector2::ZERO {
+        movement_event_writer.write(MovementAction::Move(direction));
+    }
+
+    if keyboard_input.just_pressed(KeyCode::Space) {
+        movement_event_writer.write(MovementAction::Jump);
+    }
+}
+
+/// Updates the [`Grounded`] status for character controllers.
+fn update_grounded(
+    mut commands: Commands,
+    mut query: Query<
+        (Entity, &ShapeHits, &Rotation, Option<&MaxSlopeAngle>),
+        With<CharacterController>,
+    >,
+) {
+    for (entity, hits, rotation, max_slope_angle) in &mut query {
+        // The character is grounded if the shape caster has a hit with a normal
+        // that isn't too steep
+
+        let is_grounded = hits.iter().any(|hit| {
+            if let Some(angle) = max_slope_angle {
+                (rotation * -hit.normal2).angle_between(Vector::Y).abs() <= angle.0
+            } else {
+                true
+            }
+        });
+
+        if is_grounded {
+            commands.entity(entity).insert(Grounded);
+        } else {
+            commands.entity(entity).remove::<Grounded>();
+        }
+    }
+}
+
+/// Responds to [`MovementAction`] events and moves character controllers accordingly.
+fn movement(
+    time: Res<Time>,
+    mut movement_event_reader: EventReader<MovementAction>,
+    mut controllers: Query<(
+        &MovementAcceleration,
+        &JumpImpulse,
+        &mut LinearVelocity,
+        Has<Grounded>,
+    )>,
+) {
+    // Precision is adjusted so that the example works with
+    // both the `f32` and `f64` features. Otherwise you don't need this.
+    let delta_time = time.delta_secs_f64().adjust_precision();
+
+    for event in movement_event_reader.read() {
+        for (movement_acceleration, jump_impulse, mut linear_velocity, is_grounded) in
+            &mut controllers
+        {
+            match event {
+                MovementAction::Move(direction) => {
+                    linear_velocity.x += direction.x * movement_acceleration.0 * delta_time;
+                    linear_velocity.z -= direction.y * movement_acceleration.0 * delta_time;
+                }
+                MovementAction::Jump => {
+                    if is_grounded {
+                        linear_velocity.y = jump_impulse.0;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Applies [`controllerGravity`] to character controllers.
+fn apply_gravity(
+    time: Res<Time>,
+    mut controllers: Query<(&ControllerGravity, &mut LinearVelocity)>,
+) {
+    // Precision is adjusted so that the example works with
+    // both the `f32` and `f64` features. Otherwise you don't need this.
+    let delta_time = time.delta_secs_f64().adjust_precision();
+
+    for (gravity, mut linear_velocity) in &mut controllers {
+        linear_velocity.0 += gravity.0 * delta_time;
+    }
+}
+
+/// SLow down movement in the XZ plane.
+fn apply_movement_damping(mut query: Query<(&MovementDampingFactor, &mut LinearVelocity)>) {
+    for (damping_factor, mut linear_velocity) in &mut query {
+        // We could use `LinearDamping`, but we don't want to dampen movement along the Y axis
+        linear_velocity.x *= damping_factor.0;
+        linear_velocity.z *= damping_factor.0;
     }
 }
