@@ -1,19 +1,21 @@
 use std::time::Duration;
 
-use avian3d::prelude::{Collider, RigidBody};
 use bevy::{animation::animate_targets, prelude::*};
 
 #[allow(dead_code)]
-pub(crate) fn plugin(app: &mut App) {
-    app.insert_resource(AmbientLight {
-        color: Color::WHITE,
-        brightness: 5000.,
-    })
-    .insert_resource(ClearColor(Color::srgb_u8(70, 112, 216)))
-    .add_systems(Startup, setup)
-    .add_systems(Startup, assets_setup)
-    .add_systems(Update, setup_scene_once_loaded.before(animate_targets))
-    .add_systems(Update, keyboard_animation_control);
+pub(crate) fn main() {
+    App::new()
+        .insert_resource(AmbientLight {
+            color: Color::WHITE,
+            brightness: 5000.,
+            ..default()
+        })
+        .insert_resource(ClearColor(Color::srgb_u8(70, 112, 216)))
+        .add_systems(Startup, setup)
+        .add_systems(Startup, assets_setup)
+        .add_systems(Update, setup_scene_once_loaded.before(animate_targets))
+        .add_systems(Update, keyboard_animation_control)
+        .run();
 }
 
 fn setup(
@@ -21,17 +23,15 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(10.0, 10.0, 10.0)
-            .looking_at(Vec3::new(0.0, 0.0, 0.), Vec3::Y),
-        ..default()
-    });
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(10.0, 10.0, 10.0).looking_at(Vec3::new(0.0, 0.0, 0.), Vec3::Y),
+    ));
 
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Plane3d::default().mesh().size(50.0, 50.0)),
-        material: materials.add(Color::srgba_u8(0, 0, 0, 255)),
-        ..default()
-    });
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(50.0, 50.0))),
+        MeshMaterial3d(materials.add(Color::srgba_u8(0, 0, 0, 255))),
+    ));
 }
 
 #[derive(Resource)]
@@ -70,14 +70,8 @@ fn assets_setup(
         graph: graph.clone(),
     });
 
-    commands.spawn((
-        SceneBundle {
-            scene: asset_server
-                .load(GltfAssetLabel::Scene(0).from_asset("female_base/untitled.glb")),
-            ..default()
-        },
-        // Collider::cuboid(2.0, 2.0, 2.0),
-        // RigidBody::Static,
+    commands.spawn(SceneRoot(
+        asset_server.load(GltfAssetLabel::Scene(0).from_asset("female_base/untitled.glb")),
     ));
 }
 
@@ -95,7 +89,7 @@ fn setup_scene_once_loaded(
 
         commands
             .entity(entity)
-            .insert(animations.graph.clone())
+            .insert(AnimationGraphHandle(animations.graph.clone()))
             .insert(transitions);
     }
 }
