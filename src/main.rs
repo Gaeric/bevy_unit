@@ -5,7 +5,6 @@ use bevy::prelude::*;
 use bevy_waltz::WaltzPlugin;
 
 // mod animation_demo;
-// mod dev;
 // mod ui;
 
 fn main() -> AppExit {
