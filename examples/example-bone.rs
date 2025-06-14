@@ -1,15 +1,16 @@
 use bevy::prelude::*;
 use bevy::render::mesh::skinning::SkinnedMesh;
 
-pub(crate) fn plugin(app: &mut App) {
-    app.insert_resource(AmbientLight {
-        brightness: 750.0,
-        ..default()
-    })
-    .add_systems(Startup, setup)
-    // .add_systems(Update, gltf_joints)
-    .add_systems(Update, joint_animation);
-    // .add_systems(Update, update_bone_transform);
+pub(crate) fn main() {
+    App::new()
+        .insert_resource(AmbientLight {
+            brightness: 750.0,
+            ..default()
+        })
+        .add_systems(Startup, setup)
+        .add_systems(Update, gltf_joints)
+        .add_systems(Update, joint_animation)
+        .add_systems(Update, update_bone_transform);
 }
 
 #[derive(Component, Debug)]
@@ -31,21 +32,15 @@ impl GltfHandle {
 const GLTF_PATH: &str = "female_base/ani-model4.gltf";
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(-2.0, 2.5, 5.0)
-            .looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
-        ..default()
-    });
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+    ));
 
     commands.insert_resource(GltfHandle::new(asset_server.load(GLTF_PATH)));
 
-    commands.spawn((
-        SceneBundle {
-            scene: asset_server.load(GltfAssetLabel::Scene(0).from_asset(GLTF_PATH)),
-            // scene: asset_server.load(GltfAssetLabel::Scene(0).from_asset("SimpleSkin.gltf")),
-            ..default()
-        },
-        Demo,
+    commands.spawn(SceneRoot(
+        asset_server.load(GltfAssetLabel::Scene(0).from_asset(GLTF_PATH)),
     ));
 }
 
@@ -62,7 +57,7 @@ fn gltf_joints(gltf_handle: Res<GltfHandle>, gltf_assets: Res<Assets<Gltf>>) {
 
 fn update_bone_transform(
     mut query: Query<(&mut Transform, &Name), With<SkinnedMesh>>,
-    parents: Query<&Parent>,
+    childof: Query<&ChildOf>,
     children_query: Query<&Children>,
 ) {
     for (mut transform, name) in query.iter_mut() {
@@ -86,17 +81,17 @@ fn update_bone_transform(
 /// In this example, we want to get and animate the second joint.
 /// It is similar to the animation defined in `models/SimpleSkin/SimpleSkin.gltf`.
 fn joint_animation(
-    parent_query: Query<&Parent, With<SkinnedMesh>>,
+    parent_query: Query<&ChildOf, With<SkinnedMesh>>,
     skinned_mesh: Query<&SkinnedMesh>,
     children_query: Query<&Children>,
     mut transform_query: Query<&mut Transform>,
     name_query: Query<&Name>,
 ) {
     // Iter skinned mesh entity
-    for skinned_mesh_parent in &parent_query {
-        println!("skinned_mesh_parent is {:?}", skinned_mesh_parent);
+    for skinned_mesh_childof in &parent_query {
+        println!("skinned_mesh_parent is {:?}", skinned_mesh_childof);
         // Mesh node is the parent of the skinned mesh entity.
-        let mesh_node_entity = skinned_mesh_parent.get();
+        let mesh_node_entity = skinned_mesh_childof.parent();
         println!("mesh_node_entity is {:?}", mesh_node_entity);
 
         // Get `Children` in the mesh node.
