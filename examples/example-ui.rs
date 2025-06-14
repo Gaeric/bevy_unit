@@ -1,5 +1,4 @@
 use bevy::{ecs::system::EntityCommands, prelude::*};
-use bevy_egui::egui::widgets;
 
 #[derive(Component)]
 pub struct UiCamera;
@@ -54,8 +53,8 @@ enum AppSetting {
     SoftShadows(bool),
 }
 
-pub(crate) fn plugin(app: &mut App) {
-    app.add_systems(Startup, setup);
+fn main() {
+    App::new().add_systems(Startup, setup).run();
 }
 
 fn setup(mut commands: Commands) {
@@ -75,7 +74,7 @@ fn setup(mut commands: Commands) {
     //     ))
     //     .id();
 
-    commands.spawn(Camera2dBundle::default());
+    commands.spawn(Camera2d::default());
 
     // commands.ui_builder(UiRoot).column(|column| {
     //     column.spawn(NodeBundle {
@@ -93,44 +92,39 @@ fn setup(mut commands: Commands) {
 }
 
 fn spawn_box(commands: &mut Commands) {
-    let container = NodeBundle {
-        style: Style {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        },
+    let container = Node {
+        width: Val::Percent(100.0),
+        height: Val::Percent(100.0),
+        justify_content: JustifyContent::Center,
         ..default()
     };
 
-    let square = NodeBundle {
-        style: Style {
-            width: Val::Px(20.0),
-            border: UiRect::all(Val::Px(2.)),
-            left: Val::Px(2.0),
-            ..default()
-        },
-        background_color: Color::srgba(0.65, 0.65, 0.65, 0.50).into(),
+    let square = Node {
+        width: Val::Px(20.0),
+        border: UiRect::all(Val::Px(2.)),
+        left: Val::Px(2.0),
         ..default()
     };
 
     let parent = commands.spawn(container).id();
-    let child = commands.spawn(square).id();
+    let child = commands
+        .spawn((
+            square,
+            BackgroundColor(Color::srgba(0.65, 0.65, 0.65, 0.50)),
+        ))
+        .id();
 
-    commands.entity(parent).push_children(&[child]);
+    commands.entity(parent).add_child(child);
 }
 
 fn spawn_buttons(commands: &mut Commands) {
     commands
-        .spawn(NodeBundle {
-            style: Style {
-                flex_direction: FlexDirection::Column,
-                position_type: PositionType::Absolute,
-                row_gap: Val::Px(6.0),
-                left: Val::Px(10.0),
-                bottom: Val::Px(10.0),
-                ..default()
-            },
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            position_type: PositionType::Absolute,
+            row_gap: Val::Px(6.0),
+            left: Val::Px(10.0),
+            bottom: Val::Px(10.0),
             ..default()
         })
         .with_children(|parent| {
@@ -146,21 +140,21 @@ fn spawn_buttons(commands: &mut Commands) {
         });
 }
 
-pub fn spawn_option_buttons<T>(parent: &mut ChildBuilder, title: &str, options: &[(T, &str)])
-where
+pub fn spawn_option_buttons<T>(
+    parent: &mut ChildSpawnerCommands,
+    title: &str,
+    options: &[(T, &str)],
+) where
     T: Clone + Send + Sync + 'static,
 {
     // Add the parent node for the row.
     parent
-        .spawn(NodeBundle {
-            style: Style {
-                align_items: AlignItems::Center,
-                ..default()
-            },
+        .spawn(Node {
+            align_items: AlignItems::Center,
             ..default()
         })
         .with_children(|parent| {
-            spawn_ui_text(parent, title, Color::BLACK).insert(Style {
+            spawn_ui_text(parent, title, Color::BLACK).insert(Node {
                 width: Val::Px(125.0),
                 ..default()
             });
@@ -179,22 +173,22 @@ where
 }
 
 pub fn spawn_ui_text<'a>(
-    parent: &'a mut ChildBuilder,
+    parent: &'a mut ChildSpawnerCommands,
     label: &str,
     color: Color,
 ) -> EntityCommands<'a> {
-    parent.spawn(TextBundle::from_section(
-        label,
-        TextStyle {
+    parent.spawn((
+        Text::new(label),
+        TextColor(color),
+        TextFont {
             font_size: 18.0,
-            color,
             ..default()
         },
     ))
 }
 
 pub fn spawn_option_button<T>(
-    parent: &mut ChildBuilder,
+    parent: &mut ChildSpawnerCommands,
     option_value: T,
     option_name: &str,
     is_selected: bool,
@@ -210,8 +204,9 @@ pub fn spawn_option_button<T>(
     };
 
     parent
-        .spawn(ButtonBundle {
-            style: Style {
+        .spawn((
+            Button,
+            Node {
                 border: UiRect::all(Val::Px(1.0)).with_left(if is_first {
                     Val::Px(1.0)
                 } else {
@@ -222,13 +217,12 @@ pub fn spawn_option_button<T>(
                 padding: UiRect::axes(Val::Px(2.0), Val::Px(6.0)),
                 ..default()
             },
-            border_color: BorderColor(Color::WHITE),
-            border_radius: BorderRadius::ZERO
+            BorderColor(Color::WHITE),
+            BorderRadius::ZERO
                 .with_left(if is_first { Val::Px(6.0) } else { Val::Px(0.0) })
                 .with_right(if is_last { Val::Px(6.0) } else { Val::Px(0.0) }),
-            background_color: BackgroundColor(bg_color),
-            ..default()
-        })
+            BackgroundColor(bg_color),
+        ))
         .insert(RadioButton)
         .insert(WidgetClickSender(option_value.clone()))
         .with_children(|parent| {
