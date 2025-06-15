@@ -39,14 +39,16 @@ fn setup(
     commands.spawn((
         Mesh3d(meshes.add(Capsule3d::new(0.4, 1.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-        Transform::from_xyz(0.0, 1.5, 0.0),
-        CharacterControllerBundle::new(Collider::capsule(0.4, 1.0), Vector::NEG_Y * 9.81 * 2.0)
+        Transform::from_xyz(0.0, 5.0, 0.0),
+        CharacterControllerBundle::new(Collider::capsule(0.4, 1.0), Vector::NEG_Y * 9.81 * 0.5)
             .with_movement(30.0, 0.92, 7.0, (30.0 as Scalar).to_radians()),
     ));
 
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(50.0, 50.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.0, 0.0, 0.0))),
+        Collider::cuboid(50.0, 0.1, 50.0),
+        RigidBody::Static,
     ));
 
     commands.spawn((
