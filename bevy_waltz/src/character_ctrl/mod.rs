@@ -2,7 +2,7 @@ use animating::{AnimationState, GltfSceneHandler, animate_character, animation_p
 /// character controller system
 /// forked from the tnua shooter_like demo
 use avian3d::{
-    math::AdjustPrecision,
+    math::{AdjustPrecision, Vector},
     prelude::*,
 };
 use bevy::{
@@ -127,7 +127,7 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     });
 
     cmd.insert(RigidBody::Dynamic);
-    cmd.insert(Collider::capsule(0.5, 10.0));
+    cmd.insert(Collider::capsule_endpoints(0.5, 0.5 * Vector::Y, 1.2 * Vector::Y));
 
     // Tnua's main iterface with the user code
     cmd.insert(TnuaController::default());
