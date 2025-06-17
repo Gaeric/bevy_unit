@@ -3,12 +3,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Resource, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
 #[reflect(Serialize, Deserialize)]
-pub(crate) struct WaltzConfig {
-    pub(crate) camera_config: CameraConfig,
-}
-
-#[derive(Resource, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
-#[reflect(Serialize, Deserialize)]
 pub(crate) struct CameraConfig {
     pub(crate) fixed_angle: FixedAngle,
     pub(crate) first_person: FirstPerson,

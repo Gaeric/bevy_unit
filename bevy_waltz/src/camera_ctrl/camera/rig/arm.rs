@@ -1,6 +1,7 @@
+use crate::camera_ctrl::camera::IngameCamera;
 use crate::camera_ctrl::camera::IngameCameraKind;
+use crate::camera_ctrl::config::CameraConfig;
 use crate::camera_ctrl::physics::CollisionLayer;
-use crate::{camera_ctrl::camera::IngameCamera, config::WaltzConfig};
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy_dolly::prelude::*;
@@ -9,7 +10,7 @@ pub(super) fn get_arm_distance(
     camera: &IngameCamera,
     transform: &Transform,
     spatial_query: &SpatialQuery,
-    config: &WaltzConfig,
+    config: &CameraConfig,
 ) -> Option<f32> {
     match camera.kind {
         IngameCameraKind::ThirdPerson => Some(get_distance_to_collision(
@@ -24,7 +25,7 @@ pub(super) fn get_arm_distance(
 }
 
 pub(super) fn get_zoom_smoothness(
-    config: &WaltzConfig,
+    config: &CameraConfig,
     camera: &IngameCamera,
     rig: &Rig,
     new_distance: f32,
@@ -32,14 +33,14 @@ pub(super) fn get_zoom_smoothness(
     let current_distance = rig.driver::<Arm>().offset.z;
     if new_distance < current_distance - 1e-4 {
         match camera.kind {
-            IngameCameraKind::ThirdPerson => config.camera_config.third_person.zoom_in_smoothing,
-            IngameCameraKind::FixedAngle => config.camera_config.fixed_angle.zoom_in_smoothing,
+            IngameCameraKind::ThirdPerson => config.third_person.zoom_in_smoothing,
+            IngameCameraKind::FixedAngle => config.fixed_angle.zoom_in_smoothing,
             _ => unreachable!(),
         }
     } else {
         match camera.kind {
-            IngameCameraKind::ThirdPerson => config.camera_config.third_person.zoom_out_smoothing,
-            IngameCameraKind::FixedAngle => config.camera_config.fixed_angle.zoom_out_smoothing,
+            IngameCameraKind::ThirdPerson => config.third_person.zoom_out_smoothing,
+            IngameCameraKind::FixedAngle => config.fixed_angle.zoom_out_smoothing,
             _ => unreachable!(),
         }
     }
@@ -53,7 +54,7 @@ pub(super) fn set_arm(rig: &mut Rig, distance: f32, zoom_smoothness: f32, dt: f3
 
 fn get_distance_to_collision(
     spatial_query: &SpatialQuery,
-    config: &WaltzConfig,
+    config: &CameraConfig,
     camera: &IngameCamera,
     camera_transform: &Transform,
 ) -> f32 {
@@ -65,7 +66,7 @@ fn get_distance_to_collision(
     let filter = SpatialQueryFilter::from_mask(CollisionLayer::CameraObstacle.to_bits());
 
     let min_distance = match camera.kind {
-        IngameCameraKind::ThirdPerson => config.camera_config.third_person.min_distance_to_objects,
+        IngameCameraKind::ThirdPerson => config.third_person.min_distance_to_objects,
         _ => unreachable!(),
     };
 

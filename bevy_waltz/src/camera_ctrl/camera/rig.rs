@@ -5,8 +5,10 @@ use bevy_dolly::prelude::{LookAt, Position, Rig, Smooth, YawPitch};
 use leafwing_input_manager::prelude::ActionState;
 
 use crate::{
-    camera_ctrl::actions::{ActionsFrozen, CameraAction},
-    config::WaltzConfig,
+    camera_ctrl::{
+        actions::{ActionsFrozen, CameraAction},
+        config::CameraConfig,
+    },
     utils::Vec2Ext,
 };
 
@@ -22,7 +24,7 @@ pub(super) fn update_rig(
         &ActionState<CameraAction>,
         &Transform,
     )>,
-    config: Res<WaltzConfig>,
+    config: Res<CameraConfig>,
     spatial_query: SpatialQuery,
     actions_frozen: Res<ActionsFrozen>,
 ) {
@@ -36,7 +38,7 @@ pub(super) fn update_rig(
 
         if camera.kind == IngameCameraKind::FixedAngle {
             let yaw_pitch = rig.driver_mut::<YawPitch>();
-            yaw_pitch.yaw_degrees = config.camera_config.fixed_angle.pitch;
+            yaw_pitch.yaw_degrees = config.fixed_angle.pitch;
         } else {
             let camera_movement = get_camera_movement(actions);
             if !camera_movement.is_approx_zero() {
@@ -61,11 +63,11 @@ fn set_yaw_pitch(
     rig: &mut Rig,
     camera: &IngameCamera,
     camera_movement: Vec2,
-    config: &WaltzConfig,
+    config: &CameraConfig,
 ) {
     let yaw_pitch = rig.driver_mut::<YawPitch>();
-    let yaw = -camera_movement.x * config.camera_config.mouse_sensitivity_x;
-    let pitch = -camera_movement.y * config.camera_config.mouse_sensitivity_y;
+    let yaw = -camera_movement.x * config.mouse_sensitivity_x;
+    let pitch = -camera_movement.y * config.mouse_sensitivity_y;
     yaw_pitch.rotate_yaw_pitch(yaw.to_degrees(), pitch.to_degrees());
     let (min_pitch, max_pitch) = get_pitch_extrema(config, camera);
     yaw_pitch.pitch_degrees = yaw_pitch.pitch_degrees.clamp(min_pitch, max_pitch);
@@ -94,16 +96,14 @@ fn set_position(rig: &mut Rig, camera: &IngameCamera) {
     rig.driver_mut::<Position>().position = target;
 }
 
-fn get_pitch_extrema(config: &WaltzConfig, camera: &IngameCamera) -> (f32, f32) {
+fn get_pitch_extrema(config: &CameraConfig, camera: &IngameCamera) -> (f32, f32) {
     match camera.kind {
-        IngameCameraKind::ThirdPerson => (
-            config.camera_config.third_person.min_pitch,
-            config.camera_config.third_person.max_pitch,
-        ),
-        IngameCameraKind::FirstPerson => (
-            config.camera_config.first_person.min_pitch,
-            config.camera_config.first_person.max_pitch,
-        ),
+        IngameCameraKind::ThirdPerson => {
+            (config.third_person.min_pitch, config.third_person.max_pitch)
+        }
+        IngameCameraKind::FirstPerson => {
+            (config.first_person.min_pitch, config.first_person.max_pitch)
+        }
         _ => unreachable!(),
     }
 }
@@ -111,18 +111,17 @@ fn get_pitch_extrema(config: &WaltzConfig, camera: &IngameCamera) -> (f32, f32) 
 fn set_desired_distance(
     camera: &mut IngameCamera,
     actions: &ActionState<CameraAction>,
-    config: &WaltzConfig,
+    config: &CameraConfig,
 ) {
-    let zoom =
-        actions.clamped_value(&CameraAction::Zoom) * config.camera_config.third_person.zoom_speed;
+    let zoom = actions.clamped_value(&CameraAction::Zoom) * config.third_person.zoom_speed;
     let (min_distance, max_distance) = match camera.kind {
         IngameCameraKind::ThirdPerson => (
-            config.camera_config.third_person.min_distance,
-            config.camera_config.third_person.max_distance,
+            config.third_person.min_distance,
+            config.third_person.max_distance,
         ),
         IngameCameraKind::FixedAngle => (
-            config.camera_config.fixed_angle.min_distance,
-            config.camera_config.fixed_angle.max_distance,
+            config.fixed_angle.min_distance,
+            config.fixed_angle.max_distance,
         ),
         IngameCameraKind::FirstPerson => (0.0, 0.0),
     };
@@ -130,30 +129,26 @@ fn set_desired_distance(
     camera.desired_distance = (camera.desired_distance - zoom).clamp(min_distance, max_distance);
 }
 
-fn set_smoothness(rig: &mut Rig, config: &WaltzConfig, camera: &IngameCamera) {
+fn set_smoothness(rig: &mut Rig, config: &CameraConfig, camera: &IngameCamera) {
     match camera.kind {
         IngameCameraKind::ThirdPerson => {
             rig.driver_mut::<Smooth>().position_smoothness =
-                config.camera_config.third_person.translation_smoothing;
-            rig.driver_mut::<Smooth>().rotation_smoothness =
-                config.camera_config.third_person.rotation_smoothing;
-            rig.driver_mut::<LookAt>().smoothness =
-                config.camera_config.third_person.tracking_smoothing;
+                config.third_person.translation_smoothing;
+            rig.driver_mut::<Smooth>().rotation_smoothness = config.third_person.rotation_smoothing;
+            rig.driver_mut::<LookAt>().smoothness = config.third_person.tracking_smoothing;
         }
         IngameCameraKind::FirstPerson => {
             rig.driver_mut::<Smooth>().position_smoothness =
-                config.camera_config.first_person.translation_smoothing;
-            rig.driver_mut::<Smooth>().rotation_smoothness =
-                config.camera_config.fixed_angle.rotation_smoothing;
+                config.first_person.translation_smoothing;
+            rig.driver_mut::<Smooth>().rotation_smoothness = config.fixed_angle.rotation_smoothing;
             if let Some(look_at) = rig.try_driver_mut::<LookAt>() {
-                look_at.smoothness = config.camera_config.first_person.tracking_smoothing;
+                look_at.smoothness = config.first_person.tracking_smoothing;
             }
         }
         IngameCameraKind::FixedAngle => {
             rig.driver_mut::<Smooth>().position_smoothness =
-                config.camera_config.fixed_angle.translation_smoothing;
-            rig.driver_mut::<Smooth>().rotation_smoothness =
-                config.camera_config.fixed_angle.rotation_smoothing
+                config.fixed_angle.translation_smoothing;
+            rig.driver_mut::<Smooth>().rotation_smoothness = config.fixed_angle.rotation_smoothing
         }
     }
 }

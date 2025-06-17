@@ -2,7 +2,6 @@ use bevy::prelude::*;
 
 mod character;
 mod camera_ctrl;
-mod config;
 mod utils;
 
 pub struct WaltzPlugin;

@@ -2,13 +2,13 @@ use bevy::prelude::*;
 use bevy_dolly::prelude::{Arm, LookAt, Rig, RigDriverTraits};
 use leafwing_input_manager::prelude::ActionState;
 
-use crate::{camera_ctrl::actions::CameraAction, config::WaltzConfig};
+use crate::camera_ctrl::{actions::CameraAction, config::CameraConfig};
 
 use super::{IngameCamera, IngameCameraKind};
 
 pub(super) fn update_kind(
     mut camera_query: Query<(&mut IngameCamera, &ActionState<CameraAction>)>,
-    config: Res<WaltzConfig>,
+    config: Res<CameraConfig>,
 ) {
     for (mut camera, actions) in camera_query.iter_mut() {
         let zoom = actions.clamped_value(&CameraAction::Zoom);
@@ -18,12 +18,9 @@ pub(super) fn update_kind(
         let new_kind = match camera.kind {
             IngameCameraKind::FirstPerson if zoomed_out => Some(IngameCameraKind::ThirdPerson),
             IngameCameraKind::ThirdPerson => {
-                if camera.desired_distance < config.camera_config.third_person.min_distance + 1e-5
-                    && zoomed_in
-                {
+                if camera.desired_distance < config.third_person.min_distance + 1e-5 && zoomed_in {
                     Some(IngameCameraKind::FirstPerson)
-                } else if camera.desired_distance
-                    > config.camera_config.third_person.max_distance - 1e-5
+                } else if camera.desired_distance > config.third_person.max_distance - 1e-5
                     && zoomed_out
                 {
                     Some(IngameCameraKind::FixedAngle)
@@ -32,7 +29,7 @@ pub(super) fn update_kind(
                 }
             }
             IngameCameraKind::FixedAngle => {
-                if camera.desired_distance < config.camera_config.fixed_angle.min_distance + 1e-5 {
+                if camera.desired_distance < config.fixed_angle.min_distance + 1e-5 {
                     Some(IngameCameraKind::ThirdPerson)
                 } else {
                     None
