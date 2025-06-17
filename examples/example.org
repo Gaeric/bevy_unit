@@ -34,6 +34,7 @@
    提供keyboard和gamepad到控制系统的映射的封装
 ** bevy_dolly
    这是一个平滑相机移动的crate，但是目前不确定是否需要在tps中使用他
+** bevy_transform_interpolation
 * Archive
 * Plugins
 * Reference
