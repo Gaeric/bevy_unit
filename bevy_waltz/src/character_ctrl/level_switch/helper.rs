@@ -33,7 +33,8 @@ impl<'w, 's> LevelSetupHelper<'w, 's> {
         command.insert((Mesh3d(mesh), MeshMaterial3d(material)));
 
         command.insert(RigidBody::Static);
-        command.insert(Collider::half_space(Vector3::Y));
+        // command.insert(Collider::half_space(Vector3::Y));
+        command.insert(Collider::cuboid(128.0, 0.01, 128.0));
         command
     }
 
