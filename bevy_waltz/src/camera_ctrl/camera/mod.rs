@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-mod rig;
+mod cursor;
 mod kind;
+mod rig;
 
 #[derive(Debug, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
 #[reflect(Serialize, Deserialize)]
@@ -22,4 +23,6 @@ pub(crate) struct IngameCamera {
     pub(crate) kind: IngameCameraKind,
 }
 
-pub(super) fn plugin(app: &mut App) {}
+pub(super) fn plugin(app: &mut App) {
+    // app.add_systems(Update, grab_cursor)
+}

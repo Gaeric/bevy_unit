@@ -90,6 +90,8 @@ fn setup_camera_and_lights(mut commands: Commands) {
     ));
 }
 
+// todo: the control part code is duplicated with the camera
+// this section should be deleted after the camera is completed
 fn grab_ungrab_mouse(
     // mut egui_context: EguiContexts,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
