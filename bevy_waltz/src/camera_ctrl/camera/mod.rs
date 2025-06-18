@@ -1,6 +1,11 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::camera_ctrl::camera::{
+    kind::{update_drivers, update_kind},
+    rig::update_rig,
+};
+
 mod cursor;
 mod kind;
 mod rig;
@@ -25,4 +30,5 @@ pub(crate) struct IngameCamera {
 
 pub(super) fn plugin(app: &mut App) {
     // app.add_systems(Update, grab_cursor)
+    app.add_systems(Update, (update_kind, update_drivers, update_rig).chain());
 }
