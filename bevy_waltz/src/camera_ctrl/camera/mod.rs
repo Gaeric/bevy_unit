@@ -30,5 +30,5 @@ pub(crate) struct IngameCamera {
 
 pub(super) fn plugin(app: &mut App) {
     // app.add_systems(Update, grab_cursor)
-    app.add_systems(Update, (update_kind, update_drivers, update_rig).chain());
+    // app.add_systems(Update, (update_kind, update_drivers, update_rig).chain());
 }
