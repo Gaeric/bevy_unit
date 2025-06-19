@@ -785,7 +785,7 @@ version = "0.0.6"
 source = "git+https://github.com/BlackPhlox/bevy_dolly/?branch=bevy_0.16#e3a3dd6888b07ed3debb901469b75559cebfcb3e"
 dependencies = [
  "bevy",
- "bevy_enhanced_input",
+ "bevy_enhanced_input 0.11.0",
  "dolly",
 ]
 
@@ -884,7 +884,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a73a9e5981b0b94b453a7b5ecdcb1f061da8dc8a9732683f5c55a9d887126d74"
 dependencies = [
  "bevy",
- "bevy_enhanced_input_macros",
+ "bevy_enhanced_input_macros 0.11.0",
+ "bitflags 2.9.1",
+ "log",
+ "serde",
+ "variadics_please",
+]
+
+[[package]]
+name = "bevy_enhanced_input"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e54cbf32f3dd047c0fe0ecfa7d126828e1fbd7869e862b6411e144c8be1b282c"
+dependencies = [
+ "bevy",
+ "bevy_enhanced_input_macros 0.12.0",
  "bitflags 2.9.1",
  "log",
  "serde",
@@ -896,6 +910,18 @@ name = "bevy_enhanced_input_macros"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5f50d91e55d560d1341b6592f80434889b8002a765121f60b44084ca041af8a"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "bevy_enhanced_input_macros"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fa85f75056068d2b457beb6213e58b05762324bd3dee325c9ac24e9100ba19f"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -1656,6 +1682,7 @@ dependencies = [
  "bevy-tnua-avian3d",
  "bevy_dolly",
  "bevy_egui",
+ "bevy_enhanced_input 0.12.0",
  "leafwing-input-manager",
  "serde",
 ]
