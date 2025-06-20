@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 use bevy::{prelude::*, render::camera::CameraRenderGraph};
-use bevy_shine::{graph::ShineRenderGraph, ShinePlugin};
+use bevy_shine::{ShinePlugin, graph::ShineRenderGraph};
 
 fn main() {
     App::new()
