@@ -1,48 +1,45 @@
 use bevy::prelude::*;
 use bevy_dolly::prelude::{Arm, LookAt, Rig, RigDriverTraits};
-use leafwing_input_manager::prelude::ActionState;
-
-use crate::camera_ctrl::{actions::CameraAction, config::CameraConfig};
 
 use super::{IngameCamera, IngameCameraKind};
 
-pub(super) fn update_kind(
-    mut camera_query: Query<(&mut IngameCamera, &ActionState<CameraAction>)>,
-    config: Res<CameraConfig>,
-) {
-    for (mut camera, actions) in camera_query.iter_mut() {
-        let zoom = actions.clamped_value(&CameraAction::Zoom);
-        let zoomed_out = zoom < -1e-5;
-        let zoomed_in = zoom > 1e-5;
+// pub(super) fn update_kind(
+//     mut camera_query: Query<(&mut IngameCamera, &ActionState<CameraAction>)>,
+//     config: Res<CameraConfig>,
+// ) {
+//     for (mut camera, actions) in camera_query.iter_mut() {
+//         let zoom = actions.clamped_value(&CameraAction::Zoom);
+//         let zoomed_out = zoom < -1e-5;
+//         let zoomed_in = zoom > 1e-5;
 
-        let new_kind = match camera.kind {
-            IngameCameraKind::FirstPerson if zoomed_out => Some(IngameCameraKind::ThirdPerson),
-            IngameCameraKind::ThirdPerson => {
-                if camera.desired_distance < config.third_person.min_distance + 1e-5 && zoomed_in {
-                    Some(IngameCameraKind::FirstPerson)
-                } else if camera.desired_distance > config.third_person.max_distance - 1e-5
-                    && zoomed_out
-                {
-                    Some(IngameCameraKind::FixedAngle)
-                } else {
-                    None
-                }
-            }
-            IngameCameraKind::FixedAngle => {
-                if camera.desired_distance < config.fixed_angle.min_distance + 1e-5 {
-                    Some(IngameCameraKind::ThirdPerson)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        };
+//         let new_kind = match camera.kind {
+//             IngameCameraKind::FirstPerson if zoomed_out => Some(IngameCameraKind::ThirdPerson),
+//             IngameCameraKind::ThirdPerson => {
+//                 if camera.desired_distance < config.third_person.min_distance + 1e-5 && zoomed_in {
+//                     Some(IngameCameraKind::FirstPerson)
+//                 } else if camera.desired_distance > config.third_person.max_distance - 1e-5
+//                     && zoomed_out
+//                 {
+//                     Some(IngameCameraKind::FixedAngle)
+//                 } else {
+//                     None
+//                 }
+//             }
+//             IngameCameraKind::FixedAngle => {
+//                 if camera.desired_distance < config.fixed_angle.min_distance + 1e-5 {
+//                     Some(IngameCameraKind::ThirdPerson)
+//                 } else {
+//                     None
+//                 }
+//             }
+//             _ => None,
+//         };
 
-        if let Some(new_kind) = new_kind {
-            camera.kind = new_kind;
-        }
-    }
-}
+//         if let Some(new_kind) = new_kind {
+//             camera.kind = new_kind;
+//         }
+//     }
+// }
 
 pub(super) fn update_drivers(mut camera_query: Query<(&IngameCamera, &mut Rig)>) {
     for (camera, mut rig) in camera_query.iter_mut() {

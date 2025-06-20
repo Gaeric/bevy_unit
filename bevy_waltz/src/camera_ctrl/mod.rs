@@ -14,6 +14,5 @@ pub(super) fn plugin(app: &mut App) {
     app.add_plugins((
         actions::plugin,
         camera::plugin,
-        character_embodiment::plugin,
     ));
 }
