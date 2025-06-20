@@ -750,6 +750,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_dev_tools"
+version = "0.16.1"
+dependencies = [
+ "bevy_app",
+ "bevy_asset",
+ "bevy_color 0.16.2",
+ "bevy_diagnostic 0.16.1",
+ "bevy_ecs",
+ "bevy_input",
+ "bevy_picking",
+ "bevy_reflect",
+ "bevy_render",
+ "bevy_state 0.16.1",
+ "bevy_text",
+ "bevy_time",
+ "bevy_ui",
+ "bevy_utils 0.16.1",
+ "bevy_window",
+ "tracing",
+]
+
+[[package]]
 name = "bevy_diagnostic"
 version = "0.16.1"
 dependencies = [
@@ -1092,6 +1114,7 @@ dependencies = [
  "bevy_color 0.16.2",
  "bevy_core_pipeline 0.16.1",
  "bevy_derive",
+ "bevy_dev_tools",
  "bevy_diagnostic 0.16.1",
  "bevy_ecs",
  "bevy_gilrs",
@@ -1681,6 +1704,7 @@ version = "0.1.0"
 dependencies = [
  "avian3d",
  "bevy",
+ "bevy-inspector-egui",
  "bevy-tnua",
  "bevy-tnua-avian3d",
  "bevy_dolly",
