@@ -1,5 +1,15 @@
+use avian3d::prelude::*;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+
+#[derive(PhysicsLayer, Debug, Default)]
+pub(crate) enum CollisionLayer {
+    #[default]
+    Character,
+    Terrain,
+    CameraObstacle,
+    Sensor,
+}
 
 #[derive(Resource, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
 #[reflect(Serialize, Deserialize)]

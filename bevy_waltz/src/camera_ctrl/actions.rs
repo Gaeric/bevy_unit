@@ -27,13 +27,6 @@ impl ActionsFrozen {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Reflect, Default)]
-pub(crate) enum CameraAction {
-    #[default]
-    Orbit,
-    Zoom,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Reflect, Default)]
 pub(crate) enum UiAction {
     #[default]
     TogglePause,
