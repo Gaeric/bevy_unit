@@ -1,5 +1,8 @@
 use bevy::prelude::*;
-use bevy_dolly::prelude::{MovableLookAt, Rig};
+use bevy_dolly::{
+    prelude::{MovableLookAt, Rig},
+    system::Dolly,
+};
 
 #[derive(Component)]
 struct MainCamera;
@@ -11,7 +14,11 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
-        .add_systems(FixedUpdate, (update_camera, movement_player))
+        .add_systems(
+            FixedUpdate,
+            (Dolly::<MainCamera>::update_active, update_camera),
+        )
+        .add_systems(FixedUpdate, movement_player)
         .run();
 }
 
@@ -29,10 +36,10 @@ fn setup(
         Player,
     ));
 
-    // commands.spawn((
-    //     Mesh3d(meshes.add(Plane3d::default().mesh().size(50.0, 50.0))),
-    //     MeshMaterial3d(materials.add(Color::srgb(0.0, 0.0, 0.0))),
-    // ));
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(50.0, 50.0))),
+        MeshMaterial3d(materials.add(Color::srgb(0.0, 0.0, 0.0))),
+    ));
 
     commands.spawn((
         PointLight {
