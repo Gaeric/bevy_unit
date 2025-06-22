@@ -5,6 +5,7 @@ use bevy::{animation::animate_targets, prelude::*};
 #[allow(dead_code)]
 pub(crate) fn main() {
     App::new()
+        .add_plugins(DefaultPlugins)
         .insert_resource(AmbientLight {
             color: Color::WHITE,
             brightness: 5000.,
@@ -72,6 +73,7 @@ fn assets_setup(
 
     commands.spawn(SceneRoot(
         asset_server.load(GltfAssetLabel::Scene(0).from_asset("female_base/untitled.glb")),
+        // asset_server.load(GltfAssetLabel::Scene(0).from_asset("female_base/ani-model4.gltf")),
     ));
 }
 
