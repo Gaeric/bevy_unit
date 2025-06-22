@@ -4,3 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bevy = "0.16.1"
+rand = "0.9.1"
+
+[dependencies.bevy_dolly]
+git = "https://github.com/BlackPhlox/bevy_dolly/"
+branch = "bevy_0.16"
+default-features = false
+features = ["drivers"]
