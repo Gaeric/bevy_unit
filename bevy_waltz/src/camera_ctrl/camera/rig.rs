@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy_dolly::prelude::{LookAt, Position, Rig, Smooth, YawPitch};
 
 use crate::{
-    camera_ctrl::{CameraAction, actions::ActionsFrozen, config::CameraConfig},
+    camera_ctrl::{CameraAction, config::CameraConfig},
     utils::Vec2Ext,
 };
 
