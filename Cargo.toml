@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = [ "bevy_shine", "bevy_waltz", "units/modular_character"]
+members = [ "bevy_shine", "bevy_waltz", "units/modular_character", "units/tps_camera"]
 
 [dependencies]
 avian3d = "0.3.1"
