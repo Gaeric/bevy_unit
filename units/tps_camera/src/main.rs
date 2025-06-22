@@ -71,13 +71,32 @@ fn update_camera(player: Query<&Transform, With<Player>>, mut rig: Query<&mut Ri
         .set_position_target(player_transform.translation, player_transform.rotation);
 }
 
-fn movement_player(mut player: Query<&mut Transform, With<Player>>, time: Res<Time>) {
+fn movement_player(
+    mut player: Query<&mut Transform, With<Player>>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
     let mut player_transform = player.single_mut().unwrap();
-    let random_x: f32 = rand::random::<f32>() - 0.5;
-    let random_z: f32 = rand::random::<f32>() - 0.5;
+    // let random_x: f32 = rand::random::<f32>() - 0.5;
+    // let random_z: f32 = rand::random::<f32>() - 0.5;
 
-    info!("random x is {random_x}, random z is {random_z}");
+    // info!("random x is {random_x}, random z is {random_z}");
 
-    player_transform.translation.x += random_x;
-    player_transform.translation.z += random_z;
+    // player_transform.translation.x += random_x;
+    // player_transform.translation.z += random_z;
+
+    if keyboard_input.pressed(KeyCode::KeyA) {
+        player_transform.translation.x -= 0.2;
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyD) {
+        player_transform.translation.x += 0.2;
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyS) {
+        player_transform.translation.z -= 0.2;
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyW) {
+        player_transform.translation.z += 0.2;
+    }
 }
