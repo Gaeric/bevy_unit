@@ -28,10 +28,13 @@ mod ctrl_systems;
 mod level_switch;
 
 use ctrl_systems::{
-    CharacterMotionConfig, Dimensionality, FallingThroughControlScheme, ForwardFromCamera,
-    apply_character_control, info_system::*,
+    CharacterMotionConfig, Dimensionality, FallingThroughControlScheme, apply_character_control,
+    info_system::*,
 };
-use level_switch::{IsPlayer, LevelSwitchPlugin, jungle_gym};
+use level_switch::{LevelSwitchPlugin, jungle_gym};
+
+pub use ctrl_systems::ForwardFromCamera;
+pub use level_switch::IsPlayer;
 
 pub(super) fn plugin(app: &mut App) {
     app.add_plugins(PhysicsPlugins::new(FixedPostUpdate));

@@ -1,12 +1,9 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::camera_ctrl::camera::{
-    kind::{
-        update_drivers,
-        // update_kind
-    },
-    // rig::update_rig,
+use crate::{
+    camera_ctrl::camera::{kind::update_drivers, rig::update_rig},
+    character::{ForwardFromCamera, IsPlayer},
 };
 
 mod kind;
@@ -35,9 +32,20 @@ pub(super) fn plugin(app: &mut App) {
         Update,
         (
             // update_kind,
+            set_camera_focus,
             update_drivers,
-            // update_rig,
+            update_rig,
         )
             .chain(),
     );
+}
+
+fn set_camera_focus(
+    mut camera_query: Query<&mut ForwardFromCamera>,
+    player_query: Query<&Transform, With<IsPlayer>>,
+) {
+    let mut camera = camera_query.single_mut().unwrap();
+    let player_transform = player_query.single().unwrap();
+
+    // camera.target = player_transform.translation + Vec3::Y;
 }
