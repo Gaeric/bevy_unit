@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use avian3d::math::AdjustPrecision;
 use bevy::ecs::query::QueryData;
 use bevy::prelude::*;
+use bevy::{color::palettes::css, ecs::system::Query, gizmos::gizmos::Gizmos};
 use bevy::{
     ecs::component::Component,
     input::{ButtonInput, keyboard::KeyCode},
@@ -23,12 +24,9 @@ use bevy_tnua::{
     math::{Float, Vector3},
     prelude::{TnuaBuiltinJump, TnuaBuiltinWalk, TnuaController},
 };
-use spatial_ext_facade::SpatialExtFacade;
+use bevy_tnua_avian3d::TnuaSpatialExtAvian3d;
 
 use crate::level_switch::Climable;
-
-pub mod info_system;
-pub mod spatial_ext_facade;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dimensionality {
@@ -92,6 +90,24 @@ const CROUCH_BUTTONS_2D: &[KeyCode] = &[
 
 const CROUCH_BUTOONS_3D: &[KeyCode] = &[KeyCode::ControlLeft, KeyCode::ControlRight];
 
+pub fn character_control_radar_visualization_system(
+    query: Query<&TnuaObstacleRadar>,
+    spatial_ext: TnuaSpatialExtAvian3d,
+    mut gizmos: Gizmos,
+) {
+    for obstacle_radar in query.iter() {
+        let radar_lens = TnuaRadarLens::new(obstacle_radar, &spatial_ext);
+        for blip in radar_lens.iter_blips() {
+            let closest_point = blip.closest_point().get();
+            gizmos.arrow(
+                obstacle_radar.tracked_position(),
+                closest_point.f32(),
+                css::PALE_VIOLETRED,
+            );
+        }
+    }
+}
+
 pub fn apply_character_control(
     keyboard: Res<ButtonInput<KeyCode>>,
     // todo
@@ -136,7 +152,7 @@ pub fn apply_character_control(
     // defined in the demos crates, and actual games that use Tnua should instead use the
     // appropriate type from the physics backend integration crate they use - e.g.
     // `TnuaSpatialExtAvian2d` or `TnuaSpatialExtRapier3d`.
-    spatial_ext: SpatialExtFacade,
+    spatial_ext: TnuaSpatialExtAvian3d,
     // This is used to determine the qualities of the obstacles (e.g. whether or not they are
     // climbable)
     obstacle_query: Query<ObstacleQueryHelper>,

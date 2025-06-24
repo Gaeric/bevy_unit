@@ -1,12 +1,8 @@
 use animating::{AnimationState, GltfSceneHandler, animate_character, animation_patcher_system};
 /// character controller system
 /// forked from the tnua shooter_like demo
-use avian3d::{
-    math::{AdjustPrecision, Vector},
-    prelude::*,
-};
+use avian3d::{math::Vector, prelude::*};
 use bevy::{
-    input::mouse::MouseMotion,
     prelude::*,
     window::{CursorGrabMode, PrimaryWindow},
 };
@@ -17,7 +13,7 @@ use bevy_tnua::{
         TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaCrouchEnforcerPlugin,
         TnuaSimpleAirActionsCounter, TnuaSimpleFallThroughPlatformsHelper,
     },
-    math::{AsF32, Float, Quaternion, Vector3},
+    math::{Float, Vector3},
     prelude::{TnuaBuiltinWalk, TnuaController, TnuaControllerPlugin},
 };
 use bevy_tnua::{builtins::TnuaBuiltinCrouch, math::float_consts, prelude::TnuaBuiltinJump};
@@ -28,8 +24,9 @@ mod ctrl_systems;
 
 use ctrl_systems::{
     CharacterMotionConfig, Dimensionality, FallingThroughControlScheme, apply_character_control,
-    info_system::*,
 };
+
+use crate::character::ctrl_systems::character_control_radar_visualization_system;
 
 // pub use ctrl_systems::ForwardFromCamera;
 
