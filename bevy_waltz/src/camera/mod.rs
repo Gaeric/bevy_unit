@@ -6,12 +6,24 @@ use bevy_dolly::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    camera_ctrl::camera::{kind::update_drivers, rig::update_rig},
+    camera::{kind::update_drivers, rig::update_rig},
     character::WaltzPlayer,
 };
 
+pub(crate) mod config;
+
+mod arm;
 mod kind;
 mod rig;
+
+pub struct WaltzCameraPlugin;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Reflect, Default)]
+pub(crate) enum CameraAction {
+    #[default]
+    Orbit,
+    Zoom,
+}
 
 #[derive(Debug, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
 #[reflect(Serialize, Deserialize)]
@@ -42,24 +54,6 @@ impl Default for IngameCamera {
     }
 }
 
-pub(super) fn plugin(app: &mut App) {
-    app.register_type::<IngameCameraKind>()
-        .register_type::<IngameCamera>()
-        .add_systems(FixedUpdate, Dolly::<IngameCamera>::update_active)
-        // todo: spawn camera when level load ready
-        .add_systems(Startup, setup_camera)
-        .add_systems(
-            Update,
-            (
-                // update_kind,
-                set_camera_focus,
-                update_drivers,
-                update_rig,
-            )
-                .chain(),
-        );
-}
-
 fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Name::new("waltz-camera"),
@@ -83,4 +77,29 @@ fn set_camera_focus(
     let player_transform = player_query.single().unwrap();
 
     camera.target = player_transform.translation + Vec3::Y;
+}
+
+/// Handles systems exclusive to the character's control. Is split into the following sub-plugins:
+/// - [`actions::plugin`]: Handles character input such as mouse and keyboard and neatly packs it into a [`leafwing_input_manager:Actionlike`].
+/// - [`camera::plugin`]: Handles camera movement
+/// - [`character_embodiment::plugin`]: Tells the components from [`super::movement::plugin`] about the desired [`actions::CharacterAction`]s.
+///     Also handles other systems that change how the character is physically represented in the world.
+impl Plugin for WaltzCameraPlugin {
+    fn build(&self, app: &mut App) {
+        app.register_type::<IngameCameraKind>()
+            .register_type::<IngameCamera>()
+            .add_systems(FixedUpdate, Dolly::<IngameCamera>::update_active)
+            // todo: spawn camera when level load ready
+            .add_systems(Startup, setup_camera)
+            .add_systems(
+                Update,
+                (
+                    // update_kind,
+                    set_camera_focus,
+                    update_drivers,
+                    update_rig,
+                )
+                    .chain(),
+            );
+    }
 }

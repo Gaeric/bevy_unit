@@ -1,12 +1,12 @@
 use bevy::prelude::*;
 
 use crate::{
-    camera_ctrl::WaltzCameraPlugin,
+    camera::WaltzCameraPlugin,
     control::WaltzControlPlugin,
     level_switch::{LevelSwitchPlugin, jungle_gym},
 };
 
-mod camera_ctrl;
+mod camera;
 mod character;
 mod control;
 mod level_switch;

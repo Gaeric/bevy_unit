@@ -1,7 +1,7 @@
-use crate::camera_ctrl::camera::IngameCamera;
-use crate::camera_ctrl::camera::IngameCameraKind;
-use crate::camera_ctrl::config::CameraConfig;
-use crate::camera_ctrl::config::CollisionLayer;
+use crate::camera::IngameCamera;
+use crate::camera::IngameCameraKind;
+use crate::camera::config::CameraConfig;
+use crate::camera::config::CollisionLayer;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy_dolly::prelude::*;
