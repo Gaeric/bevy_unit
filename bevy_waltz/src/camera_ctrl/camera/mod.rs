@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     camera_ctrl::camera::{kind::update_drivers, rig::update_rig},
-    character::{ForwardFromCamera, WaltzPlayer},
+    character::WaltzPlayer,
 };
 
 mod kind;

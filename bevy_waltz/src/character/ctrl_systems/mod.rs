@@ -63,20 +63,20 @@ pub struct CharacterMotionConfig {
     pub climb: TnuaBuiltinClimb,
 }
 
-#[derive(Component)]
-pub struct ForwardFromCamera {
-    pub forward: Vector3,
-    pub pitch_angle: Float,
-}
+// #[derive(Component)]
+// pub struct ForwardFromCamera {
+//     pub forward: Vector3,
+//     pub pitch_angle: Float,
+// }
 
-impl Default for ForwardFromCamera {
-    fn default() -> Self {
-        Self {
-            forward: Vector3::NEG_Z,
-            pitch_angle: 0.0,
-        }
-    }
-}
+// impl Default for ForwardFromCamera {
+//     fn default() -> Self {
+//         Self {
+//             forward: Vector3::NEG_Z,
+//             pitch_angle: 0.0,
+//         }
+//     }
+// }
 
 #[derive(QueryData)]
 pub struct ObstacleQueryHelper {
@@ -125,7 +125,7 @@ pub fn apply_character_control(
         &mut TnuaSimpleAirActionsCounter,
         // This is used in the shooter-like demo to control the forward direction of the
         // character.
-        Option<&ForwardFromCamera>,
+        // Option<&ForwardFromCamera>,
         // This is used to detect all the colliders in a small area around the character.
         &TnuaObstacleRadar,
         // This is used to avoid re-initiating actions on the same obstacles until we return to
@@ -153,7 +153,7 @@ pub fn apply_character_control(
         ghost_sensor,
         mut fall_through_helper,
         mut air_actions_counter,
-        forward_from_camera,
+        // forward_from_camera,
         obstacle_radar,
         mut blip_reuse_avoidance,
     ) in query.iter_mut()
@@ -183,14 +183,16 @@ pub fn apply_character_control(
 
             let screen_space_direction = direction.clamp_length_max(1.0);
 
-            let direction = if let Some(forward_from_camera) = forward_from_camera {
-                Transform::default()
-                    .looking_to(forward_from_camera.forward.f32(), Vec3::Y)
-                    .transform_point(screen_space_direction.f32())
-                    .adjust_precision()
-            } else {
-                screen_space_direction
-            };
+            // todo: get right forward direction for character
+            let direction = screen_space_direction;
+            // let direction = if let Some(forward_from_camera) = forward_from_camera {
+            //     Transform::default()
+            //         .looking_to(forward_from_camera.forward.f32(), Vec3::Y)
+            //         .transform_point(screen_space_direction.f32())
+            //         .adjust_precision()
+            // } else {
+            //     screen_space_direction
+            // };
 
             let jump = match (config.dimensionality, is_climbing) {
                 (Dimensionality::Dim2, true) => keyboard.any_pressed([KeyCode::Space]),
@@ -201,8 +203,9 @@ pub fn apply_character_control(
             };
 
             let dash = keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::AltRight]);
-            let turn_in_place = forward_from_camera.is_none()
-                && keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
+            // let turn_in_place = forward_from_camera.is_none()
+            //     && keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
+            let turn_in_place = keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
 
             let crouch_buttons = match (config.dimensionality, is_climbing) {
                 (Dimensionality::Dim2, true) => CROUCH_BUTOONS_3D.iter().copied(),
@@ -392,14 +395,20 @@ pub fn apply_character_control(
                 } else {
                     direction * speed_factor * config.speed
                 },
-                desired_forward: if let Some(forward_from_camera) = forward_from_camera {
-                    // With shooters, we want the character model to follow the camera.
-                    trace!(
-                        "with forward_from_camera, forward {:?}",
-                        forward_from_camera.forward
-                    );
-                    Dir3::new(-forward_from_camera.forward.f32()).ok()
-                } else {
+                // desired_forward: if let Some(forward_from_camera) = forward_from_camera {
+                //     // With shooters, we want the character model to follow the camera.
+                //     trace!(
+                //         "with forward_from_camera, forward {:?}",
+                //         forward_from_camera.forward
+                //     );
+                //     Dir3::new(-forward_from_camera.forward.f32()).ok()
+                // } else {
+                //     // For platformers, we only want to change direction when the charcter tries to
+                //     // moves (or when the player explicitly wants to set the direction)
+                //     trace!("without forward_from_camera, forward {:?}", direction);
+                //     Dir3::new(-direction.f32()).ok()
+                // },
+                desired_forward: {
                     // For platformers, we only want to change direction when the charcter tries to
                     // moves (or when the player explicitly wants to set the direction)
                     trace!("without forward_from_camera, forward {:?}", direction);
@@ -654,13 +663,14 @@ pub fn apply_character_control(
                     // When set, the `desired_forward` of the dash action "overrides" the
                     // `desired_forward` of the walk basis. Like the displacement, it gets "frozen" -
                     // allowing to easily maintain a forward direction during the dash.
-                    desired_forward: if forward_from_camera.is_none() {
-                        Dir3::new(direction.f32()).ok()
-                    } else {
-                        // For shooters, we want to allow rotating mid-dash if the player moves the
-                        // mouse.
-                        None
-                    },
+                    // desired_forward: if forward_from_camera.is_none() {
+                    //     Dir3::new(direction.f32()).ok()
+                    // } else {
+                    //     // For shooters, we want to allow rotating mid-dash if the player moves the
+                    //     // mouse.
+                    //     None
+                    // },
+                    desired_forward: Dir3::new(direction.f32()).ok(),
                     allow_in_air: air_actions_counter.air_count_for(TnuaBuiltinDash::NAME)
                         <= config.actions_in_air,
                     ..config.dash.clone()
