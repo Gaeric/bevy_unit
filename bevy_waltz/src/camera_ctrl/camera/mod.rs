@@ -1,4 +1,8 @@
 use bevy::prelude::*;
+use bevy_dolly::{
+    prelude::{Arm, LookAt, Position, Rig, Smooth, YawPitch},
+    system::Dolly,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -27,25 +31,56 @@ pub(crate) struct IngameCamera {
     pub(crate) kind: IngameCameraKind,
 }
 
+impl Default for IngameCamera {
+    fn default() -> Self {
+        Self {
+            desired_distance: 5.0,
+            target: default(),
+            secondary_target: default(),
+            kind: default(),
+        }
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(
-        Update,
-        (
-            // update_kind,
-            set_camera_focus,
-            update_drivers,
-            update_rig,
-        )
-            .chain(),
-    );
+    app.register_type::<IngameCameraKind>()
+        .register_type::<IngameCamera>()
+        .add_systems(FixedUpdate, Dolly::<IngameCamera>::update_active)
+        // todo: spawn camera when level load ready
+        .add_systems(Startup, setup_camera)
+        .add_systems(
+            Update,
+            (
+                // update_kind,
+                set_camera_focus,
+                update_drivers,
+                update_rig,
+            )
+                .chain(),
+        );
+}
+
+fn setup_camera(mut commands: Commands) {
+    commands.spawn((
+        Name::new("waltz-camera"),
+        Camera3d::default(),
+        IngameCamera::default(),
+        Rig::builder()
+            .with(Position::default())
+            .with(YawPitch::default())
+            .with(Smooth::default())
+            .with(Arm::new(Vec3::default()))
+            .with(LookAt::new(Vec3::default()).tracking_predictive(true))
+            .build(),
+    ));
 }
 
 fn set_camera_focus(
-    mut camera_query: Query<&mut ForwardFromCamera>,
+    mut camera_query: Query<&mut IngameCamera>,
     player_query: Query<&Transform, With<WaltzPlayer>>,
 ) {
     let mut camera = camera_query.single_mut().unwrap();
     let player_transform = player_query.single().unwrap();
 
-    // camera.target = player_transform.translation + Vec3::Y;
+    camera.target = player_transform.translation + Vec3::Y;
 }
