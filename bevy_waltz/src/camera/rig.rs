@@ -135,8 +135,9 @@ fn set_desired_distance(
     // let zoom = actions.clamped_value(&CameraAction::Zoom) * config.third_person.zoom_speed;
     let (min_distance, max_distance) = match camera.kind {
         IngameCameraKind::ThirdPerson => (
-            config.third_person.min_distance,
-            config.third_person.max_distance,
+            // config.third_person.min_distance,
+            // config.third_person.max_distance,
+            1.0, 5.0,
         ),
         IngameCameraKind::FixedAngle => (
             config.fixed_angle.min_distance,

@@ -6,7 +6,7 @@ use bevy_dolly::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    camera::{kind::update_drivers, rig::update_rig},
+    camera::{config::CameraConfig, kind::update_drivers, rig::update_rig},
     character::WaltzPlayer,
 };
 
@@ -76,7 +76,7 @@ fn set_camera_focus(
     let mut camera = camera_query.single_mut().unwrap();
     let player_transform = player_query.single().unwrap();
 
-    camera.target = player_transform.translation + Vec3::Y;
+    camera.target = player_transform.translation + Vec3::Y * 1.75;
 }
 
 /// Handles systems exclusive to the character's control. Is split into the following sub-plugins:
@@ -88,6 +88,7 @@ impl Plugin for WaltzCameraPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<IngameCameraKind>()
             .register_type::<IngameCamera>()
+            .init_resource::<CameraConfig>()
             .add_systems(FixedUpdate, Dolly::<IngameCamera>::update_active)
             // todo: spawn camera when level load ready
             .add_systems(Startup, setup_camera)
