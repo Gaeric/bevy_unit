@@ -2,12 +2,21 @@ use bevy::{
     prelude::*,
     window::{CursorGrabMode, PrimaryWindow},
 };
+use bevy_tnua::TnuaUserControlsSystemSet;
+
+use crate::control::character_ctrl::apply_character_control;
+
+mod character_ctrl;
 
 pub struct WaltzControlPlugin;
 
 impl Plugin for WaltzControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, grab_ungrab_mouse);
+        app.add_systems(
+            FixedUpdate,
+            apply_character_control.in_set(TnuaUserControlsSystemSet),
+        );
     }
 }
 

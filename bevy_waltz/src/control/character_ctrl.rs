@@ -2,12 +2,9 @@ use std::cmp::Ordering;
 
 use avian3d::math::AdjustPrecision;
 use bevy::ecs::query::QueryData;
+use bevy::input::{ButtonInput, keyboard::KeyCode};
 use bevy::prelude::*;
 use bevy::{color::palettes::css, ecs::system::Query, gizmos::gizmos::Gizmos};
-use bevy::{
-    ecs::component::Component,
-    input::{ButtonInput, keyboard::KeyCode},
-};
 use bevy_tnua::builtins::TnuaBuiltinCrouchState;
 use bevy_tnua::control_helpers::{
     TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaSimpleAirActionsCounter,
@@ -17,49 +14,16 @@ use bevy_tnua::math::AsF32;
 use bevy_tnua::radar_lens::{TnuaBlipSpatialRelation, TnuaRadarLens};
 use bevy_tnua::{TnuaAction, TnuaGhostSensor, TnuaObstacleRadar, TnuaProximitySensor};
 use bevy_tnua::{
-    builtins::{
-        TnuaBuiltinClimb, TnuaBuiltinCrouch, TnuaBuiltinDash, TnuaBuiltinKnockback,
-        TnuaBuiltinWallSlide,
-    },
+    builtins::{TnuaBuiltinClimb, TnuaBuiltinCrouch, TnuaBuiltinDash, TnuaBuiltinWallSlide},
     math::{Float, Vector3},
     prelude::{TnuaBuiltinJump, TnuaBuiltinWalk, TnuaController},
 };
 use bevy_tnua_avian3d::TnuaSpatialExtAvian3d;
 
+use crate::character::config::{
+    CharacterMotionConfig, Dimensionality, FallingThroughControlScheme,
+};
 use crate::level_switch::Climable;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Dimensionality {
-    Dim2,
-    Dim3,
-}
-
-#[derive(Component, Debug, PartialEq, Default)]
-pub enum FallingThroughControlScheme {
-    JumpThroughOnly,
-    WithoutHelper,
-    #[default]
-    SingleFall,
-    KeepFalling,
-}
-
-#[derive(Component)]
-pub struct CharacterMotionConfig {
-    pub dimensionality: Dimensionality,
-    pub speed: Float,
-    pub walk: TnuaBuiltinWalk,
-    pub actions_in_air: usize,
-    pub jump: TnuaBuiltinJump,
-    pub crouch: TnuaBuiltinCrouch,
-    pub dash_distance: Float,
-    pub dash: TnuaBuiltinDash,
-    pub one_way_platforms_min_proximity: Float,
-    pub falling_through: FallingThroughControlScheme,
-    pub knockback: TnuaBuiltinKnockback,
-    pub wall_slide: TnuaBuiltinWallSlide,
-    pub climb_speed: Float,
-    pub climb: TnuaBuiltinClimb,
-}
 
 // #[derive(Component)]
 // pub struct ForwardFromCamera {
@@ -89,24 +53,6 @@ const CROUCH_BUTTONS_2D: &[KeyCode] = &[
 ];
 
 const CROUCH_BUTOONS_3D: &[KeyCode] = &[KeyCode::ControlLeft, KeyCode::ControlRight];
-
-pub fn character_control_radar_visualization_system(
-    query: Query<&TnuaObstacleRadar>,
-    spatial_ext: TnuaSpatialExtAvian3d,
-    mut gizmos: Gizmos,
-) {
-    for obstacle_radar in query.iter() {
-        let radar_lens = TnuaRadarLens::new(obstacle_radar, &spatial_ext);
-        for blip in radar_lens.iter_blips() {
-            let closest_point = blip.closest_point().get();
-            gizmos.arrow(
-                obstacle_radar.tracked_position(),
-                closest_point.f32(),
-                css::PALE_VIOLETRED,
-            );
-        }
-    }
-}
 
 pub fn apply_character_control(
     keyboard: Res<ButtonInput<KeyCode>>,

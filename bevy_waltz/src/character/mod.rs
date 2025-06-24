@@ -1,37 +1,54 @@
+///! character controller system
+///! forked from the tnua shooter_like demo
 use animating::{AnimationState, GltfSceneHandler, animate_character, animation_patcher_system};
-/// character controller system
-/// forked from the tnua shooter_like demo
 use avian3d::{math::Vector, prelude::*};
+use bevy::{color::palettes::css, ecs::system::Query, gizmos::gizmos::Gizmos};
 use bevy::{
     prelude::*,
     window::{CursorGrabMode, PrimaryWindow},
 };
+use bevy_tnua::math::AsF32;
 
 use bevy_tnua::{
-    TnuaAnimatingState, TnuaGhostSensor, TnuaObstacleRadar, TnuaToggle, TnuaUserControlsSystemSet,
+    TnuaAnimatingState, TnuaGhostSensor, TnuaObstacleRadar, TnuaToggle,
     control_helpers::{
         TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaCrouchEnforcerPlugin,
         TnuaSimpleAirActionsCounter, TnuaSimpleFallThroughPlatformsHelper,
     },
     math::{Float, Vector3},
     prelude::{TnuaBuiltinWalk, TnuaController, TnuaControllerPlugin},
+    radar_lens::TnuaRadarLens,
 };
 use bevy_tnua::{builtins::TnuaBuiltinCrouch, math::float_consts, prelude::TnuaBuiltinJump};
 use bevy_tnua_avian3d::*;
 
-mod animating;
-mod ctrl_systems;
-
-use ctrl_systems::{
-    CharacterMotionConfig, Dimensionality, FallingThroughControlScheme, apply_character_control,
+use crate::character::config::{
+    CharacterMotionConfig, Dimensionality, FallingThroughControlScheme,
 };
 
-use crate::character::ctrl_systems::character_control_radar_visualization_system;
-
-// pub use ctrl_systems::ForwardFromCamera;
+mod animating;
+pub mod config;
 
 #[derive(Component, Debug)]
 pub struct WaltzPlayer;
+
+pub fn character_control_radar_visualization_system(
+    query: Query<&TnuaObstacleRadar>,
+    spatial_ext: TnuaSpatialExtAvian3d,
+    mut gizmos: Gizmos,
+) {
+    for obstacle_radar in query.iter() {
+        let radar_lens = TnuaRadarLens::new(obstacle_radar, &spatial_ext);
+        for blip in radar_lens.iter_blips() {
+            let closest_point = blip.closest_point().get();
+            gizmos.arrow(
+                obstacle_radar.tracked_position(),
+                closest_point.f32(),
+                css::PALE_VIOLETRED,
+            );
+        }
+    }
+}
 
 pub(super) fn plugin(app: &mut App) {
     app.add_plugins(PhysicsPlugins::new(FixedPostUpdate));
@@ -56,11 +73,6 @@ pub(super) fn plugin(app: &mut App) {
     //     PostUpdate,
     //     apply_camera_controls.before(TransformSystem::TransformPropagate),
     // );
-
-    app.add_systems(
-        FixedUpdate,
-        apply_character_control.in_set(TnuaUserControlsSystemSet),
-    );
     app.add_systems(Update, animation_patcher_system);
     // todo
     app.add_systems(Update, animate_character);
