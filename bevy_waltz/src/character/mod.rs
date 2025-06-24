@@ -25,16 +25,16 @@ use bevy_tnua_avian3d::*;
 
 mod animating;
 mod ctrl_systems;
-mod level_switch;
 
 use ctrl_systems::{
     CharacterMotionConfig, Dimensionality, FallingThroughControlScheme, apply_character_control,
     info_system::*,
 };
-use level_switch::{LevelSwitchPlugin, jungle_gym};
 
 pub use ctrl_systems::ForwardFromCamera;
-pub use level_switch::IsPlayer;
+
+#[derive(Component, Debug)]
+pub struct WaltzPlayer;
 
 pub(super) fn plugin(app: &mut App) {
     app.add_plugins(PhysicsPlugins::new(FixedPostUpdate));
@@ -50,12 +50,6 @@ pub(super) fn plugin(app: &mut App) {
 
     app.add_systems(Startup, setup_camera_and_lights);
     // app.add_systems(Startup, setup_sphere);
-
-    app.add_plugins(
-        LevelSwitchPlugin::new(Some("jungle_gym")).with("jungle_gym", jungle_gym::setup_level),
-    );
-    // level switching
-    // app.add_plugins();
 
     // spawn player
     app.add_systems(Startup, setup_player);
@@ -122,7 +116,7 @@ fn grab_ungrab_mouse(
 }
 
 fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let mut cmd = commands.spawn(IsPlayer);
+    let mut cmd = commands.spawn(WaltzPlayer);
     cmd.insert(SceneRoot(
         // asset_server.load("waltz/scenes/library/Fox.glb#Scene0"),
         asset_server.load("waltz/ani_model_1.0_20250608.glb#Scene0"),
@@ -204,7 +198,7 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
 }
 
 fn apply_camera_controls(
-    mut primary_window_query: Query<&mut Window, With<PrimaryWindow>>,
+    primary_window_query: Query<&mut Window, With<PrimaryWindow>>,
     mut mouse_motion: EventReader<MouseMotion>,
     mut player_character_query: Query<(&GlobalTransform, &mut ForwardFromCamera)>,
     mut camera_query: Query<&mut Transform, With<Camera>>,

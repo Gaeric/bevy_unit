@@ -4,7 +4,7 @@ use avian3d::math::AdjustPrecision;
 use bevy::ecs::query::QueryData;
 use bevy::prelude::*;
 use bevy::{
-    ecs::{component::Component, system::ResMut},
+    ecs::component::Component,
     input::{ButtonInput, keyboard::KeyCode},
 };
 use bevy_tnua::builtins::TnuaBuiltinCrouchState;
@@ -25,7 +25,7 @@ use bevy_tnua::{
 };
 use spatial_ext_facade::SpatialExtFacade;
 
-use super::level_switch::Climable;
+use crate::level_switch::Climable;
 
 pub mod info_system;
 pub mod spatial_ext_facade;
@@ -394,7 +394,10 @@ pub fn apply_character_control(
                 },
                 desired_forward: if let Some(forward_from_camera) = forward_from_camera {
                     // With shooters, we want the character model to follow the camera.
-                    trace!("with forward_from_camera, forward {:?}", forward_from_camera.forward);
+                    trace!(
+                        "with forward_from_camera, forward {:?}",
+                        forward_from_camera.forward
+                    );
                     Dir3::new(-forward_from_camera.forward.f32()).ok()
                 } else {
                     // For platformers, we only want to change direction when the charcter tries to
