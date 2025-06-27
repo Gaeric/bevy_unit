@@ -16,10 +16,15 @@
    - artists:
    - design:
 ** hot patch
-   当前尝试但未成功，下个发布版本后再尝试
-
    offical: https://github.com/bevyengine/bevy/pull/19309
    plugins: https://github.com/TheBevyFlock/bevy_simple_subsecond_system
+
+   需要先手动安装最新的dioxus-cli:
+
+   cargo install --git https://github.com/DioxusLabs/dioxus dioxus-cli --locked
+
+   在bevy的开发版本中进行尝试：
+   dx serve --hot-patch --example hotpatching_systems --features hotpatching
 ** 3c system
    character-control-camera系统
 *** character部分
