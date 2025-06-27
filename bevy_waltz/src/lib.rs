@@ -5,12 +5,14 @@ use crate::{
     control::WaltzControlPlugin,
     level_switch::{LevelSwitchPlugin, jungle_gym},
 };
-
 mod camera;
 mod character;
 mod control;
 mod level_switch;
 mod utils;
+
+pub use camera::WaltzCamera;
+pub use character::WaltzPlayer;
 
 pub struct WaltzPlugin;
 

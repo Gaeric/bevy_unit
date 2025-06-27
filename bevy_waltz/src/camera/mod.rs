@@ -16,7 +16,9 @@ mod arm;
 mod kind;
 mod rig;
 
-pub struct WaltzCameraPlugin;
+/// Marks an entity as the camera that follows the player
+#[derive(Component, Debug)]
+pub struct WaltzCamera;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Reflect, Default)]
 pub(crate) enum CameraAction {
@@ -78,6 +80,8 @@ fn set_camera_focus(
 
     camera.target = player_transform.translation + Vec3::Y * 1.75;
 }
+
+pub struct WaltzCameraPlugin;
 
 /// Handles systems exclusive to the character's control. Is split into the following sub-plugins:
 /// - [`actions::plugin`]: Handles character input such as mouse and keyboard and neatly packs it into a [`leafwing_input_manager:Actionlike`].

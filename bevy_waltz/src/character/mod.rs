@@ -22,13 +22,12 @@ use bevy_tnua::{
 use bevy_tnua::{builtins::TnuaBuiltinCrouch, math::float_consts, prelude::TnuaBuiltinJump};
 use bevy_tnua_avian3d::*;
 
-use crate::character::config::{
-    CharacterMotionConfig, Dimensionality, FallingThroughControlScheme,
-};
-
 mod animating;
 pub mod config;
 
+use config::{CharacterMotionConfig, Dimensionality, FallingThroughControlScheme};
+
+/// Marks an entity as the player character
 #[derive(Component, Debug)]
 pub struct WaltzPlayer;
 
