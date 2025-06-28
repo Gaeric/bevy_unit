@@ -5592,6 +5592,7 @@ dependencies = [
 name = "tps_camera"
 version = "0.1.0"
 dependencies = [
+ "avian3d",
  "bevy",
  "bevy_dolly",
  "rand 0.9.1",

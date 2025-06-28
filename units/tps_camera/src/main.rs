@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 mod dolly_camera;
+mod waltz_camera;
 
 #[derive(Component)]
 struct Character;
