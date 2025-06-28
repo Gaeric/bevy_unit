@@ -72,7 +72,7 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn set_camera_focus(
-    mut camera_query: Query<&mut IngameCamera>,
+    mut camera_query: Query<&mut IngameCamera, With<WaltzCamera>>,
     player_query: Query<&Transform, With<WaltzPlayer>>,
 ) {
     let mut camera = camera_query.single_mut().unwrap();

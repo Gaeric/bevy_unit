@@ -1,7 +1,7 @@
 //! the example fork from avian kinematic_character_3d
 
 use avian3d::{math::*, prelude::*};
-use bevy::{math::VectorSpace, prelude::*};
+use bevy::prelude::*;
 
 fn main() {
     App::new()
@@ -44,15 +44,15 @@ fn setup(
             .with_movement(30.0, 0.92, 7.0, (30.0 as Scalar).to_radians()),
     ));
 
-    commands.spawn((
-        SceneRoot(asset_server.load("waltz/ani_model_1.0_20250608.glb#Scene0")),
-        Transform::from_xyz(1.0, 5.0, 0.0),
-        CharacterControllerBundle::new(
-            Collider::capsule_endpoints(0.5, 0.5 * Vector::Y, 1.2 * Vector::Y),
-            Vector::NEG_Y * 9.81 * 0.5,
-        )
-        .with_movement(30.0, 0.92, 7.0, (30.0 as Scalar).to_radians()),
-    ));
+    // commands.spawn((
+    //     SceneRoot(asset_server.load("waltz/ani_model_1.0_20250608.glb#Scene0")),
+    //     Transform::from_xyz(1.0, 5.0, 0.0),
+    //     CharacterControllerBundle::new(
+    //         Collider::capsule_endpoints(0.5, 0.5 * Vector::Y, 1.2 * Vector::Y),
+    //         Vector::NEG_Y * 9.81 * 0.5,
+    //     )
+    //     .with_movement(30.0, 0.92, 7.0, (30.0 as Scalar).to_radians()),
+    // ));
 
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(50.0, 50.0))),
