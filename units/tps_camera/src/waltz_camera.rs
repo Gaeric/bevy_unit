@@ -12,13 +12,15 @@ fn setup_camera(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // root anchor
-    commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(0.1))),
-        MeshMaterial3d(materials.add(Color::from(BLUE_600))),
-        Transform::from_xyz(0.0, 3.0, 0.0),
-    ));
+    let root_anchor = commands
+        .spawn((
+            Mesh3d(meshes.add(Sphere::new(0.1))),
+            MeshMaterial3d(materials.add(Color::from(BLUE_600))),
+            Transform::from_xyz(0.0, 3.0, 0.0),
+        ))
+        .id();
 
-    // arm anchor
+    // arm
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::new(6.0, 0.1, 0.1))),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -34,14 +36,23 @@ fn setup_camera(
     ));
 
     // camera anchor
-    commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(0.1))),
-        MeshMaterial3d(materials.add(Color::srgb(0.5, 0.4, 0.3))),
-        Transform::from_xyz(6.1, 3.0, 0.0),
-        RigidBody::Dynamic,
-        Collider::sphere(0.1),
-        GravityScale(0.0),
-    ));
+    let camera_anchor = commands
+        .spawn((
+            Mesh3d(meshes.add(Sphere::new(0.1))),
+            MeshMaterial3d(materials.add(Color::srgb(0.5, 0.4, 0.3))),
+            Transform::from_xyz(6.1, 3.0, 0.0),
+            RigidBody::Dynamic,
+            Collider::sphere(0.1),
+            GravityScale(0.0),
+        ))
+        .id();
+
+    commands.spawn(
+        PrismaticJoint::new(root_anchor, camera_anchor)
+            .with_local_anchor_1(Vec3::X)
+            .with_free_axis(Vec3::X)
+            .with_limits(0.5, 2.0),
+    );
 
     commands.spawn((
         Camera3d::default(),
