@@ -16,7 +16,7 @@ pub fn plugin(app: &mut App) {
     );
 }
 
-pub fn setup_camera(mut commands: Commands) {
+fn setup_camera(mut commands: Commands) {
     commands.spawn((
         MainCamera,
         Rig::builder()
