@@ -1,23 +1,16 @@
+//! this unit is used to implement WaltzCamera, whose motion is driven by `avian`
+
 use bevy::prelude::*;
-use bevy_dolly::{
-    prelude::{MovableLookAt, Rig},
-    system::Dolly,
-};
+mod dolly_camera;
 
 #[derive(Component)]
-struct MainCamera;
-
-#[derive(Component)]
-struct Player;
+struct Character;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(dolly_camera::plugin)
         .add_systems(Startup, setup)
-        .add_systems(
-            FixedUpdate,
-            (Dolly::<MainCamera>::update_active, update_camera),
-        )
         .add_systems(FixedUpdate, movement_player)
         .run();
 }
@@ -27,13 +20,12 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
 ) {
     commands.spawn((
         Mesh3d(meshes.add(Capsule3d::new(0.5, 1.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
         Transform::from_xyz(0.0, 1.0, 0.0),
-        Player,
+        Character,
     ));
 
     commands.spawn((
@@ -50,29 +42,10 @@ fn setup(
         },
         Transform::from_xyz(0.0, 15.0, 0.0),
     ));
-
-    commands.spawn((
-        MainCamera,
-        Rig::builder()
-            .with(MovableLookAt::from_position_target(Vec3::new(
-                0.0, 0.0, 0.0,
-            )))
-            .build(),
-        Camera3d::default(),
-        Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-}
-
-fn update_camera(player: Query<&Transform, With<Player>>, mut rig: Query<&mut Rig>) {
-    let player_transform = player.single().unwrap();
-    let mut rig = rig.single_mut().unwrap();
-
-    rig.driver_mut::<MovableLookAt>()
-        .set_position_target(player_transform.translation, player_transform.rotation);
 }
 
 fn movement_player(
-    mut player: Query<&mut Transform, With<Player>>,
+    mut player: Query<&mut Transform, With<Character>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
     let mut player_transform = player.single_mut().unwrap();
