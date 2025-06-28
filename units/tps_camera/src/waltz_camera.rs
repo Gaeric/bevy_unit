@@ -21,7 +21,15 @@ fn setup_camera(
     // arm anchor
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::new(6.0, 0.1, 0.1))),
-        MeshMaterial3d(materials.add(Color::from(BLUE_600))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::from(BLUE_600),
+            specular_transmission: 0.9,
+            diffuse_transmission: 1.0,
+            thickness: 0.1,
+            ior: 1.5,
+            perceptual_roughness: 0.12,
+            ..default()
+        })),
         Transform::from_xyz(3.1, 3.0, 0.0),
     ));
 
