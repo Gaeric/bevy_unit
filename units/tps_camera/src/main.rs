@@ -10,7 +10,8 @@ struct Character;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(dolly_camera::plugin)
+        // .add_plugins(dolly_camera::plugin)
+        .add_plugins(waltz_camera::plugin)
         .add_systems(Startup, setup)
         .add_systems(FixedUpdate, movement_player)
         .run();

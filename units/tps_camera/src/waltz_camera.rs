@@ -31,6 +31,8 @@ fn setup_camera(
         MeshMaterial3d(materials.add(Color::srgb(0.5, 0.4, 0.3))),
         Transform::from_xyz(6.1, 3.0, 0.0),
         RigidBody::Dynamic,
+        Collider::sphere(0.1),
+        GravityScale(0.0),
     ));
 
     commands.spawn((
