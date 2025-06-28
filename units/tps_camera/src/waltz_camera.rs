@@ -17,6 +17,7 @@ fn setup_camera(
             Mesh3d(meshes.add(Sphere::new(0.1))),
             MeshMaterial3d(materials.add(Color::from(BLUE_600))),
             Transform::from_xyz(0.0, 3.0, 0.0),
+            RigidBody::Kinematic,
         ))
         .id();
 
@@ -43,7 +44,8 @@ fn setup_camera(
             Transform::from_xyz(6.1, 3.0, 0.0),
             RigidBody::Dynamic,
             Collider::sphere(0.1),
-            GravityScale(0.0),
+            // GravityScale(0.0),
+            MassPropertiesBundle::from_shape(&Cuboid::from_length(1.0), 1.0),
         ))
         .id();
 
