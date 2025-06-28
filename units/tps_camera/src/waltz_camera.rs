@@ -1,10 +1,16 @@
 use avian3d::prelude::*;
 use bevy::{color::palettes::tailwind::BLUE_600, prelude::*};
 
+use crate::Character;
+
 pub fn plugin(app: &mut App) {
     app.add_plugins(PhysicsPlugins::default())
-        .add_systems(Startup, setup_camera);
+        .add_systems(Startup, setup_camera)
+        .add_systems(Update, move_camera);
 }
+
+#[derive(Component, Debug)]
+pub struct MainCamera;
 
 fn setup_camera(
     mut commands: Commands,
@@ -17,6 +23,7 @@ fn setup_camera(
             Mesh3d(meshes.add(Sphere::new(0.1))),
             MeshMaterial3d(materials.add(Color::from(BLUE_600))),
             Transform::from_xyz(0.0, 3.0, 0.0),
+            MainCamera,
             RigidBody::Kinematic,
         ))
         .id();
@@ -60,4 +67,14 @@ fn setup_camera(
         Camera3d::default(),
         Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+}
+
+fn move_camera(
+    player_query: Query<&mut Transform, (With<Character>, Without<MainCamera>)>,
+    mut root_query: Query<&mut Transform, (With<MainCamera>, Without<Character>)>,
+) {
+    let mut root_transform = root_query.single_mut().unwrap();
+    let player_transform = player_query.single().unwrap();
+
+    *root_transform = *player_transform;
 }

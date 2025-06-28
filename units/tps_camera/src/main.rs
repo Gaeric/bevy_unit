@@ -74,4 +74,8 @@ fn movement_player(
     if keyboard_input.pressed(KeyCode::KeyW) {
         player_transform.translation.z += 0.2;
     }
+
+    if keyboard_input.pressed(KeyCode::Space) {
+        player_transform.translation.y += 0.2;
+    }
 }
