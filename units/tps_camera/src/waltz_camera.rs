@@ -5,7 +5,9 @@ use crate::Character;
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(PhysicsPlugins::default())
+        .add_plugins(PhysicsDebugPlugin::default())
         .add_systems(Startup, setup_camera)
+        .add_systems(Startup, generic_static_cuboid)
         .add_systems(Update, move_camera);
 }
 
@@ -51,7 +53,7 @@ fn setup_camera(
             Transform::from_xyz(6.1, 3.0, 0.0),
             RigidBody::Dynamic,
             Collider::sphere(0.1),
-            // GravityScale(0.0),
+            GravityScale(0.0),
             MassPropertiesBundle::from_shape(&Cuboid::from_length(1.0), 1.0),
         ))
         .id();
@@ -61,12 +63,29 @@ fn setup_camera(
             .with_local_anchor_1(Vec3::X)
             .with_local_anchor_2(Vec3::X)
             .with_free_axis(Vec3::X)
-            .with_limits(2.00, 2.00),
+            .with_compliance(0.00000001)
+            .with_linear_velocity_damping(0.2)
+            .with_angular_velocity_damping(1.0)
+            .with_limits(1.00, 2.00),
     );
 
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+}
+
+fn generic_static_cuboid(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(2.0, 2.0, 2.0))),
+        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
+        RigidBody::Static,
+        Transform::from_xyz(10.0, 1.0, 0.0),
+        Collider::cuboid(2.0, 2.0, 2.0),
     ));
 }
 
