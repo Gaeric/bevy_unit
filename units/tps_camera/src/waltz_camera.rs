@@ -59,8 +59,9 @@ fn setup_camera(
     commands.spawn(
         PrismaticJoint::new(root_anchor, camera_anchor)
             .with_local_anchor_1(Vec3::X)
+            .with_local_anchor_2(Vec3::X)
             .with_free_axis(Vec3::X)
-            .with_limits(0.5, 2.0),
+            .with_limits(2.00, 2.00),
     );
 
     commands.spawn((
