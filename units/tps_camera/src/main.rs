@@ -60,22 +60,31 @@ fn movement_player(
     // player_transform.translation.z += random_z;
 
     if keyboard_input.pressed(KeyCode::KeyA) {
-        player_transform.translation.x -= 0.2;
+        player_transform.translation.x -= 0.1;
     }
 
     if keyboard_input.pressed(KeyCode::KeyD) {
-        player_transform.translation.x += 0.2;
+        player_transform.translation.x += 0.1;
     }
 
     if keyboard_input.pressed(KeyCode::KeyS) {
-        player_transform.translation.z -= 0.2;
+        player_transform.translation.z -= 0.1;
     }
 
     if keyboard_input.pressed(KeyCode::KeyW) {
-        player_transform.translation.z += 0.2;
+        player_transform.translation.z += 0.1;
     }
 
     if keyboard_input.pressed(KeyCode::Space) {
-        player_transform.translation.y += 0.2;
+        player_transform.translation.y += 0.1;
     }
+
+    if keyboard_input.pressed(KeyCode::KeyQ) {
+        player_transform.rotate_y(0.05);
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyE) {
+        player_transform.rotate_y(-0.05);
+    }
+
 }
