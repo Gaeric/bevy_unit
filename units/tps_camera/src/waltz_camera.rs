@@ -54,19 +54,19 @@ fn setup_camera(
             RigidBody::Dynamic,
             Collider::sphere(0.1),
             GravityScale(0.0),
-            MassPropertiesBundle::from_shape(&Sphere::new(0.1), 1.0),
+            MassPropertiesBundle::from_shape(&Sphere::new(0.1), 100.0),
         ))
         .id();
 
     commands.spawn(
         PrismaticJoint::new(root_anchor, camera_anchor)
-            .with_local_anchor_1(Vec3::X)
-            .with_local_anchor_2(Vec3::X)
+            // .with_local_anchor_1(Vec3::X)
+            // .with_local_anchor_2(Vec3::X)
             .with_free_axis(Vec3::X)
-            .with_compliance(1.0)
+            .with_compliance(1.0 / 20.0)
             .with_linear_velocity_damping(1.0)
             .with_angular_velocity_damping(1.0)
-            .with_limits(0.1, 2.00),
+            .with_limits(1.0, 1.1),
     );
 
     commands.spawn((
