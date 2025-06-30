@@ -9,8 +9,12 @@ fn main() {
             PhysicsDebugPlugin::default(),
         ))
         .add_systems(Startup, setup)
+        .add_systems(FixedUpdate, move_static_cube)
         .run();
 }
+
+#[derive(Component)]
+pub struct Character;
 
 fn setup(
     mut commands: Commands,
@@ -27,6 +31,7 @@ fn setup(
             RigidBody::Static,
             Collider::cuboid(1.0, 1.0, 1.0),
             Transform::from_xyz(0.0, 8.0, 0.0),
+            Character,
         ))
         .id();
 
@@ -49,6 +54,21 @@ fn setup(
 
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 0.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.0, 10.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+}
+
+fn move_static_cube(
+    mut player_query: Query<&mut Transform, With<Character>>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    let mut player_transform = player_query.single_mut().unwrap();
+
+    if keyboard_input.pressed(KeyCode::KeyW) {
+        player_transform.translation.y += 0.1;
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyS) {
+        player_transform.translation.y -= 0.1;
+    }
 }
