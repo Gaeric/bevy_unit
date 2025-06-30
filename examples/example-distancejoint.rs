@@ -3,7 +3,11 @@ use bevy::prelude::*;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins((
+            DefaultPlugins,
+            PhysicsPlugins::default(),
+            PhysicsDebugPlugin::default(),
+        ))
         .add_systems(Startup, setup)
         .run();
 }
@@ -29,7 +33,7 @@ fn setup(
         .spawn((
             Mesh3d(cube_mesh),
             MeshMaterial3d(cube_material),
-            Transform::from_xyz(0.0, -2.0, 0.0),
+            Transform::from_xyz(2.0, -2.0, 0.0),
             RigidBody::Dynamic,
             Collider::cuboid(1.0, 1.0, 1.0),
         ))
@@ -39,7 +43,7 @@ fn setup(
         DistanceJoint::new(static_cube, dynamic_cube)
             .with_local_anchor_2(Vec3::new(0.0, 0.5, 0.0))
             .with_rest_length(3.0)
-            .with_compliance(1.0 / 400.0),
+            .with_compliance(1.0 / 1000.0),
     );
 
     commands.spawn((
