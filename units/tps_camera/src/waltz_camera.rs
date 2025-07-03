@@ -50,11 +50,13 @@ fn setup_camera(
         .spawn((
             Mesh3d(meshes.add(Sphere::new(0.1))),
             MeshMaterial3d(materials.add(Color::srgb(0.5, 0.4, 0.3))),
-            Transform::from_xyz(6.1, 3.0, 0.0),
+            Transform::from_xyz(6.1, 3.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
             RigidBody::Dynamic,
             Collider::sphere(0.1),
             GravityScale(0.0),
-            MassPropertiesBundle::from_shape(&Sphere::new(0.3), 1.0),
+            MassPropertiesBundle::from_shape(&Sphere::new(0.2), 1.0),
+            Camera3d::default(),
+            TransformInterpolation,
         ))
         .id();
 
@@ -63,16 +65,16 @@ fn setup_camera(
             // .with_local_anchor_1(Vec3::X)
             // .with_local_anchor_2(Vec3::X)
             .with_free_axis(Vec3::X)
-            .with_compliance(1.0 / 100.0)
+            .with_compliance(1.0 / 1000.0)
             .with_linear_velocity_damping(1.0)
             .with_angular_velocity_damping(1.0)
             .with_limits(2.0, 2.0),
     );
 
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
+    // commands.spawn((
+    //     Camera3d::default(),
+    //     Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+    // ));
 }
 
 fn generic_static_cuboid(
