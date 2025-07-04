@@ -1,5 +1,8 @@
 use avian3d::prelude::*;
-use bevy::{color::palettes::tailwind::BLUE_600, prelude::*};
+use bevy::{
+    color::palettes::tailwind::{BLUE_600, RED_600},
+    prelude::*,
+};
 
 use crate::Character;
 
@@ -55,10 +58,16 @@ fn setup_camera(
             Collider::sphere(0.1),
             GravityScale(0.0),
             MassPropertiesBundle::from_shape(&Sphere::new(0.2), 1.0),
-            Camera3d::default(),
             TransformInterpolation,
         ))
         .id();
+
+    let camera_location = commands.spawn((
+        Mesh3d(meshes.add(Sphere::new(0.2))),
+        MeshMaterial3d(materials.add(Color::from(RED_600))),
+        Camera3d::default(),
+        TransformInterpolation,
+    ));
 
     commands.spawn(
         PrismaticJoint::new(root_anchor, camera_anchor)
