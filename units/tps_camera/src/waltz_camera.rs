@@ -69,6 +69,8 @@ fn setup_camera(
             // Camera3d::default(),
             TransformInterpolation,
             Transform::from_xyz(2.0, 2.0, -2.0),
+            MassPropertiesBundle::from_shape(&Sphere::new(0.2), 0.1),
+            RigidBody::Dynamic,
         ))
         .id();
 
@@ -83,12 +85,13 @@ fn setup_camera(
             .with_limits(2.0, 2.0),
     );
 
-    commands.spawn(
-        SphericalJoint::new(camera_anchor, camera_location)
-            .with_local_anchor_1(Vec3::ZERO)
-            .with_local_anchor_2(Vec3::ZERO)
-            .with_compliance(1.0 / 10000.0),
-    );
+    // commands.spawn(
+    //     SphericalJoint::new(camera_anchor, camera_location)
+    //         .with_local_anchor_1(Vec3::ZERO)
+    //         .with_local_anchor_2(Vec3::ZERO)
+    //         .with_compliance(1.0 / 10000.0),
+    // );
+    commands.spawn(FixedJoint::new(camera_anchor, camera_location).with_local_anchor_1(Vec3::X));
 
     commands.spawn((
         Camera3d::default(),
