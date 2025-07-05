@@ -11,11 +11,15 @@ pub fn plugin(app: &mut App) {
         .add_plugins(PhysicsDebugPlugin::default())
         .add_systems(Startup, setup_camera)
         .add_systems(Startup, generic_static_cuboid)
-        .add_systems(Update, move_camera);
+        .add_systems(Update, move_camera)
+        .add_systems(Update, rotation_camera);
 }
 
 #[derive(Component, Debug)]
-pub struct MainCamera;
+pub struct MainCameraRoot;
+
+#[derive(Component, Debug)]
+pub struct MainCameraLocation;
 
 fn setup_camera(
     mut commands: Commands,
@@ -28,7 +32,7 @@ fn setup_camera(
             Mesh3d(meshes.add(Sphere::new(0.1))),
             MeshMaterial3d(materials.add(Color::from(BLUE_600))),
             Transform::from_xyz(0.0, 3.0, 0.0),
-            MainCamera,
+            MainCameraRoot,
             RigidBody::Kinematic,
         ))
         .id();
@@ -62,6 +66,7 @@ fn setup_camera(
         ))
         .id();
 
+    // camera location
     let camera_location = commands
         .spawn((
             Mesh3d(meshes.add(Sphere::new(0.2))),
@@ -71,6 +76,7 @@ fn setup_camera(
             Transform::from_xyz(2.0, 2.0, -2.0),
             MassPropertiesBundle::from_shape(&Sphere::new(0.2), 0.1),
             RigidBody::Dynamic,
+            MainCameraLocation,
         ))
         .id();
 
@@ -85,13 +91,15 @@ fn setup_camera(
             .with_limits(2.0, 2.0),
     );
 
-    // commands.spawn(
-    //     SphericalJoint::new(camera_anchor, camera_location)
-    //         .with_local_anchor_1(Vec3::ZERO)
-    //         .with_local_anchor_2(Vec3::ZERO)
-    //         .with_compliance(1.0 / 10000.0),
-    // );
-    commands.spawn(FixedJoint::new(camera_anchor, camera_location).with_local_anchor_1(Vec3::X));
+    commands.spawn(
+        SphericalJoint::new(camera_anchor, camera_location)
+            .with_local_anchor_1(Vec3::ZERO)
+            .with_local_anchor_2(Vec3::ZERO)
+            .with_compliance(1.0 / 10000.0)
+            .with_linear_velocity_damping(1.0)
+            .with_angular_velocity_damping(1.0),
+    );
+    // commands.spawn(FixedJoint::new(camera_anchor, camera_location).with_local_anchor_1(Vec3::X));
 
     commands.spawn((
         Camera3d::default(),
@@ -114,11 +122,26 @@ fn generic_static_cuboid(
 }
 
 fn move_camera(
-    player_query: Query<&mut Transform, (With<Character>, Without<MainCamera>)>,
-    mut root_query: Query<&mut Transform, (With<MainCamera>, Without<Character>)>,
+    player_query: Query<&mut Transform, (With<Character>, Without<MainCameraRoot>)>,
+    mut root_query: Query<&mut Transform, (With<MainCameraRoot>, Without<Character>)>,
 ) {
     let mut root_transform = root_query.single_mut().unwrap();
     let player_transform = player_query.single().unwrap();
 
     *root_transform = *player_transform;
+}
+
+fn rotation_camera(
+    mut camera_query: Query<&mut Transform, With<MainCameraLocation>>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    let mut camera = camera_query.single_mut().unwrap();
+
+    if keyboard_input.pressed(KeyCode::KeyV) {
+        camera.rotation.x += 0.1;
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyC) {
+        camera.rotation.x -= 0.1;
+    }
 }
