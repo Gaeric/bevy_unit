@@ -1,6 +1,6 @@
-use avian3d::prelude::*;
+use avian3d::{math::TAU, prelude::*};
 use bevy::{
-    color::palettes::tailwind::{BLUE_600, CYAN_600, RED_600},
+    color::palettes::tailwind::{BLUE_600, CYAN_600},
     prelude::*,
 };
 
@@ -57,7 +57,7 @@ fn setup_camera(
         .spawn((
             Mesh3d(meshes.add(Sphere::new(0.1))),
             MeshMaterial3d(materials.add(Color::srgb(0.5, 0.4, 0.3))),
-            Transform::from_xyz(6.1, 3.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+            Transform::from_xyz(6.1, 3.0, 0.0),
             RigidBody::Dynamic,
             Collider::sphere(0.1),
             GravityScale(0.0),
@@ -73,10 +73,12 @@ fn setup_camera(
             MeshMaterial3d(materials.add(Color::from(CYAN_600))),
             // Camera3d::default(),
             TransformInterpolation,
-            Transform::from_xyz(2.0, 2.0, -2.0),
+            Transform::from_xyz(6.1, 3.0, 0.0),
             MassPropertiesBundle::from_shape(&Sphere::new(0.2), 0.1),
             RigidBody::Dynamic,
             MainCameraLocation,
+            GravityScale(0.0),
+            Camera3d::default(),
         ))
         .id();
 
@@ -95,16 +97,15 @@ fn setup_camera(
         SphericalJoint::new(camera_anchor, camera_location)
             .with_local_anchor_1(Vec3::ZERO)
             .with_local_anchor_2(Vec3::ZERO)
-            .with_compliance(1.0 / 10000.0)
+            .with_compliance(1.0 / 1000.0)
             .with_linear_velocity_damping(1.0)
             .with_angular_velocity_damping(1.0),
     );
-    // commands.spawn(FixedJoint::new(camera_anchor, camera_location).with_local_anchor_1(Vec3::X));
 
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
+    // commands.spawn((
+    //     Camera3d::default(),
+    //     Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+    // ));
 }
 
 fn generic_static_cuboid(
@@ -137,11 +138,19 @@ fn rotation_camera(
 ) {
     let mut camera = camera_query.single_mut().unwrap();
 
-    if keyboard_input.pressed(KeyCode::KeyV) {
-        camera.rotation.x += 0.1;
+    if keyboard_input.pressed(KeyCode::ArrowLeft) {
+        camera.rotate_y(0.01 * TAU);
     }
 
-    if keyboard_input.pressed(KeyCode::KeyC) {
-        camera.rotation.x -= 0.1;
+    if keyboard_input.pressed(KeyCode::ArrowRight) {
+        camera.rotate_y(-0.01 * TAU);
+    }
+
+    if keyboard_input.pressed(KeyCode::ArrowUp) {
+        camera.rotate_z(-0.01 * TAU);
+    }
+
+    if keyboard_input.pressed(KeyCode::ArrowDown) {
+        camera.rotate_z(0.01 * TAU);
     }
 }
