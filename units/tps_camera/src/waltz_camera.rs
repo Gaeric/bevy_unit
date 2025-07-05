@@ -1,6 +1,6 @@
 use avian3d::prelude::*;
 use bevy::{
-    color::palettes::tailwind::{BLUE_600, RED_600},
+    color::palettes::tailwind::{BLUE_600, CYAN_600, RED_600},
     prelude::*,
 };
 
@@ -62,12 +62,15 @@ fn setup_camera(
         ))
         .id();
 
-    let camera_location = commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(0.2))),
-        MeshMaterial3d(materials.add(Color::from(RED_600))),
-        Camera3d::default(),
-        TransformInterpolation,
-    ));
+    let camera_location = commands
+        .spawn((
+            Mesh3d(meshes.add(Sphere::new(0.2))),
+            MeshMaterial3d(materials.add(Color::from(CYAN_600))),
+            // Camera3d::default(),
+            TransformInterpolation,
+            Transform::from_xyz(2.0, 2.0, -2.0),
+        ))
+        .id();
 
     commands.spawn(
         PrismaticJoint::new(root_anchor, camera_anchor)
@@ -80,10 +83,17 @@ fn setup_camera(
             .with_limits(2.0, 2.0),
     );
 
-    // commands.spawn((
-    //     Camera3d::default(),
-    //     Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
-    // ));
+    commands.spawn(
+        SphericalJoint::new(camera_anchor, camera_location)
+            .with_local_anchor_1(Vec3::ZERO)
+            .with_local_anchor_2(Vec3::ZERO)
+            .with_compliance(1.0 / 10000.0),
+    );
+
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
 }
 
 fn generic_static_cuboid(
