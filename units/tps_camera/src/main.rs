@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 mod dolly_camera;
-mod waltz_camera;
+mod physic_camera;
 
 #[derive(Component)]
 struct Character;
@@ -11,7 +11,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         // .add_plugins(dolly_camera::plugin)
-        .add_plugins(waltz_camera::plugin)
+        .add_plugins(physic_camera::plugin)
         .add_systems(Startup, setup)
         .add_systems(FixedUpdate, movement_player)
         .run();
@@ -86,5 +86,4 @@ fn movement_player(
     if keyboard_input.pressed(KeyCode::KeyE) {
         player_transform.rotate_y(-0.05);
     }
-
 }
