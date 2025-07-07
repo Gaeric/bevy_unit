@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_dolly::{
-    prelude::{MovableLookAt, Rig},
+    prelude::{MovableLookAt, Rig, Smooth},
     system::Dolly,
 };
 
@@ -20,6 +20,8 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn((
         MainCamera,
         Rig::builder()
+            .with(Smooth::new_position(0.2))
+            .with(Smooth::new_rotation(0.2))
             .with(MovableLookAt::from_position_target(Vec3::new(
                 0.0, 0.0, 0.0,
             )))
