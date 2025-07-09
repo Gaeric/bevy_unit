@@ -49,31 +49,35 @@ pub fn character_control_radar_visualization_system(
     }
 }
 
-pub(super) fn plugin(app: &mut App) {
-    app.add_plugins(PhysicsPlugins::new(FixedPostUpdate));
-    app.add_plugins(TnuaAvian3dPlugin::new(FixedUpdate));
-    app.add_plugins(TnuaControllerPlugin::new(FixedUpdate));
-    app.add_plugins(TnuaCrouchEnforcerPlugin::new(FixedUpdate));
-    app.add_plugins(PhysicsDebugPlugin::default());
+pub struct WaltzCharacterPlugin;
 
-    app.add_systems(Update, character_control_radar_visualization_system);
+impl Plugin for WaltzCharacterPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(PhysicsPlugins::new(FixedPostUpdate));
+        app.add_plugins(TnuaAvian3dPlugin::new(FixedUpdate));
+        app.add_plugins(TnuaControllerPlugin::new(FixedUpdate));
+        app.add_plugins(TnuaCrouchEnforcerPlugin::new(FixedUpdate));
+        app.add_plugins(PhysicsDebugPlugin::default());
 
-    // CharacterMotionConfig
-    // app.add_plugins();
+        app.add_systems(Update, character_control_radar_visualization_system);
 
-    app.add_systems(Startup, setup_camera_and_lights);
-    // app.add_systems(Startup, setup_sphere);
+        // CharacterMotionConfig
+        // app.add_plugins();
 
-    // spawn player
-    app.add_systems(Startup, setup_player);
+        app.add_systems(Startup, setup_camera_and_lights);
+        // app.add_systems(Startup, setup_sphere);
 
-    // app.add_systems(
-    //     PostUpdate,
-    //     apply_camera_controls.before(TransformSystem::TransformPropagate),
-    // );
-    app.add_systems(Update, animation_patcher_system);
-    // todo
-    app.add_systems(Update, animate_character);
+        // spawn player
+        app.add_systems(Startup, setup_player);
+
+        // app.add_systems(
+        //     PostUpdate,
+        //     apply_camera_controls.before(TransformSystem::TransformPropagate),
+        // );
+        app.add_systems(Update, animation_patcher_system);
+        // todo
+        app.add_systems(Update, animate_character);
+    }
 }
 
 fn setup_camera_and_lights(mut commands: Commands) {

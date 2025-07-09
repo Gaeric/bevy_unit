@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::{
     camera::WaltzCameraPlugin,
+    character::WaltzCharacterPlugin,
     control::WaltzControlPlugin,
     level_switch::{LevelSwitchPlugin, jungle_gym},
 };
@@ -21,8 +22,6 @@ impl Plugin for WaltzPlugin {
         app.add_plugins(
             LevelSwitchPlugin::new(Some("jungle_gym")).with("jungle_gym", jungle_gym::setup_level),
         );
-        app.add_plugins(character::plugin);
-        app.add_plugins(WaltzCameraPlugin);
-        app.add_plugins(WaltzControlPlugin);
+        app.add_plugins((WaltzCharacterPlugin, WaltzCameraPlugin, WaltzControlPlugin));
     }
 }
