@@ -38,4 +38,8 @@ fn update_camera(player: Query<&Transform, With<Character>>, mut rig: Query<&mut
     rig.driver_mut::<Arm>().offset.z = 3.0;
     rig.driver_mut::<LookAt>().target = player_transform.translation + Vec3::Y;
     rig.driver_mut::<Position>().position = player_transform.translation + Vec3::Y;
+
+    rig.driver_mut::<Smooth>().position_smoothness = 1.2;
+    rig.driver_mut::<Smooth>().rotation_smoothness = 0.5;
+    rig.driver_mut::<LookAt>().smoothness = 1.0;
 }
