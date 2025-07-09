@@ -7,7 +7,7 @@ mod physic_camera;
 #[derive(Component)]
 struct Character;
 
-#[derive(Component, Clone, Event)]
+#[derive(Component, Clone, Event, Debug)]
 struct CharacterMovement {
     direction: Vec2,
 }
@@ -19,7 +19,7 @@ fn main() {
         // .add_plugins(physic_camera::plugin)
         .add_systems(Startup, setup)
         .add_systems(FixedUpdate, movement_player)
-        // .add_observer(movement_character)
+        .add_observer(movement_character)
         .run();
 }
 
@@ -102,10 +102,12 @@ fn movement_player(
 
     let direction = direction.clamp_length_max(1.0);
 
-    commands.trigger(CharacterMovement { direction });
+    if direction.length_squared() > 0.0 {
+        commands.trigger(CharacterMovement { direction });
+    }
 }
 
-// fn movement_character(mut trigger: On<CharacterMovement>) {
-//     let event = trigger.event();
-//     println!("event is {event:?}")
-// }
+fn movement_character(trigger: Trigger<CharacterMovement>) {
+    let character_movement_event = trigger.event();
+    println!("event is {:?}", character_movement_event.direction)
+}
