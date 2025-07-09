@@ -7,6 +7,11 @@ mod physic_camera;
 #[derive(Component)]
 struct Character;
 
+#[derive(Component, Clone, Event)]
+struct CharacterMovement {
+    direction: Vec2,
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -14,6 +19,7 @@ fn main() {
         // .add_plugins(physic_camera::plugin)
         .add_systems(Startup, setup)
         .add_systems(FixedUpdate, movement_player)
+        // .add_observer(movement_character)
         .run();
 }
 
@@ -49,6 +55,7 @@ fn setup(
 fn movement_player(
     mut player: Query<&mut Transform, With<Character>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut commands: Commands,
 ) {
     let mut player_transform = player.single_mut().unwrap();
     // let random_x: f32 = rand::random::<f32>() - 0.5;
@@ -59,20 +66,26 @@ fn movement_player(
     // player_transform.translation.x += random_x;
     // player_transform.translation.z += random_z;
 
+    let mut direction = Vec2::new(0.0, 0.0);
+
     if keyboard_input.pressed(KeyCode::KeyA) {
         player_transform.translation.x -= 0.1;
+        direction.x -= 1.0;
     }
 
     if keyboard_input.pressed(KeyCode::KeyD) {
         player_transform.translation.x += 0.1;
+        direction.x += 1.0;
     }
 
     if keyboard_input.pressed(KeyCode::KeyS) {
         player_transform.translation.z -= 0.1;
+        direction.y -= 1.0;
     }
 
     if keyboard_input.pressed(KeyCode::KeyW) {
         player_transform.translation.z += 0.1;
+        direction.y += 1.0;
     }
 
     if keyboard_input.pressed(KeyCode::Space) {
@@ -86,4 +99,13 @@ fn movement_player(
     if keyboard_input.pressed(KeyCode::KeyE) {
         player_transform.rotate_y(-0.05);
     }
+
+    let direction = direction.clamp_length_max(1.0);
+
+    commands.trigger(CharacterMovement { direction });
 }
+
+// fn movement_character(mut trigger: On<CharacterMovement>) {
+//     let event = trigger.event();
+//     println!("event is {event:?}")
+// }

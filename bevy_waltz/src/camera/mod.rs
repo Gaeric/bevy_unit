@@ -93,12 +93,12 @@ impl Plugin for WaltzCameraPlugin {
         app.register_type::<IngameCameraKind>()
             .register_type::<IngameCamera>()
             .init_resource::<CameraConfig>()
-            .add_systems(FixedUpdate, Dolly::<IngameCamera>::update_active)
             // todo: spawn camera when level load ready
             .add_systems(Startup, setup_camera)
             .add_systems(
                 Update,
                 (
+                    Dolly::<IngameCamera>::update_active,
                     // update_kind,
                     set_camera_focus,
                     update_drivers,
