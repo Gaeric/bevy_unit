@@ -69,22 +69,22 @@ fn movement_player(
     let mut direction = Vec2::new(0.0, 0.0);
 
     if keyboard_input.pressed(KeyCode::KeyA) {
-        player_transform.translation.x -= 0.1;
+        // player_transform.translation.x -= 0.1;
         direction.x -= 1.0;
     }
 
     if keyboard_input.pressed(KeyCode::KeyD) {
-        player_transform.translation.x += 0.1;
+        // player_transform.translation.x += 0.1;
         direction.x += 1.0;
     }
 
     if keyboard_input.pressed(KeyCode::KeyS) {
-        player_transform.translation.z -= 0.1;
+        // player_transform.translation.z -= 0.1;
         direction.y -= 1.0;
     }
 
     if keyboard_input.pressed(KeyCode::KeyW) {
-        player_transform.translation.z += 0.1;
+        // player_transform.translation.z += 0.1;
         direction.y += 1.0;
     }
 
@@ -107,7 +107,13 @@ fn movement_player(
     }
 }
 
-fn movement_character(trigger: Trigger<CharacterMovement>) {
+fn movement_character(
+    trigger: Trigger<CharacterMovement>,
+    mut player: Query<&mut Transform, With<Character>>,
+) {
     let character_movement_event = trigger.event();
-    println!("event is {:?}", character_movement_event.direction)
+    println!("event is {:?}", character_movement_event.direction);
+    let mut player_transform = player.single_mut().unwrap();
+    player_transform.translation.x += character_movement_event.direction.x;
+    player_transform.translation.z += character_movement_event.direction.y;
 }
