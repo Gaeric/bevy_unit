@@ -4,11 +4,11 @@ use bevy_dolly::{prelude::*, system::Dolly};
 use crate::Character;
 
 #[derive(Component)]
-struct MainCamera;
+pub struct MainCamera;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Startup, setup_camera)
-        .add_systems(Update, (Dolly::<MainCamera>::update_active, update_camera));
+        .add_systems(Update, (update_camera, Dolly::<MainCamera>::update_active));
 }
 
 fn setup_camera(mut commands: Commands) {

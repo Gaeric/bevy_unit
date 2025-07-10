@@ -1,6 +1,8 @@
 //! this unit is used to implement WaltzCamera, whose motion is driven by `avian`
 
 use bevy::prelude::*;
+
+use crate::dolly_camera::MainCamera;
 mod dolly_camera;
 mod physic_camera;
 
@@ -50,6 +52,11 @@ fn setup(
         },
         Transform::from_xyz(0.0, 15.0, 0.0),
     ));
+
+    // commands.spawn((
+    //     Camera3d::default(),
+    //     Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+    // ));
 }
 
 fn movement_player(
@@ -103,17 +110,25 @@ fn movement_player(
     let direction = direction.clamp_length_max(1.0);
 
     if direction.length_squared() > 0.0 {
-        commands.trigger(CharacterMovement { direction });
+        commands.trigger(CharacterMovement {
+            direction: 0.1 * direction,
+        });
     }
 }
 
 fn movement_character(
     trigger: Trigger<CharacterMovement>,
-    mut player: Query<&mut Transform, With<Character>>,
+    mut player: Query<&mut Transform, (With<Character>, Without<MainCamera>)>,
+    mut camera: Query<&mut Transform, (With<MainCamera>, Without<Character>)>,
 ) {
     let character_movement_event = trigger.event();
     println!("event is {:?}", character_movement_event.direction);
+
     let mut player_transform = player.single_mut().unwrap();
     player_transform.translation.x += character_movement_event.direction.x;
     player_transform.translation.z += character_movement_event.direction.y;
+
+    // let mut camera_transform = camera.single_mut().unwrap();
+    // camera_transform.translation.x += character_movement_event.direction.x;
+    // camera_transform.translation.z += character_movement_event.direction.y;
 }
