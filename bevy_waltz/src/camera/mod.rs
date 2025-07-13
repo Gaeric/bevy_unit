@@ -61,6 +61,7 @@ fn setup_camera(mut commands: Commands) {
         Name::new("waltz-camera"),
         Camera3d::default(),
         IngameCamera::default(),
+        WaltzCamera,
         Rig::builder()
             .with(Position::default())
             .with(YawPitch::default())
