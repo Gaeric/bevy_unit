@@ -19,4 +19,4 @@
 
   [[file:bevy_docs/tips.org][tips]] 记录一些有用的小提示。
 
-  
+  [[file:bevy_waltz/readme.org][waltz]] 一个简单但功能完整的tps演示项目
