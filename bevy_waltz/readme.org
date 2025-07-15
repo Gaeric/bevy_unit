@@ -7,7 +7,16 @@
 * Intro
   Waltz is a project inspired by foxtrot, aiming to build a complete TPS game.
 * Functions
-  - [ ] third person camera
-  - [ ] 
+  - [ ] 3c system
+    - [ ] camera system
+    - [ ] chracter system
+      - [ ] modular character
+    - [ ] controller system
+  - [ ] level scene
+  - [ ] particle
+  - [ ] simple ui
+  - [ ] navigation
+  - [ ] dev/debug tools
+  - [ ] dialogue
 * Tips
   TPS dev is complex — ship fast, squash bugs in phases
