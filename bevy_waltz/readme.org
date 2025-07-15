@@ -5,6 +5,9 @@
 #+HTML_HEAD: <link href="/static/css/worg.css" rel="stylesheet" type="text/css">
 #+OPTIONS: ^:{}
 * Intro
-  waltz是受到foxtrot 早期内容启发而启动的一个模板项目，这是一个tps模板。
+  Waltz is a project inspired by foxtrot, aiming to build a complete TPS game.
+* Functions
+  - [ ] third person camera
+  - [ ] 
 * Tips
-  在这个项目中，应当使用小步快跑的敏捷开发模式，功能可以逐步完善，不要在原地停留太久。
+  TPS dev is complex — ship fast, squash bugs in phases
