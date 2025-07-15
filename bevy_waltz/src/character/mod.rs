@@ -98,22 +98,32 @@ fn setup_camera_and_lights(mut commands: Commands) {
     ));
 }
 
-fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let mut cmd = commands.spawn(WaltzPlayer);
-    cmd.insert(SceneRoot(
-        // asset_server.load("waltz/scenes/library/Fox.glb#Scene0"),
-        asset_server.load("waltz/ani_model_1.0_20250608.glb#Scene0"),
+fn setup_player(
+    mut commands: Commands,
+    _asset_server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let mut cmd = commands.spawn((
+        Mesh3d(meshes.add(Capsule3d::new(0.5, 1.0))),
+        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
+        WaltzPlayer,
     ));
-    cmd.insert(GltfSceneHandler {
-        names_from: asset_server.load("waltz/ani_model_1.0_20250608.glb"),
-    });
+    // cmd.insert(SceneRoot(
+    //     // asset_server.load("waltz/scenes/library/Fox.glb#Scene0"),
+    //     asset_server.load("waltz/ani_model_1.0_20250608.glb#Scene0"),
+    // ));
+    // cmd.insert(GltfSceneHandler {
+    //     names_from: asset_server.load("waltz/ani_model_1.0_20250608.glb"),
+    // });
+    // cmd.insert(Collider::capsule_endpoints(
+    //     0.5,
+    //     0.5 * Vector::Y,
+    //     1.2 * Vector::Y,
+    // ));
 
     cmd.insert(RigidBody::Dynamic);
-    cmd.insert(Collider::capsule_endpoints(
-        0.5,
-        0.5 * Vector::Y,
-        1.2 * Vector::Y,
-    ));
+    cmd.insert(Collider::capsule(0.5, 1.0));
 
     // Tnua's main iterface with the user code
     cmd.insert(TnuaController::default());
