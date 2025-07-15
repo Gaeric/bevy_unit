@@ -6,6 +6,8 @@ use bevy::{
     prelude::*,
 };
 
+use crate::WaltzPlayer;
+
 pub struct LevelSwitchPlugin {
     levels: Vec<(String, Box<dyn Send + Sync + Fn(&mut World) -> SystemId>)>,
     default_level: Option<String>,
@@ -117,9 +119,6 @@ impl From<Vec3> for PositionPlayer {
     }
 }
 
-#[derive(Component)]
-pub struct IsPlayer;
-
 // Observer maybe suitable for this function
 fn handle_level_switch(
     mut reader: EventReader<SwitchToLevel>,
@@ -148,7 +147,7 @@ struct PlayerQueryForPosition {
 
 fn handle_player_position(
     time: Res<Time>,
-    mut player_query: Query<PlayerQueryForPosition, With<IsPlayer>>,
+    mut player_query: Query<PlayerQueryForPosition, With<WaltzPlayer>>,
     mut position_query: Query<(Entity, &mut PositionPlayer)>,
     mut commands: Commands,
 ) {
