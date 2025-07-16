@@ -18,5 +18,7 @@
   - [ ] navigation
   - [ ] dev/debug tools
   - [ ] dialogue
+* Credits
+  The [assets](../assets/waltz/) in this repository are all 3rd-party.
 * Tips
   TPS dev is complex — ship fast, squash bugs in phases
