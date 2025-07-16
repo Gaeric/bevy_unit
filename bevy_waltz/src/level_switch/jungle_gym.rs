@@ -8,6 +8,16 @@ use bevy_tnua::math::Vector3;
 pub fn setup_level(mut helper: LevelSetupHelper) {
     helper.spawn(PositionPlayer::from(Vec3::new(0.0, 10.0, 0.0)));
 
+    helper.spawn((PointLight::default(), Transform::from_xyz(5.0, 5.0, 5.0)));
+    helper.spawn((
+        DirectionalLight {
+            illuminance: 4000.0,
+            shadows_enabled: true,
+            ..Default::default()
+        },
+        Transform::default().looking_at(-Vec3::Y, Vec3::Z),
+    ));
+
     helper.spawn_floor(css::WHITE);
 
     let mut obstacles_helper = helper.with_color(css::GRAY);

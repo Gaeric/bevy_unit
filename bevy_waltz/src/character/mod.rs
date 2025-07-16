@@ -59,43 +59,12 @@ impl Plugin for WaltzCharacterPlugin {
         app.add_plugins(TnuaCrouchEnforcerPlugin::new(FixedUpdate));
         app.add_plugins(PhysicsDebugPlugin::default());
 
-        app.add_systems(Update, character_control_radar_visualization_system);
-
-        // CharacterMotionConfig
-        // app.add_plugins();
-
-        app.add_systems(Startup, setup_camera_and_lights);
-        // app.add_systems(Startup, setup_sphere);
-
-        // spawn player
         app.add_systems(Startup, setup_player);
 
-        // app.add_systems(
-        //     PostUpdate,
-        //     apply_camera_controls.before(TransformSystem::TransformPropagate),
-        // );
+        app.add_systems(Update, character_control_radar_visualization_system);
         app.add_systems(Update, animation_patcher_system);
-        // todo
         app.add_systems(Update, animate_character);
     }
-}
-
-fn setup_camera_and_lights(mut commands: Commands) {
-    // commands.spawn((
-    //     Camera3d::default(),
-    //     Transform::from_xyz(0.0, 16.0, 40.0).looking_at(Vec3::new(0.0, 10.0, 0.0), Vec3::Y),
-    // ));
-
-    commands.spawn((PointLight::default(), Transform::from_xyz(5.0, 5.0, 5.0)));
-
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 4000.0,
-            shadows_enabled: true,
-            ..Default::default()
-        },
-        Transform::default().looking_at(-Vec3::Y, Vec3::Z),
-    ));
 }
 
 fn setup_player(
@@ -189,45 +158,3 @@ fn setup_player(
     // This helper keeps track of air actions like jumps or air dashes.
     cmd.insert(TnuaSimpleAirActionsCounter::default());
 }
-
-// fn apply_camera_controls(
-//     primary_window_query: Query<&mut Window, With<PrimaryWindow>>,
-//     mut mouse_motion: EventReader<MouseMotion>,
-//     mut player_character_query: Query<(&GlobalTransform, &mut ForwardFromCamera)>,
-//     mut camera_query: Query<&mut Transform, With<Camera>>,
-// ) {
-//     let mouse_controls_camera = primary_window_query
-//         .single()
-//         .is_ok_and(|w| !w.cursor_options.visible);
-
-//     let total_delta = if mouse_controls_camera {
-//         mouse_motion.read().map(|event| event.delta).sum()
-//     } else {
-//         mouse_motion.clear();
-//         Vec2::ZERO
-//     };
-
-//     let Ok((player_transform, mut forward_from_camera)) = player_character_query.single_mut()
-//     else {
-//         return;
-//     };
-
-//     let yaw = Quaternion::from_rotation_y(-0.01 * total_delta.x.adjust_precision());
-//     forward_from_camera.forward = yaw.mul_vec3(forward_from_camera.forward);
-
-//     let pitch = 0.005 * total_delta.y.adjust_precision();
-//     forward_from_camera.pitch_angle = (forward_from_camera.pitch_angle + pitch)
-//         .clamp(-float_consts::FRAC_PI_2, float_consts::FRAC_PI_2);
-
-//     // todo: make camera move smooth
-//     for mut camera in camera_query.iter_mut() {
-//         camera.translation =
-//             player_transform.translation() + -5.0 * forward_from_camera.forward.f32() + Vec3::Y;
-//         camera.look_to(forward_from_camera.forward.f32(), Vec3::Y);
-//         let pitch_axis = camera.left();
-//         camera.rotate_around(
-//             player_transform.translation(),
-//             Quat::from_axis_angle(*pitch_axis, forward_from_camera.pitch_angle.f32()),
-//         );
-//     }
-// }
