@@ -360,6 +360,7 @@ pub fn apply_character_control(
                     trace!("without forward_from_camera, forward {:?}", direction);
                     Dir3::new(-direction.f32()).ok()
                 },
+                // float_height: 1.5,
                 ..config.walk.clone()
             });
 

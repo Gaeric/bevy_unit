@@ -1,12 +1,9 @@
 ///! character controller system
 ///! forked from the tnua shooter_like demo
-use animating::{AnimationState, GltfSceneHandler, animate_character, animation_patcher_system};
-use avian3d::{math::Vector, prelude::*};
+use animating::{AnimationState, animate_character, animation_patcher_system};
+use avian3d::prelude::*;
+use bevy::prelude::*;
 use bevy::{color::palettes::css, ecs::system::Query, gizmos::gizmos::Gizmos};
-use bevy::{
-    prelude::*,
-    window::{CursorGrabMode, PrimaryWindow},
-};
 use bevy_tnua::math::AsF32;
 
 use bevy_tnua::{
