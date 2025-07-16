@@ -106,7 +106,7 @@ fn setup_player(
         walk: TnuaBuiltinWalk {
             // the float height based on the model's geometrics
             // The origin of our model is at the origin of the world coordinates.
-            float_height: 0.01,
+            float_height: 0.91,
             max_slope: float_consts::FRAC_PI_4,
             turning_angvel: Float::INFINITY,
             ..Default::default()
