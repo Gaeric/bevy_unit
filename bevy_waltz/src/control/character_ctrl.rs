@@ -2,9 +2,9 @@ use std::cmp::Ordering;
 
 use avian3d::math::AdjustPrecision;
 use bevy::ecs::query::QueryData;
+use bevy::ecs::system::Query;
 use bevy::input::{ButtonInput, keyboard::KeyCode};
 use bevy::prelude::*;
-use bevy::{color::palettes::css, ecs::system::Query, gizmos::gizmos::Gizmos};
 use bevy_tnua::builtins::TnuaBuiltinCrouchState;
 use bevy_tnua::control_helpers::{
     TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaSimpleAirActionsCounter,
@@ -20,25 +20,11 @@ use bevy_tnua::{
 };
 use bevy_tnua_avian3d::TnuaSpatialExtAvian3d;
 
+use crate::WaltzCamera;
 use crate::character::config::{
     CharacterMotionConfig, Dimensionality, FallingThroughControlScheme,
 };
 use crate::level_switch::Climable;
-
-// #[derive(Component)]
-// pub struct ForwardFromCamera {
-//     pub forward: Vector3,
-//     pub pitch_angle: Float,
-// }
-
-// impl Default for ForwardFromCamera {
-//     fn default() -> Self {
-//         Self {
-//             forward: Vector3::NEG_Z,
-//             pitch_angle: 0.0,
-//         }
-//     }
-// }
 
 #[derive(QueryData)]
 pub struct ObstacleQueryHelper {
@@ -94,6 +80,7 @@ pub fn apply_character_control(
         // them.
         &mut TnuaBlipReuseAvoidance,
     )>,
+    camera_query: Query<&Transform, With<WaltzCamera>>,
     // This is used to run spatial queries on the physics backend. Note that `SpatialExtFacade` is
     // defined in the demos crates, and actual games that use Tnua should instead use the
     // appropriate type from the physics backend integration crate they use - e.g.
@@ -104,7 +91,6 @@ pub fn apply_character_control(
     obstacle_query: Query<ObstacleQueryHelper>,
 ) {
     // todo: egui
-
     trace!("apply character control");
 
     for (
@@ -145,16 +131,13 @@ pub fn apply_character_control(
 
             let screen_space_direction = direction.clamp_length_max(1.0);
 
-            // todo: get right forward direction for character
-            let direction = screen_space_direction;
-            // let direction = if let Some(forward_from_camera) = forward_from_camera {
-            //     Transform::default()
-            //         .looking_to(forward_from_camera.forward.f32(), Vec3::Y)
-            //         .transform_point(screen_space_direction.f32())
-            //         .adjust_precision()
-            // } else {
-            //     screen_space_direction
-            // };
+            let direction = if let Ok(camera_transform) = camera_query.single() {
+                camera_transform
+                    .transform_point(screen_space_direction.f32())
+                    .adjust_precision()
+            } else {
+                screen_space_direction
+            };
 
             let jump = match (config.dimensionality, is_climbing) {
                 (Dimensionality::Dim2, true) => keyboard.any_pressed([KeyCode::Space]),
@@ -165,9 +148,10 @@ pub fn apply_character_control(
             };
 
             let dash = keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::AltRight]);
+            let turn_in_place = keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
+
             // let turn_in_place = forward_from_camera.is_none()
             //     && keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
-            let turn_in_place = keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
 
             let crouch_buttons = match (config.dimensionality, is_climbing) {
                 (Dimensionality::Dim2, true) => CROUCH_BUTOONS_3D.iter().copied(),

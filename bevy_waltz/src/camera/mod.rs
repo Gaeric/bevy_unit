@@ -99,7 +99,7 @@ impl Plugin for WaltzCameraPlugin {
             .add_systems(
                 Update,
                 (
-                    Dolly::<IngameCamera>::update_active,
+                    Dolly::<WaltzCamera>::update_active,
                     // update_kind,
                     set_camera_focus,
                     update_drivers,
