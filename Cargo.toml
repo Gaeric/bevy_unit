@@ -18,6 +18,7 @@ bevy_shine = { path = "bevy_shine" }
 # modular_character = { path = "modular_character" }
 bevy_waltz = { path = "bevy_waltz" }
 crossbeam-channel = "0.5.15"
+tracing-appender = "0.2.3"
 
 [patch.crates-io]
 bevy = { path = "../bevy_engines/bevy_0.16/" }
