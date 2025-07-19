@@ -21,11 +21,11 @@ use bevy_tnua::{
 };
 use bevy_tnua_avian3d::TnuaSpatialExtAvian3d;
 
-use crate::WaltzCamera;
 use crate::character::config::{
     CharacterMotionConfig, Dimensionality, FallingThroughControlScheme,
 };
 use crate::level_switch::Climable;
+use crate::{WaltzCamera, WaltzPlayer};
 
 #[derive(QueryData)]
 pub struct ObstacleQueryHelper {
@@ -82,6 +82,7 @@ pub fn apply_character_control(
         &mut TnuaBlipReuseAvoidance,
     )>,
     camera_query: Query<&Transform, With<WaltzCamera>>,
+    player_query: Query<&Transform, With<WaltzPlayer>>,
     // This is used to run spatial queries on the physics backend. Note that `SpatialExtFacade` is
     // defined in the demos crates, and actual games that use Tnua should instead use the
     // appropriate type from the physics backend integration crate they use - e.g.
@@ -130,15 +131,17 @@ pub fn apply_character_control(
                 direction += Vector3::X;
             }
 
-            let screen_space_direction = direction.clamp_length_max(1.0);
+            let mut screen_space_direction = Vec3::NEG_Z;
+            let player_transform = player_query.single().unwrap();
+            if let Ok(camera_transform) = camera_query.single() {
+                screen_space_direction =
+                    (camera_transform.translation - player_transform.translation).normalize();
+            }
 
-            let direction = if let Ok(camera_transform) = camera_query.single() {
-                camera_transform
-                    .transform_point(screen_space_direction.f32())
-                    .adjust_precision()
-            } else {
-                screen_space_direction
-            };
+            info!(
+                "screen_space_direction is {:?}, direction is {:?}",
+                screen_space_direction, direction
+            );
 
             let jump = match (config.dimensionality, is_climbing) {
                 (Dimensionality::Dim2, true) => keyboard.any_pressed([KeyCode::Space]),
@@ -356,12 +359,12 @@ pub fn apply_character_control(
                 //     trace!("without forward_from_camera, forward {:?}", direction);
                 //     Dir3::new(-direction.f32()).ok()
                 // },
-                // desired_forward: {
-                //     // For platformers, we only want to change direction when the charcter tries to
-                //     // moves (or when the player explicitly wants to set the direction)
-                //     trace!("without forward_from_camera, forward {:?}", direction);
-                //     Dir3::new(-direction.f32()).ok()
-                // },
+                desired_forward: {
+                    // For platformers, we only want to change direction when the charcter tries to
+                    // moves (or when the player explicitly wants to set the direction)
+                    trace!("without forward_from_camera, forward {:?}", direction);
+                    Dir3::new(-direction.f32()).ok()
+                },
                 ..config.walk.clone()
             };
             info!("tnua walk is {:?}", walk);

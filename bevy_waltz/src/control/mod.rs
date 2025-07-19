@@ -15,8 +15,8 @@ impl Plugin for WaltzControlPlugin {
         app.add_systems(Update, grab_ungrab_mouse);
         app.add_systems(
             FixedUpdate,
-            // apply_character_control.in_set(TnuaUserControlsSystemSet),
-            sample_character_control.in_set(TnuaUserControlsSystemSet),
+            apply_character_control.in_set(TnuaUserControlsSystemSet),
+            // sample_character_control.in_set(TnuaUserControlsSystemSet),
         );
     }
 }

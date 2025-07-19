@@ -85,11 +85,11 @@ fn setup_character_with_entity_cmd(mut cmd: EntityCommands) {
 
     cmd.insert(CharacterMotionConfig {
         dimensionality: Dimensionality::Dim3,
-        speed: 20.0,
+        speed: 5.0,
         walk: TnuaBuiltinWalk {
             // the float height based on the model's geometrics
             // The origin of our model is at the origin of the world coordinates.
-            float_height: 1.5,
+            float_height: 1.51,
             max_slope: float_consts::FRAC_PI_4,
             turning_angvel: Float::INFINITY,
             ..Default::default()
