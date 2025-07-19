@@ -80,6 +80,65 @@ pub enum AnimationState {
     Climbing(Float),
 }
 
+#[derive(Debug)]
+pub struct AnimationProp {
+    name: &'static str,
+    speed: f32,
+}
+
+pub fn get_animation_prop(ani_state: &AnimationState) -> AnimationProp {
+    match ani_state {
+        AnimationState::Standing => AnimationProp {
+            name: "Idle_Loop",
+            speed: 1.0,
+        },
+        AnimationState::Running(speed) => AnimationProp {
+            name: "Walk_Loop",
+            speed: *speed,
+        },
+        AnimationState::Jumping => AnimationProp {
+            name: "Jump_Start",
+            speed: 2.0,
+        },
+
+        AnimationState::Falling => AnimationProp {
+            name: "Jump_Loop",
+            speed: 1.0,
+        },
+
+        AnimationState::Crouching => AnimationProp {
+            name: "Crouch_Idle_Loop",
+            speed: 1.0,
+        },
+
+        AnimationState::Crawling(speed) => AnimationProp {
+            name: "Swim_Fwd_Loop",
+            speed: *speed,
+        },
+        AnimationState::Dashing => AnimationProp {
+            name: "Jog_Fwd_Loop",
+            speed: 1.0,
+        },
+
+        AnimationState::KnockedBack => AnimationProp {
+            name: "Hit_Chest",
+            speed: 1.0,
+        },
+        AnimationState::WallSliding => AnimationProp {
+            name: "Swim_Fwd_Idle",
+            speed: 1.0,
+        },
+        AnimationState::WallJumping => AnimationProp {
+            name: "Swim_Fwd_Idle",
+            speed: 1.0,
+        },
+        AnimationState::Climbing(speed) => AnimationProp {
+            name: "Swim_Fwd_Idle",
+            speed: *speed,
+        },
+    }
+}
+
 pub fn animate_character(
     mut animations_handlers_query: Query<(
         // `TnuaAnimatingState` is a helper for controlling the animations. The user system is
@@ -215,64 +274,10 @@ pub fn animate_character(
             // variable speed, and set it to repeat if it's something that needs to repeat.
             TnuaAnimatingStateDirective::Alter { old_state, state } => {
                 player.stop_all();
-                match state {
-                    AnimationState::Standing => {
-                        player
-                            .start(handler.animations["idle"])
-                            .set_speed(1.0)
-                            .repeat();
-                    }
-                    AnimationState::Running(speed) => {
-                        player
-                            .start(handler.animations["walk"])
-                            .set_speed(*speed as f32)
-                            .repeat();
-                    }
-                    AnimationState::Jumping => {
-                        player.start(handler.animations["jump"]).set_speed(2.0);
-                    }
-                    AnimationState::Falling => {
-                        player.start(handler.animations["run"]).set_speed(1.0);
-                    }
-                    AnimationState::Crouching => {
-                        player
-                            .start(handler.animations["run"])
-                            .set_speed(1.0)
-                            .repeat();
-                    }
-                    AnimationState::Crawling(speed) => {
-                        player
-                            .start(handler.animations["run"])
-                            .set_speed(*speed as f32)
-                            .repeat();
-                    }
-                    AnimationState::Dashing => {
-                        player.start(handler.animations["run"]).set_speed(10.0);
-                    }
-                    AnimationState::KnockedBack => {
-                        player
-                            .start(handler.animations["run"])
-                            .set_speed(1.0);
-                    }
-                    AnimationState::WallSliding => {
-                        player
-                            .start(handler.animations["run"])
-                            .set_speed(1.0)
-                            .repeat();
-                    }
-                    AnimationState::WallJumping => {
-                        player
-                            .start(handler.animations["run"])
-                            .set_speed(2.0);
-                    }
-                    AnimationState::Climbing(speed) => {
-                        player
-                            .start(handler.animations["run"])
-                            .set_speed(*speed as f32)
-                            .repeat()
-                            .set_speed(1.0);
-                    }
-                }
+                let animation_prop = get_animation_prop(state);
+                player
+                    .start(handler.animations[animation_prop.name])
+                    .set_speed(animation_prop.speed);
             }
         }
     }

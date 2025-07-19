@@ -1,6 +1,7 @@
 ///! character controller system
 ///! forked from the tnua shooter_like demo
 use animating::{AnimationState, animate_character, animation_patcher_system};
+use avian3d::math::Vector;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::{color::palettes::css, ecs::system::Query, gizmos::gizmos::Gizmos};
@@ -23,6 +24,8 @@ mod animating;
 pub mod config;
 
 use config::{CharacterMotionConfig, Dimensionality, FallingThroughControlScheme};
+
+use crate::character::animating::GltfSceneHandler;
 
 /// Marks an entity as the player character
 #[derive(Component, Debug)]
@@ -57,6 +60,7 @@ impl Plugin for WaltzCharacterPlugin {
         app.add_plugins(PhysicsDebugPlugin::default());
 
         app.add_systems(Startup, setup_player);
+        // app.add_systems(Startup, setup_demo_player);
 
         app.add_systems(Update, character_control_radar_visualization_system);
         app.add_systems(Update, animation_patcher_system);
@@ -64,38 +68,14 @@ impl Plugin for WaltzCharacterPlugin {
     }
 }
 
-fn setup_player(
-    mut commands: Commands,
-    _asset_server: Res<AssetServer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let mut cmd = commands.spawn((
-        Mesh3d(meshes.add(Capsule3d::new(0.5, 1.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-    ));
-
+fn setup_character_with_entity_cmd(mut cmd: EntityCommands) {
     cmd.insert((
         WaltzPlayer,
         // The player caharacter needs to be configured as a dynamic rigid body of the physics engine.
         RigidBody::Dynamic,
-        Collider::capsule(0.5, 1.0),
         // This is Tnua's interface component.
         TnuaController::default(),
-        TnuaAvian3dSensorShape(Collider::cylinder(0.49, 0.0)),
     ));
-    // cmd.insert(SceneRoot(
-    //     // asset_server.load("waltz/scenes/library/Fox.glb#Scene0"),
-    //     asset_server.load("waltz/ani_model_1.0_20250608.glb#Scene0"),
-    // ));
-    // cmd.insert(GltfSceneHandler {
-    //     names_from: asset_server.load("waltz/ani_model_1.0_20250608.glb"),
-    // });
-    // cmd.insert(Collider::capsule_endpoints(
-    //     0.5,
-    //     0.5 * Vector::Y,
-    //     1.2 * Vector::Y,
-    // ));
 
     // detect obstacles around the player that the player can use for env actions.
     cmd.insert(TnuaObstacleRadar::new(1.0, 3.0));
@@ -157,4 +137,31 @@ fn setup_player(
 
     // This helper keeps track of air actions like jumps or air dashes.
     cmd.insert(TnuaSimpleAirActionsCounter::default());
+}
+
+fn setup_demo_player(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let cmd = commands.spawn((
+        Mesh3d(meshes.add(Capsule3d::new(0.5, 1.0))),
+        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
+        Collider::capsule(0.5, 1.0),
+        TnuaAvian3dSensorShape(Collider::cylinder(0.49, 0.0)),
+    ));
+
+    setup_character_with_entity_cmd(cmd);
+}
+
+fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let cmd = commands.spawn((
+        SceneRoot(asset_server.load("waltz/player.glb#Scene0")),
+        GltfSceneHandler {
+            names_from: asset_server.load("waltz/player.glb"),
+        },
+        Collider::capsule_endpoints(0.5, 0.5 * Vector::Y, 1.2 * Vector::Y),
+    ));
+
+    setup_character_with_entity_cmd(cmd);
 }
