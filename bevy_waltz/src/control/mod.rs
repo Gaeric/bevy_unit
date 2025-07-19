@@ -4,7 +4,7 @@ use bevy::{
 };
 use bevy_tnua::TnuaUserControlsSystemSet;
 
-use crate::control::character_ctrl::apply_character_control;
+use crate::control::character_ctrl::{apply_character_control, sample_character_control};
 
 mod character_ctrl;
 
@@ -15,7 +15,8 @@ impl Plugin for WaltzControlPlugin {
         app.add_systems(Update, grab_ungrab_mouse);
         app.add_systems(
             FixedUpdate,
-            apply_character_control.in_set(TnuaUserControlsSystemSet),
+            // apply_character_control.in_set(TnuaUserControlsSystemSet),
+            sample_character_control.in_set(TnuaUserControlsSystemSet),
         );
     }
 }
@@ -26,7 +27,6 @@ pub(super) fn grab_ungrab_mouse(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut primary_window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-
     let Ok(mut window) = primary_window_query.single_mut() else {
         return;
     };

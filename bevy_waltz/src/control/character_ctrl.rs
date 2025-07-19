@@ -4,6 +4,7 @@ use avian3d::math::AdjustPrecision;
 use bevy::ecs::query::QueryData;
 use bevy::ecs::system::Query;
 use bevy::input::{ButtonInput, keyboard::KeyCode};
+use bevy::math::VectorSpace;
 use bevy::prelude::*;
 use bevy_tnua::builtins::TnuaBuiltinCrouchState;
 use bevy_tnua::control_helpers::{
@@ -106,7 +107,7 @@ pub fn apply_character_control(
         mut blip_reuse_avoidance,
     ) in query.iter_mut()
     {
-        trace!("control character motion");
+        info!("control character motion");
 
         // This part is just keyboard input processing. In a real game this would probably be done
         // with a third party plugin.
@@ -335,7 +336,8 @@ pub fn apply_character_control(
             // `desired_velocity` or `desired_forward` which we compute here based on the current
             // frame's input
 
-            controller.basis(TnuaBuiltinWalk {
+            info!("tnua basis walk");
+            let walk = TnuaBuiltinWalk {
                 desired_velocity: if turn_in_place {
                     Vector3::ZERO
                 } else {
@@ -354,15 +356,16 @@ pub fn apply_character_control(
                 //     trace!("without forward_from_camera, forward {:?}", direction);
                 //     Dir3::new(-direction.f32()).ok()
                 // },
-                desired_forward: {
-                    // For platformers, we only want to change direction when the charcter tries to
-                    // moves (or when the player explicitly wants to set the direction)
-                    trace!("without forward_from_camera, forward {:?}", direction);
-                    Dir3::new(-direction.f32()).ok()
-                },
-                // float_height: 1.5,
+                // desired_forward: {
+                //     // For platformers, we only want to change direction when the charcter tries to
+                //     // moves (or when the player explicitly wants to set the direction)
+                //     trace!("without forward_from_camera, forward {:?}", direction);
+                //     Dir3::new(-direction.f32()).ok()
+                // },
                 ..config.walk.clone()
-            });
+            };
+            info!("tnua walk is {:?}", walk);
+            controller.basis(walk);
 
             let radar_lens = TnuaRadarLens::new(obstacle_radar, &spatial_ext);
 
@@ -625,4 +628,37 @@ pub fn apply_character_control(
             }
         }
     }
+}
+
+pub fn sample_character_control(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut query: Query<&mut TnuaController>,
+) {
+    let Ok(mut controller) = query.single_mut() else {
+        return;
+    };
+
+    let mut direction = Vec3::ZERO;
+
+    if keyboard.any_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) {
+        direction -= Vector3::Z;
+    }
+    if keyboard.any_pressed([KeyCode::ArrowDown, KeyCode::KeyS]) {
+        direction += Vector3::Z;
+    }
+    if keyboard.any_pressed([KeyCode::ArrowLeft, KeyCode::KeyA]) {
+        direction -= Vector3::X;
+    }
+    if keyboard.any_pressed([KeyCode::ArrowRight, KeyCode::KeyD]) {
+        direction += Vector3::X;
+    }
+
+    let walk = TnuaBuiltinWalk {
+        desired_velocity: direction.normalize_or_zero() * 9.0,
+        float_height: 1.5,
+        ..Default::default()
+    };
+    info!("tnua walk is {:?}", walk);
+
+    controller.basis(walk);
 }

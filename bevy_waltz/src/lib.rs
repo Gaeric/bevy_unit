@@ -24,7 +24,11 @@ impl Plugin for WaltzPlugin {
         app.add_plugins(
             LevelSwitchPlugin::new(Some("jungle_gym")).with("jungle_gym", jungle_gym::setup_level),
         );
-        app.add_plugins((WaltzCharacterPlugin, WaltzCameraPlugin, WaltzControlPlugin));
+        app.add_plugins((
+            WaltzCharacterPlugin,
+            // WaltzCameraPlugin,
+            WaltzControlPlugin,
+        ));
         app.add_plugins(perf::plugin);
     }
 }

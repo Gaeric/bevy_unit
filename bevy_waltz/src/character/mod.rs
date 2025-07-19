@@ -73,7 +73,16 @@ fn setup_player(
     let mut cmd = commands.spawn((
         Mesh3d(meshes.add(Capsule3d::new(0.5, 1.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
+    ));
+
+    cmd.insert((
         WaltzPlayer,
+        // The player caharacter needs to be configured as a dynamic rigid body of the physics engine.
+        RigidBody::Dynamic,
+        Collider::capsule(0.5, 1.0),
+        // This is Tnua's interface component.
+        TnuaController::default(),
+        TnuaAvian3dSensorShape(Collider::cylinder(0.49, 0.0)),
     ));
     // cmd.insert(SceneRoot(
     //     // asset_server.load("waltz/scenes/library/Fox.glb#Scene0"),
@@ -88,12 +97,6 @@ fn setup_player(
     //     1.2 * Vector::Y,
     // ));
 
-    cmd.insert(RigidBody::Dynamic);
-    cmd.insert(Collider::capsule(0.5, 1.0));
-
-    // Tnua's main iterface with the user code
-    cmd.insert(TnuaController::default());
-
     // detect obstacles around the player that the player can use for env actions.
     cmd.insert(TnuaObstacleRadar::new(1.0, 3.0));
 
@@ -106,7 +109,7 @@ fn setup_player(
         walk: TnuaBuiltinWalk {
             // the float height based on the model's geometrics
             // The origin of our model is at the origin of the world coordinates.
-            float_height: 0.91,
+            float_height: 1.5,
             max_slope: float_consts::FRAC_PI_4,
             turning_angvel: Float::INFINITY,
             ..Default::default()
