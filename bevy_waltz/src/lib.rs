@@ -46,10 +46,10 @@ fn setup_level(
 
 impl Plugin for WaltzPlugin {
     fn build(&self, app: &mut App) {
-        // app.add_plugins(
-        //     LevelSwitchPlugin::new(Some("jungle_gym")).with("jungle_gym", jungle_gym::setup_level),
-        // );
-        app.add_systems(Startup, setup_level);
+        app.add_plugins(
+            LevelSwitchPlugin::new(Some("jungle_gym")).with("jungle_gym", jungle_gym::setup_level),
+        );
+        // app.add_systems(Startup, setup_level);
         app.add_plugins((
             WaltzCharacterPlugin,
             // WaltzCameraPlugin,
