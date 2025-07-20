@@ -6,7 +6,11 @@ use bevy::{
     prelude::*,
     render::diagnostic::RenderDiagnosticsPlugin,
 };
-use iyes_perf_ui::{PerfUiPlugin, prelude::PerfUiDefaultEntries};
+use iyes_perf_ui::{
+    PerfUiPlugin,
+    entries::{PerfUiFixedTimeEntries, PerfUiWindowEntries},
+    prelude::PerfUiDefaultEntries,
+};
 
 pub fn plugin(app: &mut App) {
     app.add_plugins((
@@ -21,5 +25,9 @@ pub fn plugin(app: &mut App) {
 }
 
 fn setup_perf_ui(mut commands: Commands) {
-    commands.spawn(PerfUiDefaultEntries::default());
+    commands.spawn((
+        PerfUiDefaultEntries::default(),
+        PerfUiFixedTimeEntries::default(),
+        PerfUiWindowEntries::default(),
+    ));
 }
