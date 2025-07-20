@@ -125,15 +125,15 @@ pub fn get_animation_prop(ani_state: &AnimationState) -> AnimationProp {
             speed: 1.0,
         },
         AnimationState::WallSliding => AnimationProp {
-            name: "Swim_Fwd_Idle",
+            name: "Swim_Idle_Loop",
             speed: 1.0,
         },
         AnimationState::WallJumping => AnimationProp {
-            name: "Swim_Fwd_Idle",
+            name: "Swim_Idle_Loop",
             speed: 1.0,
         },
         AnimationState::Climbing(speed) => AnimationProp {
-            name: "Swim_Fwd_Idle",
+            name: "Swim_Idle_Loop",
             speed: *speed,
         },
     }
