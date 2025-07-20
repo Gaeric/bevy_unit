@@ -41,3 +41,21 @@ bevy_winit = { path = "../bevy_engines/bevy_0.16/crates/bevy_winit" }
 
 bevy-tnua = { path = "../bevy-tnua/" }
 bevy-tnua-avian3d = { path = "../bevy-tnua/avian3d/" }
+
+[features]
+default = ["dev"]
+dev = [
+        "bevy/dynamic_linking",
+        "bevy/bevy_dev_tools",
+        "bevy/bevy_ui_debug",
+        "avian3d/diagnostic_ui",
+]
+
+
+# Enable a small amount of optimization in debug mode
+[profile.dev]
+opt-level = 1
+
+# Enable high optimizations for dependencies (incl. Bevy), but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
