@@ -659,7 +659,7 @@ pub fn apply_movement(trigger: Trigger<Fired<Move>>, mut query: Query<&mut TnuaC
         return;
     };
 
-    let movement = trigger.value.extend(0.0);
+    let movement = Vec3::new(trigger.value.x, 0.0, trigger.value.y);
 
     let walk = TnuaBuiltinWalk {
         desired_velocity: movement.normalize_or_zero() * 9.0,

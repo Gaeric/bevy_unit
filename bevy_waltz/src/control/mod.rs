@@ -2,28 +2,32 @@ use bevy::{
     prelude::*,
     window::{CursorGrabMode, PrimaryWindow},
 };
+use bevy_enhanced_input::prelude::*;
 use bevy_tnua::TnuaUserControlsSystemSet;
 
 use crate::control::character_ctrl::{
-    apply_character_control, apply_movement, bind_movement, debug_character_position,
-    sample_character_control,
+    CharacterFloor, apply_character_control, apply_movement, bind_movement,
+    debug_character_position, sample_character_control,
 };
 
-mod character_ctrl;
+pub mod character_ctrl;
 
 pub struct WaltzControlPlugin;
 
 impl Plugin for WaltzControlPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(EnhancedInputPlugin)
+            .add_input_context::<CharacterFloor>();
+
         app.add_systems(Update, grab_ungrab_mouse);
-        // app.add_observer(bind_movement).add_observer(apply_movement);
-        app.add_systems(
-            FixedUpdate,
-            (
-                debug_character_position.in_set(TnuaUserControlsSystemSet),
-                apply_character_control.in_set(TnuaUserControlsSystemSet),
-            ), // sample_character_control.in_set(TnuaUserControlsSystemSet),
-        );
+        app.add_observer(bind_movement).add_observer(apply_movement);
+        // app.add_systems(
+        //     FixedUpdate,
+        //     (
+        //         // debug_character_position.in_set(TnuaUserControlsSystemSet),
+        //         // apply_character_control.in_set(TnuaUserControlsSystemSet),
+        //     ), // sample_character_control.in_set(TnuaUserControlsSystemSet),
+        // );
     }
 }
 
