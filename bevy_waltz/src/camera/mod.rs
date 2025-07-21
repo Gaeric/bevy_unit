@@ -97,7 +97,7 @@ impl Plugin for WaltzCameraPlugin {
             // todo: spawn camera when level load ready
             .add_systems(Startup, setup_camera)
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     Dolly::<WaltzCamera>::update_active,
                     // update_kind,

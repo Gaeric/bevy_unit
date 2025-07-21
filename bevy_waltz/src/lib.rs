@@ -52,7 +52,7 @@ impl Plugin for WaltzPlugin {
         // app.add_systems(Startup, setup_level);
         app.add_plugins((
             WaltzCharacterPlugin,
-            // WaltzCameraPlugin,
+            WaltzCameraPlugin,
             WaltzControlPlugin,
         ));
         app.add_plugins(perf::plugin);
