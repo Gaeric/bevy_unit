@@ -89,7 +89,7 @@ fn setup_character_with_entity_cmd(mut cmd: EntityCommands) {
         walk: TnuaBuiltinWalk {
             // the float height based on the model's geometrics
             // The origin of our model is at the origin of the world coordinates.
-            float_height: 1.51,
+            float_height: 0.01,
             max_slope: float_consts::FRAC_PI_4,
             turning_angvel: Float::INFINITY,
             ..Default::default()
