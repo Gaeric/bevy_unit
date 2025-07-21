@@ -1,24 +1,22 @@
 use std::cmp::Ordering;
 
-use avian3d::math::AdjustPrecision;
+use avian3d::math::{AdjustPrecision, Vector3};
 use bevy::ecs::query::QueryData;
 use bevy::ecs::system::Query;
 use bevy::input::{ButtonInput, keyboard::KeyCode};
-use bevy::math::VectorSpace;
 use bevy::prelude::*;
-use bevy_tnua::builtins::TnuaBuiltinCrouchState;
+use bevy_enhanced_input::prelude::*;
+use bevy_tnua::builtins::{
+    TnuaBuiltinClimb, TnuaBuiltinCrouch, TnuaBuiltinCrouchState, TnuaBuiltinDash,
+    TnuaBuiltinWallSlide,
+};
 use bevy_tnua::control_helpers::{
     TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaSimpleAirActionsCounter,
     TnuaSimpleFallThroughPlatformsHelper,
 };
-use bevy_tnua::math::AsF32;
+use bevy_tnua::math::{AsF32, Float};
 use bevy_tnua::radar_lens::{TnuaBlipSpatialRelation, TnuaRadarLens};
-use bevy_tnua::{TnuaAction, TnuaGhostSensor, TnuaObstacleRadar, TnuaProximitySensor};
-use bevy_tnua::{
-    builtins::{TnuaBuiltinClimb, TnuaBuiltinCrouch, TnuaBuiltinDash, TnuaBuiltinWallSlide},
-    math::{Float, Vector3},
-    prelude::{TnuaBuiltinJump, TnuaBuiltinWalk, TnuaController},
-};
+use bevy_tnua::{TnuaGhostSensor, TnuaObstacleRadar, TnuaProximitySensor, prelude::*};
 use bevy_tnua_avian3d::TnuaSpatialExtAvian3d;
 
 use crate::character::config::{
@@ -633,6 +631,46 @@ pub fn apply_character_control(
     }
 }
 
+#[derive(InputContext)]
+pub struct CharacterFloor;
+
+#[derive(Debug, InputAction)]
+#[input_action(output = Vec2)]
+pub struct Move;
+
+pub fn bind_movement(
+    trigger: Trigger<Binding<CharacterFloor>>,
+    mut players: Query<&mut Actions<CharacterFloor>>,
+) {
+    let mut actions = players.get_mut(trigger.target()).unwrap();
+
+    actions
+        .bind::<Move>()
+        .to((Cardinal::wasd_keys(), Axial::left_stick()))
+        .with_modifiers((
+            DeadZone::default(),
+            SmoothNudge::default(),
+            Scale::splat(0.3),
+        ));
+}
+
+pub fn apply_movement(trigger: Trigger<Fired<Move>>, mut query: Query<&mut TnuaController>) {
+    let Ok(mut controller) = query.single_mut() else {
+        return;
+    };
+
+    let movement = trigger.value.extend(0.0);
+
+    let walk = TnuaBuiltinWalk {
+        desired_velocity: movement.normalize_or_zero() * 9.0,
+        float_height: 1.5,
+        ..Default::default()
+    };
+    info!("tnua walk is {:?}", walk);
+
+    controller.basis(walk);
+}
+
 pub fn sample_character_control(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut query: Query<&mut TnuaController>,
@@ -664,4 +702,9 @@ pub fn sample_character_control(
     info!("tnua walk is {:?}", walk);
 
     controller.basis(walk);
+}
+
+pub fn debug_character_position(query: Query<&Transform, With<WaltzPlayer>>) {
+    let transform = query.single();
+    warn!("transform is {transform:?}");
 }

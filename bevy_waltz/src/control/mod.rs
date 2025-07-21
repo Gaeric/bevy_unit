@@ -4,7 +4,10 @@ use bevy::{
 };
 use bevy_tnua::TnuaUserControlsSystemSet;
 
-use crate::control::character_ctrl::{apply_character_control, sample_character_control};
+use crate::control::character_ctrl::{
+    apply_character_control, apply_movement, bind_movement, debug_character_position,
+    sample_character_control,
+};
 
 mod character_ctrl;
 
@@ -13,10 +16,13 @@ pub struct WaltzControlPlugin;
 impl Plugin for WaltzControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, grab_ungrab_mouse);
+        // app.add_observer(bind_movement).add_observer(apply_movement);
         app.add_systems(
             FixedUpdate,
-            apply_character_control.in_set(TnuaUserControlsSystemSet),
-            // sample_character_control.in_set(TnuaUserControlsSystemSet),
+            (
+                debug_character_position.in_set(TnuaUserControlsSystemSet),
+                apply_character_control.in_set(TnuaUserControlsSystemSet),
+            ), // sample_character_control.in_set(TnuaUserControlsSystemSet),
         );
     }
 }
