@@ -107,9 +107,12 @@ pub fn get_animation_prop(ani_state: &AnimationState) -> AnimationProp {
             name: "Jump_Loop",
             speed: 1.0,
         },
-        AnimationState::JumpLand => todo!(),
-        AnimationState::Falling => AnimationProp {
+        AnimationState::JumpLand => AnimationProp {
             name: "Jump_Loop",
+            speed: 1.0,
+        },
+        AnimationState::Falling => AnimationProp {
+            name: "Jump_Land",
             speed: 1.0,
         },
 
