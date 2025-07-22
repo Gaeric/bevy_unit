@@ -42,8 +42,9 @@ const CROUCH_BUTOONS_3D: &[KeyCode] = &[KeyCode::ControlLeft, KeyCode::ControlRi
 pub fn pulgin(app: &mut App) {
     app.add_input_context::<CharacterFloor>();
     app.add_observer(setup_player_bind);
-    app.add_observer(bind_movement);
+    app.add_observer(bind_character_action);
     app.add_observer(apply_movement);
+    app.add_observer(apply_jump);
 
     // app.add_systems(
     //     FixedUpdate,
@@ -661,7 +662,7 @@ fn setup_player_bind(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Command
         .insert(Actions::<CharacterFloor>::default());
 }
 
-fn bind_movement(
+fn bind_character_action(
     trigger: Trigger<Binding<CharacterFloor>>,
     mut players: Query<&mut Actions<CharacterFloor>>,
 ) {
@@ -675,6 +676,10 @@ fn bind_movement(
             SmoothNudge::default(),
             Scale::splat(0.3),
         ));
+
+    actions
+        .bind::<Jump>()
+        .to((KeyCode::Space, GamepadButton::West));
 }
 
 fn apply_movement(trigger: Trigger<Fired<Move>>, mut query: Query<&mut TnuaController>) {
