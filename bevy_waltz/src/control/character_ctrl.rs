@@ -39,7 +39,19 @@ const CROUCH_BUTTONS_2D: &[KeyCode] = &[
 
 const CROUCH_BUTOONS_3D: &[KeyCode] = &[KeyCode::ControlLeft, KeyCode::ControlRight];
 
-pub fn apply_character_control(
+pub fn pulgin(app: &mut App) {
+    app.add_input_context::<CharacterFloor>();
+    app.add_observer(setup_player_bind);
+    app.add_observer(bind_movement);
+    app.add_observer(apply_movement);
+
+    // app.add_systems(
+    //     FixedUpdate,
+    //     apply_character_control.in_set(TnuaUserControlsSystemSet),
+    // );
+}
+
+fn apply_character_control(
     keyboard: Res<ButtonInput<KeyCode>>,
     // todo
     // mut just_pressed: ResMut<JustPressedCache>,
@@ -632,20 +644,24 @@ pub fn apply_character_control(
 }
 
 #[derive(InputContext)]
-pub struct CharacterFloor;
+struct CharacterFloor;
 
 #[derive(Debug, InputAction)]
 #[input_action(output = Vec2)]
-pub struct Move;
+struct Move;
 
-pub fn setup_player_bind(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Commands) {
+#[derive(Debug, InputAction)]
+#[input_action(output = bool)]
+struct Jump;
+
+fn setup_player_bind(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Commands) {
     info!("setup player bind");
     commands
         .entity(trigger.target())
         .insert(Actions::<CharacterFloor>::default());
 }
 
-pub fn bind_movement(
+fn bind_movement(
     trigger: Trigger<Binding<CharacterFloor>>,
     mut players: Query<&mut Actions<CharacterFloor>>,
 ) {
@@ -661,7 +677,7 @@ pub fn bind_movement(
         ));
 }
 
-pub fn apply_movement(trigger: Trigger<Fired<Move>>, mut query: Query<&mut TnuaController>) {
+fn apply_movement(trigger: Trigger<Fired<Move>>, mut query: Query<&mut TnuaController>) {
     let Ok(mut controller) = query.single_mut() else {
         return;
     };
@@ -676,4 +692,8 @@ pub fn apply_movement(trigger: Trigger<Fired<Move>>, mut query: Query<&mut TnuaC
     info!("tnua walk is {:?}", walk);
 
     controller.basis(walk);
+}
+
+fn apply_jump(trigger: Trigger<Fired<Jump>>, mut query: Query<&mut TnuaController>) {
+    
 }

@@ -4,10 +4,6 @@ use bevy::{
 };
 use bevy_enhanced_input::prelude::*;
 
-use crate::control::character_ctrl::{
-    CharacterFloor, apply_movement, bind_movement, setup_player_bind,
-};
-
 pub mod character_ctrl;
 
 pub struct WaltzControlPlugin;
@@ -15,18 +11,9 @@ pub struct WaltzControlPlugin;
 impl Plugin for WaltzControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(EnhancedInputPlugin)
-            .add_input_context::<CharacterFloor>();
+            .add_plugins(character_ctrl::pulgin);
 
         app.add_systems(Update, grab_ungrab_mouse);
-        app.add_observer(bind_movement);
-        app.add_observer(apply_movement);
-        app.add_observer(setup_player_bind);
-        // app.add_systems(
-        //     FixedUpdate,
-        //     (
-        //         // apply_character_control.in_set(TnuaUserControlsSystemSet),
-        //     ), // sample_character_control.in_set(TnuaUserControlsSystemSet),
-        // );
     }
 }
 
