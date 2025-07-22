@@ -638,6 +638,13 @@ pub struct CharacterFloor;
 #[input_action(output = Vec2)]
 pub struct Move;
 
+pub fn setup_player_bind(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Commands) {
+    info!("setup player bind");
+    commands
+        .entity(trigger.target())
+        .insert(Actions::<CharacterFloor>::default());
+}
+
 pub fn bind_movement(
     trigger: Trigger<Binding<CharacterFloor>>,
     mut players: Query<&mut Actions<CharacterFloor>>,

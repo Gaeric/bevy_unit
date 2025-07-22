@@ -7,7 +7,7 @@ use bevy_tnua::TnuaUserControlsSystemSet;
 
 use crate::control::character_ctrl::{
     CharacterFloor, apply_character_control, apply_movement, bind_movement,
-    debug_character_position, sample_character_control,
+    debug_character_position, sample_character_control, setup_player_bind,
 };
 
 pub mod character_ctrl;
@@ -20,7 +20,9 @@ impl Plugin for WaltzControlPlugin {
             .add_input_context::<CharacterFloor>();
 
         app.add_systems(Update, grab_ungrab_mouse);
-        app.add_observer(bind_movement).add_observer(apply_movement);
+        app.add_observer(bind_movement);
+        app.add_observer(apply_movement);
+        app.add_observer(setup_player_bind);
         // app.add_systems(
         //     FixedUpdate,
         //     (

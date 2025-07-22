@@ -5,7 +5,6 @@ use avian3d::math::Vector;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::{color::palettes::css, ecs::system::Query, gizmos::gizmos::Gizmos};
-use bevy_enhanced_input::prelude::Actions;
 use bevy_tnua::math::AsF32;
 
 use bevy_tnua::{
@@ -27,7 +26,6 @@ pub mod config;
 use config::{CharacterMotionConfig, Dimensionality, FallingThroughControlScheme};
 
 use crate::character::animating::GltfSceneHandler;
-use crate::control::character_ctrl::CharacterFloor;
 
 /// Marks an entity as the player character
 #[derive(Component, Debug)]
@@ -72,8 +70,6 @@ impl Plugin for WaltzCharacterPlugin {
 
 fn setup_character_with_entity_cmd(mut cmd: EntityCommands) {
     cmd.insert((
-        // todo: insert the action input context on control model
-        Actions::<CharacterFloor>::default(),
         WaltzPlayer,
         // The player caharacter needs to be configured as a dynamic rigid body of the physics engine.
         RigidBody::Dynamic,
