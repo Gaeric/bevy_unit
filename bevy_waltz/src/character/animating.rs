@@ -1,4 +1,4 @@
-use bevy::{log, platform::collections::HashMap, prelude::*};
+use bevy::{animation::RepeatAnimation, log, platform::collections::HashMap, prelude::*};
 use bevy_tnua::{
     TnuaAction, TnuaAnimatingState, TnuaAnimatingStateDirective,
     builtins::{
@@ -86,6 +86,7 @@ pub enum AnimationState {
 pub struct AnimationProp {
     name: &'static str,
     speed: f32,
+    repeat: RepeatAnimation,
 }
 
 pub fn get_animation_prop(ani_state: &AnimationState) -> AnimationProp {
@@ -93,58 +94,71 @@ pub fn get_animation_prop(ani_state: &AnimationState) -> AnimationProp {
         AnimationState::Standing => AnimationProp {
             name: "Idle_Loop",
             speed: 1.0,
+            repeat: RepeatAnimation::Forever,
         },
         AnimationState::Running(speed) => AnimationProp {
             name: "Walk_Loop",
             speed: *speed,
+            repeat: RepeatAnimation::Forever,
         },
         AnimationState::JumpStart => AnimationProp {
             name: "Jump_Start",
             speed: 2.0,
+            repeat: RepeatAnimation::Never,
         },
 
         AnimationState::JumpLoop => AnimationProp {
             name: "Jump_Loop",
             speed: 1.0,
+            repeat: RepeatAnimation::Forever,
         },
         AnimationState::JumpLand => AnimationProp {
-            name: "Jump_Loop",
+            name: "Jump_Land",
             speed: 1.0,
+            repeat: RepeatAnimation::Never,
         },
         AnimationState::Falling => AnimationProp {
             name: "Jump_Land",
             speed: 1.0,
+            repeat: RepeatAnimation::Forever,
         },
 
         AnimationState::Crouching => AnimationProp {
             name: "Crouch_Idle_Loop",
             speed: 1.0,
+            repeat: RepeatAnimation::Forever,
         },
 
         AnimationState::Crawling(speed) => AnimationProp {
             name: "Swim_Fwd_Loop",
             speed: *speed,
+            repeat: RepeatAnimation::Forever,
         },
         AnimationState::Dashing => AnimationProp {
             name: "Jog_Fwd_Loop",
             speed: 1.0,
+            repeat: RepeatAnimation::Forever,
         },
 
         AnimationState::KnockedBack => AnimationProp {
             name: "Hit_Chest",
             speed: 1.0,
+            repeat: RepeatAnimation::Never,
         },
         AnimationState::WallSliding => AnimationProp {
             name: "Swim_Idle_Loop",
             speed: 1.0,
+            repeat: RepeatAnimation::Forever,
         },
         AnimationState::WallJumping => AnimationProp {
             name: "Swim_Idle_Loop",
             speed: 1.0,
+            repeat: RepeatAnimation::Forever,
         },
         AnimationState::Climbing(speed) => AnimationProp {
             name: "Swim_Idle_Loop",
             speed: *speed,
+            repeat: RepeatAnimation::Forever,
         },
     }
 }
@@ -281,12 +295,13 @@ pub fn animate_character(
             // start a new animation. The actual implementation for each possiable animation state
             // is straightforward - we start the animation, set its speed if the state has a
             // variable speed, and set it to repeat if it's something that needs to repeat.
-            TnuaAnimatingStateDirective::Alter { old_state, state } => {
+            TnuaAnimatingStateDirective::Alter { old_state: _, state } => {
                 player.stop_all();
                 let animation_prop = get_animation_prop(state);
                 player
                     .start(handler.animations[animation_prop.name])
-                    .set_speed(animation_prop.speed);
+                    .set_speed(animation_prop.speed)
+                    .set_repeat(animation_prop.repeat);
             }
         }
     }
