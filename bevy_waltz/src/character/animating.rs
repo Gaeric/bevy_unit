@@ -150,11 +150,7 @@ pub fn get_animation_prop(ani_state: &AnimationState) -> AnimationProp {
             speed: 1.0,
             repeat: RepeatAnimation::Forever,
         },
-        AnimationState::WallJumping => AnimationProp {
-            name: "Swim_Idle_Loop",
-            speed: 1.0,
-            repeat: RepeatAnimation::Forever,
-        },
+        AnimationState::WallJumping => todo!(),
         AnimationState::Climbing(speed) => AnimationProp {
             name: "Swim_Idle_Loop",
             speed: *speed,
@@ -232,7 +228,7 @@ pub fn animate_character(
             Some(TnuaBuiltinKnockback::NAME) => AnimationState::KnockedBack,
             Some(TnuaBuiltinWallSlide::NAME) => AnimationState::WallSliding,
             // todo
-            // Some("walljump") => AnimationState::WallJumping,
+            Some("walljump") => AnimationState::WallJumping,
             Some(TnuaBuiltinClimb::NAME) => {
                 let Some((_, action_state)) = controller.concrete_action::<TnuaBuiltinClimb>()
                 else {
@@ -295,13 +291,20 @@ pub fn animate_character(
             // start a new animation. The actual implementation for each possiable animation state
             // is straightforward - we start the animation, set its speed if the state has a
             // variable speed, and set it to repeat if it's something that needs to repeat.
-            TnuaAnimatingStateDirective::Alter { old_state: _, state } => {
-                player.stop_all();
+            TnuaAnimatingStateDirective::Alter {
+                old_state: _,
+                state,
+            } => {
                 let animation_prop = get_animation_prop(state);
-                player
-                    .start(handler.animations[animation_prop.name])
-                    .set_speed(animation_prop.speed)
-                    .set_repeat(animation_prop.repeat);
+                if let Some(animation) = handler.animations.get(animation_prop.name) {
+                    player.stop_all();
+                    player
+                        .start(*animation)
+                        .set_speed(animation_prop.speed)
+                        .set_repeat(animation_prop.repeat);
+                } else {
+                    todo!("{} not exist", animation_prop.name)
+                }
             }
         }
     }
