@@ -694,6 +694,40 @@ fn apply_movement(trigger: Trigger<Fired<Move>>, mut query: Query<&mut TnuaContr
     controller.basis(walk);
 }
 
-fn apply_jump(trigger: Trigger<Fired<Jump>>, mut query: Query<&mut TnuaController>) {
-    
+/// handle jump action for walk/climp/walljump
+fn apply_jump(
+    trigger: Trigger<Fired<Jump>>,
+    mut query: Query<(
+        &CharacterMotionConfig,
+        &TnuaSimpleAirActionsCounter,
+        &mut TnuaController,
+    )>,
+) {
+    let (config, air_actions_counter, mut controller) = query.get_mut(trigger.target()).unwrap();
+
+    // todo: climp/walljump
+    let current_action_name = controller.action_name();
+    controller.action(TnuaBuiltinJump {
+        // Jumping, like crouching, is an action that we either feed or don't. However,
+        // because it can be used in midair, we want to set its `allow_in_air`. The air
+        // counter helps us with that.
+        //
+        // The air actions counter is used to decide if the action is allowed midair by
+        // determining how many actions were performed since the last time the character
+        // was considered "grounded" - including the first jump (if it was done from the
+        // ground) or the initiation of a free fall.
+        //
+        // `air_count_for` needs the name of the action to be performed (in this case
+        // `TnuaBuiltinJump::NAME`) because if the player is still holding the jump button,
+        // we want it to be considered as the same air action number. So, if the player
+        // performs an air jump, before the air jump `air_count_for` will return 1 for any
+        // action, but after it it'll return 1 only for `TnuaBuiltinJump::NAME`
+        // (maintaining the jump) and 2 for any other action. Of course, if the player
+        // releases the button and press it again it'll return 2.
+        allow_in_air: air_actions_counter.air_count_for(TnuaBuiltinJump::NAME)
+                            <= config.actions_in_air
+                            // we also want to be able to jump from a climb
+                            || current_action_name == Some(TnuaBuiltinClimb::NAME),
+        ..config.jump.clone()
+    });
 }
