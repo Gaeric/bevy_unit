@@ -72,6 +72,7 @@ impl Plugin for WaltzCharacterPlugin {
 
 fn setup_character_with_entity_cmd(mut cmd: EntityCommands) {
     cmd.insert((
+        // todo: insert the action input context on control model
         Actions::<CharacterFloor>::default(),
         WaltzPlayer,
         // The player caharacter needs to be configured as a dynamic rigid body of the physics engine.
