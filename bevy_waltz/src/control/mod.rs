@@ -3,11 +3,9 @@ use bevy::{
     window::{CursorGrabMode, PrimaryWindow},
 };
 use bevy_enhanced_input::prelude::*;
-use bevy_tnua::TnuaUserControlsSystemSet;
 
 use crate::control::character_ctrl::{
-    CharacterFloor, apply_character_control, apply_movement, bind_movement,
-    debug_character_position, sample_character_control, setup_player_bind,
+    CharacterFloor, apply_movement, bind_movement, setup_player_bind,
 };
 
 pub mod character_ctrl;
@@ -26,7 +24,6 @@ impl Plugin for WaltzControlPlugin {
         // app.add_systems(
         //     FixedUpdate,
         //     (
-        //         // debug_character_position.in_set(TnuaUserControlsSystemSet),
         //         // apply_character_control.in_set(TnuaUserControlsSystemSet),
         //     ), // sample_character_control.in_set(TnuaUserControlsSystemSet),
         // );

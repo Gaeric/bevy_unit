@@ -165,3 +165,8 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     setup_character_with_entity_cmd(cmd);
 }
+
+pub fn debug_character_position(query: Query<&Transform, With<WaltzPlayer>>) {
+    let transform = query.single();
+    warn!("transform is {transform:?}");
+}
