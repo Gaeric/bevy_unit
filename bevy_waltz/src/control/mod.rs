@@ -6,6 +6,8 @@ use bevy_enhanced_input::prelude::*;
 
 pub mod character_ctrl;
 
+mod fixed_update_inspection;
+
 pub struct WaltzControlPlugin;
 
 impl Plugin for WaltzControlPlugin {
