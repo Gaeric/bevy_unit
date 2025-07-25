@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::f32::consts::TAU;
 
 use avian3d::math::{AdjustPrecision, Vector3};
 use bevy::ecs::query::QueryData;
@@ -25,6 +26,12 @@ use crate::character::config::{
 use crate::level_switch::Climable;
 use crate::{WaltzCamera, WaltzPlayer};
 
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+struct AccumulatedInput {
+    last_move: Option<Vec3>,
+}
+
 #[derive(QueryData)]
 pub struct ObstacleQueryHelper {
     pub climbable: Has<Climable>,
@@ -43,7 +50,7 @@ pub fn pulgin(app: &mut App) {
     app.add_input_context::<CharacterFloor>();
     app.add_observer(setup_player_bind);
     app.add_observer(bind_character_action);
-    app.add_observer(apply_movement);
+    app.add_observer(apply_movement_straight);
     app.add_observer(apply_jump);
 
     // app.add_systems(
@@ -662,6 +669,13 @@ fn setup_player_bind(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Command
         .insert(Actions::<CharacterFloor>::default());
 }
 
+fn setup_player_accumulated(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Commands) {
+    info!("setup player accumulated");
+    commands
+        .entity(trigger.target())
+        .insert(AccumulatedInput::default());
+}
+
 fn bind_character_action(
     trigger: Trigger<Binding<CharacterFloor>>,
     mut players: Query<&mut Actions<CharacterFloor>>,
@@ -682,7 +696,41 @@ fn bind_character_action(
         .to((KeyCode::Space, GamepadButton::West));
 }
 
-fn apply_movement(trigger: Trigger<Fired<Move>>, mut query: Query<&mut TnuaController>) {
+fn accumulate_movement(
+    trigger: Trigger<Fired<Move>>,
+    mut accumulated_inputs: Single<&mut AccumulatedInput>,
+) {
+    let direction = Vec3::new(trigger.value.x, 0.0, trigger.value.y).normalize_or_zero();
+    accumulated_inputs.last_move.replace(direction);
+}
+
+fn clear_accumulated_input(mut accumulated_inputs: Query<&mut AccumulatedInput>) {
+    for mut accumulated_input in &mut accumulated_inputs {
+        accumulated_input.last_move = None;
+    }
+}
+
+fn apply_movement_by_accumulate(
+    single: Single<(&mut TnuaController, &AccumulatedInput)>,
+    transform: Single<&Transform, With<WaltzCamera>>,
+) {
+    let (mut controller, accumulated_input) = single.into_inner();
+    let last_move = accumulated_input.last_move.unwrap_or_default();
+
+    let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+    let yaw_quat = Quat::from_axis_angle(Vec3::Y, yaw);
+
+    controller.basis(TnuaBuiltinWalk {
+        desired_velocity: yaw_quat * last_move,
+        float_height: 1.5,
+        max_slope: TAU / 8.0,
+        ..default()
+    });
+
+    // Feed TnuaBuiltinWalk every frame.
+}
+
+fn apply_movement_straight(trigger: Trigger<Fired<Move>>, mut query: Query<&mut TnuaController>) {
     let Ok(mut controller) = query.single_mut() else {
         return;
     };

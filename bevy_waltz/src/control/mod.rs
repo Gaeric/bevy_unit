@@ -13,6 +13,7 @@ pub struct WaltzControlPlugin;
 impl Plugin for WaltzControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(EnhancedInputPlugin)
+            .add_plugins(fixed_update_inspection::plugin)
             .add_plugins(character_ctrl::pulgin);
 
         app.add_systems(Update, grab_ungrab_mouse);
