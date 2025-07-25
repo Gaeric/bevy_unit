@@ -23,6 +23,8 @@ use bevy_tnua_avian3d::TnuaSpatialExtAvian3d;
 use crate::character::config::{
     CharacterMotionConfig, Dimensionality, FallingThroughControlScheme,
 };
+
+use crate::control::fixed_update_inspection::did_fixed_update_happen;
 use crate::level_switch::Climable;
 use crate::{WaltzCamera, WaltzPlayer};
 
@@ -48,15 +50,24 @@ const CROUCH_BUTOONS_3D: &[KeyCode] = &[KeyCode::ControlLeft, KeyCode::ControlRi
 
 pub fn pulgin(app: &mut App) {
     app.add_input_context::<CharacterFloor>();
-    app.add_observer(setup_player_bind);
     app.add_observer(bind_character_action);
-    app.add_observer(apply_movement_straight);
+    app.add_observer(setup_player_bind);
+    // app.add_observer(apply_movement_straight);
+    app.add_observer(setup_player_accumulated);
+    app.add_observer(accumulate_movement);
+
     app.add_observer(apply_jump);
 
-    // app.add_systems(
-    //     FixedUpdate,
-    //     apply_character_control.in_set(TnuaUserControlsSystemSet),
-    // );
+    app.add_systems(
+        FixedUpdate,
+        // apply_character_control.in_set(TnuaUserControlsSystemSet),
+        apply_movement_by_accumulate.in_set(TnuaUserControlsSystemSet),
+    );
+
+    app.add_systems(
+        Update,
+        clear_accumulated_input.run_if(did_fixed_update_happen),
+    );
 }
 
 fn apply_character_control(
@@ -712,16 +723,18 @@ fn clear_accumulated_input(mut accumulated_inputs: Query<&mut AccumulatedInput>)
 
 fn apply_movement_by_accumulate(
     single: Single<(&mut TnuaController, &AccumulatedInput)>,
-    transform: Single<&Transform, With<WaltzCamera>>,
+    // transform: Single<&Transform, With<WaltzCamera>>,
 ) {
+    info!("apply accumulate movement");
     let (mut controller, accumulated_input) = single.into_inner();
     let last_move = accumulated_input.last_move.unwrap_or_default();
 
-    let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
-    let yaw_quat = Quat::from_axis_angle(Vec3::Y, yaw);
+    // let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+    // let yaw_quat = Quat::from_axis_angle(Vec3::Y, yaw);
 
     controller.basis(TnuaBuiltinWalk {
-        desired_velocity: yaw_quat * last_move,
+        // desired_velocity: yaw_quat * last_move,
+        desired_velocity: last_move,
         float_height: 1.5,
         max_slope: TAU / 8.0,
         ..default()
