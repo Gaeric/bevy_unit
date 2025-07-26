@@ -1,9 +1,16 @@
 use bevy::prelude::*;
-use bevy_dolly::prelude::{Arm, LookAt, Position, Rig, Smooth, YawPitch};
+use bevy_dolly::{
+    prelude::{Arm, LookAt, Position, Rig, Smooth, YawPitch},
+    system::Dolly,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    camera::{config::CameraConfig, kind::update_drivers},
+    camera::{
+        config::CameraConfig,
+        kind::{update_drivers, update_kind},
+        rig::update_rig,
+    },
     character::WaltzPlayer,
 };
 
@@ -40,15 +47,14 @@ pub(crate) struct WaltzCamera {
     pub(crate) secondary_target: Option<Vec3>,
     pub(crate) desired_distance: f32,
     pub(crate) kind: IngameCameraKind,
+    pub(crate) yaw_pitch: Vec2,
 }
 
 impl Default for WaltzCamera {
     fn default() -> Self {
         Self {
             desired_distance: 5.0,
-            target: default(),
-            secondary_target: default(),
-            kind: default(),
+            ..default()
         }
     }
 }
@@ -96,11 +102,11 @@ impl Plugin for WaltzCameraPlugin {
             .add_systems(
                 FixedUpdate,
                 (
-                    // Dolly::<WaltzCamera>::update_active,
-                    // update_kind,
-                    // set_camera_focus,
+                    Dolly::<WaltzCamera>::update_active,
+                    update_kind,
+                    set_camera_focus,
                     update_drivers,
-                    // update_rig,
+                    update_rig,
                 )
                     .chain(),
             );
