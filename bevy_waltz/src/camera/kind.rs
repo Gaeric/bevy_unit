@@ -3,34 +3,32 @@ use bevy_dolly::prelude::{Arm, LookAt, Rig, RigDriverTraits};
 
 use crate::camera::config::CameraConfig;
 
-use super::{IngameCameraKind, WaltzCamera};
+use super::{CameraZoom, IngameCameraKind, WaltzCamera};
 
 pub(super) fn update_kind(mut camera_query: Query<&mut WaltzCamera>, config: Res<CameraConfig>) {
     for mut camera in camera_query.iter_mut() {
-        // let zoom = actions.clamped_value(&CameraAction::Zoom);
-        let zoom = 0.0;
-        let zoomed_out = zoom < -1e-5;
-        let zoomed_in = zoom > 1e-5;
+        if camera.zoom.is_none() {
+            continue;
+        }
 
-        let new_kind = match camera.kind {
-            IngameCameraKind::FirstPerson if zoomed_out => Some(IngameCameraKind::ThirdPerson),
-            IngameCameraKind::ThirdPerson => {
-                if camera.desired_distance < config.third_person.min_distance + 1e-5 && zoomed_in {
-                    Some(IngameCameraKind::FirstPerson)
-                } else if camera.desired_distance > config.third_person.max_distance - 1e-5
-                    && zoomed_out
-                {
-                    Some(IngameCameraKind::FixedAngle)
-                } else {
-                    None
-                }
+        let new_kind = match (&camera.kind, &camera.zoom) {
+            (IngameCameraKind::FirstPerson, Some(CameraZoom::ZoomOut)) => {
+                Some(IngameCameraKind::ThirdPerson)
             }
-            IngameCameraKind::FixedAngle => {
-                if camera.desired_distance < config.fixed_angle.min_distance + 1e-5 {
-                    Some(IngameCameraKind::ThirdPerson)
-                } else {
-                    None
-                }
+            (IngameCameraKind::ThirdPerson, Some(CameraZoom::ZoomIn))
+                if camera.desired_distance < config.third_person.min_distance + 1e-5 =>
+            {
+                Some(IngameCameraKind::FirstPerson)
+            }
+            (IngameCameraKind::ThirdPerson, Some(CameraZoom::ZoomOut))
+                if camera.desired_distance > config.third_person.max_distance - 1e-5 =>
+            {
+                Some(IngameCameraKind::FixedAngle)
+            }
+            (IngameCameraKind::FixedAngle, _)
+                if camera.desired_distance < config.fixed_angle.min_distance + 1e-5 =>
+            {
+                Some(IngameCameraKind::ThirdPerson)
             }
             _ => None,
         };

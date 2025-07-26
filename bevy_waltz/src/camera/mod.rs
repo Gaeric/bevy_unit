@@ -24,13 +24,6 @@ mod rig;
 // #[derive(Component, Debug)]
 // pub struct WaltzCamera;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Reflect, Default)]
-pub(crate) enum CameraAction {
-    #[default]
-    Orbit,
-    Zoom,
-}
-
 #[derive(Debug, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
 #[reflect(Serialize, Deserialize)]
 pub(crate) enum IngameCameraKind {
