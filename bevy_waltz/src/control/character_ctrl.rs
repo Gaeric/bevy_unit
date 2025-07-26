@@ -1,28 +1,16 @@
-use std::cmp::Ordering;
 use std::f32::consts::TAU;
 
-use avian3d::math::{AdjustPrecision, Vector3};
 use bevy::ecs::query::QueryData;
 use bevy::ecs::system::Query;
-use bevy::input::{ButtonInput, keyboard::KeyCode};
+use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
-use bevy_tnua::builtins::{
-    TnuaBuiltinClimb, TnuaBuiltinCrouch, TnuaBuiltinCrouchState, TnuaBuiltinDash,
-    TnuaBuiltinWallSlide,
-};
-use bevy_tnua::control_helpers::{
-    TnuaBlipReuseAvoidance, TnuaCrouchEnforcer, TnuaSimpleAirActionsCounter,
-    TnuaSimpleFallThroughPlatformsHelper,
-};
-use bevy_tnua::math::{AsF32, Float};
-use bevy_tnua::radar_lens::{TnuaBlipSpatialRelation, TnuaRadarLens};
-use bevy_tnua::{TnuaGhostSensor, TnuaObstacleRadar, TnuaProximitySensor, prelude::*};
-use bevy_tnua_avian3d::TnuaSpatialExtAvian3d;
+use bevy_tnua::builtins::TnuaBuiltinClimb;
+use bevy_tnua::control_helpers::TnuaSimpleAirActionsCounter;
+use bevy_tnua::math::AsF32;
+use bevy_tnua::prelude::*;
 
-use crate::character::config::{
-    CharacterMotionConfig, Dimensionality, FallingThroughControlScheme,
-};
+use crate::character::config::CharacterMotionConfig;
 
 use crate::control::fixed_update_inspection::did_fixed_update_happen;
 use crate::level_switch::Climable;
@@ -52,7 +40,7 @@ pub fn pulgin(app: &mut App) {
     app.add_systems(
         FixedUpdate,
         // apply_character_control.in_set(TnuaUserControlsSystemSet),
-        apply_movement_by_accumulate.in_set(TnuaUserControlsSystemSet),
+        apply_tnua_ctrl.in_set(TnuaUserControlsSystemSet),
     );
 
     app.add_systems(
@@ -120,12 +108,16 @@ fn clear_accumulated_input(mut accumulated_inputs: Query<&mut AccumulatedInput>)
     }
 }
 
-fn apply_movement_by_accumulate(
-    single: Single<(&mut TnuaController, &AccumulatedInput)>,
+fn apply_tnua_ctrl(
+    single: Single<(
+        &mut TnuaController,
+        &mut TnuaSimpleAirActionsCounter,
+        &AccumulatedInput,
+    )>,
     transform: Single<&Transform, With<WaltzCamera>>,
 ) {
     // info!("apply accumulate movement");
-    let (mut controller, accumulated_input) = single.into_inner();
+    let (mut controller, mut air_action_counter, accumulated_input) = single.into_inner();
     let last_move = accumulated_input.last_move.unwrap_or_default();
 
     let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
@@ -142,6 +134,7 @@ fn apply_movement_by_accumulate(
         ..default()
     });
 
+    air_action_counter.update(&controller);
 }
 
 fn apply_movement_straight(trigger: Trigger<Fired<Move>>, mut query: Query<&mut TnuaController>) {
@@ -174,7 +167,7 @@ fn apply_jump(
 
     // todo: climp/walljump
     let current_action_name = controller.action_name();
-    let jump_counter =  air_actions_counter.air_count_for(TnuaBuiltinJump::NAME);
+    let jump_counter = air_actions_counter.air_count_for(TnuaBuiltinJump::NAME);
     info!("jump counter is {:?}", jump_counter);
 
     controller.action(TnuaBuiltinJump {
