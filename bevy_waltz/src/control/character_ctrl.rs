@@ -723,24 +723,26 @@ fn clear_accumulated_input(mut accumulated_inputs: Query<&mut AccumulatedInput>)
 
 fn apply_movement_by_accumulate(
     single: Single<(&mut TnuaController, &AccumulatedInput)>,
-    // transform: Single<&Transform, With<WaltzCamera>>,
+    transform: Single<&Transform, With<WaltzCamera>>,
 ) {
     info!("apply accumulate movement");
     let (mut controller, accumulated_input) = single.into_inner();
     let last_move = accumulated_input.last_move.unwrap_or_default();
 
-    // let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
-    // let yaw_quat = Quat::from_axis_angle(Vec3::Y, yaw);
+    let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+    let yaw_quat = Quat::from_axis_angle(Vec3::Y, yaw);
 
+    let direction = yaw_quat * last_move;
+
+    // Feed TnuaBuiltinWalk every frame.
     controller.basis(TnuaBuiltinWalk {
-        // desired_velocity: yaw_quat * last_move,
-        desired_velocity: last_move,
-        float_height: 1.5,
+        desired_velocity: direction,
+        desired_forward: Dir3::new(-direction.f32()).ok(),
+        float_height: 0.01,
         max_slope: TAU / 8.0,
         ..default()
     });
 
-    // Feed TnuaBuiltinWalk every frame.
 }
 
 fn apply_movement_straight(trigger: Trigger<Fired<Move>>, mut query: Query<&mut TnuaController>) {
