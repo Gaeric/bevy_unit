@@ -120,6 +120,8 @@ pub(super) fn update_rig(
             let zoom_smoothness = get_zoom_smoothness(&config, &camera, &rig, distance);
             set_arm(&mut rig, distance, zoom_smoothness, dt);
         }
+
+        set_smoothness(&mut rig, &config, &camera);
     }
 }
 

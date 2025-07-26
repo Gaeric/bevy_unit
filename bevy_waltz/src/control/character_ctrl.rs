@@ -27,12 +27,12 @@ pub struct ObstacleQueryHelper {
     pub climbable: Has<Climable>,
 }
 
-pub fn pulgin(app: &mut App) {
-    app.add_input_context::<CharacterFloor>();
-    app.add_observer(bind_character_action);
-    app.add_observer(setup_player_bind);
+pub fn plugin(app: &mut App) {
+    app.add_input_context::<CharacterCtrl>();
+    app.add_observer(setup_character_ctrl_bind);
+    app.add_observer(bind_character_ctrl_action);
     // app.add_observer(apply_movement_straight);
-    app.add_observer(setup_player_accumulated);
+    app.add_observer(setup_character_accumulated);
     app.add_observer(accumulate_movement);
 
     app.add_observer(apply_jump);
@@ -50,7 +50,7 @@ pub fn pulgin(app: &mut App) {
 }
 
 #[derive(InputContext)]
-struct CharacterFloor;
+struct CharacterCtrl;
 
 #[derive(Debug, InputAction)]
 #[input_action(output = Vec2)]
@@ -60,23 +60,23 @@ struct Move;
 #[input_action(output = bool)]
 struct Jump;
 
-fn setup_player_bind(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Commands) {
+fn setup_character_ctrl_bind(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Commands) {
     info!("setup player bind");
     commands
         .entity(trigger.target())
-        .insert(Actions::<CharacterFloor>::default());
+        .insert(Actions::<CharacterCtrl>::default());
 }
 
-fn setup_player_accumulated(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Commands) {
+fn setup_character_accumulated(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Commands) {
     info!("setup player accumulated");
     commands
         .entity(trigger.target())
         .insert(AccumulatedInput::default());
 }
 
-fn bind_character_action(
-    trigger: Trigger<Binding<CharacterFloor>>,
-    mut players: Query<&mut Actions<CharacterFloor>>,
+fn bind_character_ctrl_action(
+    trigger: Trigger<Binding<CharacterCtrl>>,
+    mut players: Query<&mut Actions<CharacterCtrl>>,
 ) {
     let mut actions = players.get_mut(trigger.target()).unwrap();
 

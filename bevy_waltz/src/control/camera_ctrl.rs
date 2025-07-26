@@ -1,3 +1,5 @@
+use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Resource, Default, Reflect, Serialize, Deserialize)]
 #[reflect(Resource, Serialize, Deserialize)]
@@ -23,3 +25,5 @@ pub(crate) enum UiAction {
     #[default]
     TogglePause,
 }
+
+pub fn plugin(app: &mut App) {}
