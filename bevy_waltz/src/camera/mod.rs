@@ -40,6 +40,13 @@ pub(crate) enum IngameCameraKind {
     FixedAngle,
 }
 
+#[derive(Debug, Clone, PartialEq, Reflect, Serialize, Deserialize)]
+#[reflect(Serialize, Deserialize)]
+pub(crate) enum CameraZoom {
+    ZoomIn,
+    ZoomOut,
+}
+
 #[derive(Debug, Clone, PartialEq, Component, Reflect, Serialize, Deserialize)]
 #[reflect(Component, Serialize, Deserialize)]
 pub(crate) struct WaltzCamera {
@@ -48,6 +55,7 @@ pub(crate) struct WaltzCamera {
     pub(crate) desired_distance: f32,
     pub(crate) kind: IngameCameraKind,
     pub(crate) yaw_pitch: Vec2,
+    pub(crate) zoom: Option<CameraZoom>,
 }
 
 impl Default for WaltzCamera {
