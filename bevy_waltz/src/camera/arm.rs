@@ -1,4 +1,4 @@
-use crate::camera::IngameCamera;
+use crate::camera::WaltzCamera;
 use crate::camera::IngameCameraKind;
 use crate::camera::config::CameraConfig;
 use crate::camera::config::CollisionLayer;
@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy_dolly::prelude::*;
 
 pub(super) fn get_arm_distance(
-    camera: &IngameCamera,
+    camera: &WaltzCamera,
     transform: &Transform,
     spatial_query: &SpatialQuery,
     config: &CameraConfig,
@@ -26,7 +26,7 @@ pub(super) fn get_arm_distance(
 
 pub(super) fn get_zoom_smoothness(
     config: &CameraConfig,
-    camera: &IngameCamera,
+    camera: &WaltzCamera,
     rig: &Rig,
     new_distance: f32,
 ) -> f32 {
@@ -55,7 +55,7 @@ pub(super) fn set_arm(rig: &mut Rig, distance: f32, zoom_smoothness: f32, dt: f3
 fn get_distance_to_collision(
     spatial_query: &SpatialQuery,
     config: &CameraConfig,
-    camera: &IngameCamera,
+    camera: &WaltzCamera,
     camera_transform: &Transform,
 ) -> f32 {
     let origin = camera.target;

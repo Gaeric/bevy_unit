@@ -44,7 +44,7 @@ pub fn plugin(app: &mut App) {
     app.add_input_context::<CameraCtrl>()
         .add_observer(setup_camera_ctrl_bind)
         .add_observer(bind_camera_ctrl_action);
-        // .add_observer(set_yaw_pitch)
+    // .add_observer(set_yaw_pitch)
 }
 
 fn setup_camera_ctrl_bind(trigger: Trigger<OnAdd, WaltzCamera>, mut commands: Commands) {

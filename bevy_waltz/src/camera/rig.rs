@@ -7,11 +7,11 @@ use crate::camera::{
     config::CameraConfig,
 };
 
-use super::{IngameCamera, IngameCameraKind};
+use super::{WaltzCamera, IngameCameraKind};
 
 fn set_yaw_pitch(
     rig: &mut Rig,
-    camera: &IngameCamera,
+    camera: &WaltzCamera,
     camera_movement: Vec2,
     config: &CameraConfig,
 ) {
@@ -23,7 +23,7 @@ fn set_yaw_pitch(
     yaw_pitch.pitch_degrees = yaw_pitch.pitch_degrees.clamp(min_pitch, max_pitch);
 }
 
-fn set_look_at(rig: &mut Rig, camera: &IngameCamera) {
+fn set_look_at(rig: &mut Rig, camera: &WaltzCamera) {
     if let Some(look_at) = rig.try_driver_mut::<LookAt>() {
         if let Some(secondary_target) = camera.secondary_target {
             look_at.target = secondary_target
@@ -33,7 +33,7 @@ fn set_look_at(rig: &mut Rig, camera: &IngameCamera) {
     };
 }
 
-fn set_position(rig: &mut Rig, camera: &IngameCamera) {
+fn set_position(rig: &mut Rig, camera: &WaltzCamera) {
     let target = if let Some(secondary_target) = camera
         .secondary_target
         .filter(|_| camera.kind != IngameCameraKind::FirstPerson)
@@ -46,7 +46,7 @@ fn set_position(rig: &mut Rig, camera: &IngameCamera) {
     rig.driver_mut::<Position>().position = target;
 }
 
-fn get_pitch_extrema(config: &CameraConfig, camera: &IngameCamera) -> (f32, f32) {
+fn get_pitch_extrema(config: &CameraConfig, camera: &WaltzCamera) -> (f32, f32) {
     match camera.kind {
         IngameCameraKind::ThirdPerson => {
             (config.third_person.min_pitch, config.third_person.max_pitch)
@@ -58,7 +58,7 @@ fn get_pitch_extrema(config: &CameraConfig, camera: &IngameCamera) -> (f32, f32)
     }
 }
 
-fn set_smoothness(rig: &mut Rig, config: &CameraConfig, camera: &IngameCamera) {
+fn set_smoothness(rig: &mut Rig, config: &CameraConfig, camera: &WaltzCamera) {
     match camera.kind {
         IngameCameraKind::ThirdPerson => {
             rig.driver_mut::<Smooth>().position_smoothness =
@@ -85,7 +85,7 @@ fn set_smoothness(rig: &mut Rig, config: &CameraConfig, camera: &IngameCamera) {
 pub(super) fn update_rig(
     time: Res<Time<Virtual>>,
     mut camera_query: Query<(
-        &mut IngameCamera,
+        &mut WaltzCamera,
         &mut Rig,
         // &ActionState<CameraAction>,
         &Transform,
@@ -130,7 +130,7 @@ pub(super) fn update_rig(
 // }
 
 fn set_desired_distance(
-    camera: &mut IngameCamera,
+    camera: &mut WaltzCamera,
     // actions: &ActionState<CameraAction>,
     config: &CameraConfig,
 ) {

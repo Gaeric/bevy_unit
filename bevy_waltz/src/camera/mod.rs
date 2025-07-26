@@ -1,12 +1,9 @@
 use bevy::prelude::*;
-use bevy_dolly::{
-    prelude::{Arm, LookAt, Position, Rig, Smooth, YawPitch},
-    system::Dolly,
-};
+use bevy_dolly::prelude::{Arm, LookAt, Position, Rig, Smooth, YawPitch};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    camera::{config::CameraConfig, kind::update_drivers, rig::update_rig},
+    camera::{config::CameraConfig, kind::update_drivers},
     character::WaltzPlayer,
 };
 
@@ -16,9 +13,9 @@ mod arm;
 mod kind;
 mod rig;
 
-/// Marks an entity as the camera that follows the player
-#[derive(Component, Debug)]
-pub struct WaltzCamera;
+// /// Marks an entity as the camera that follows the player
+// #[derive(Component, Debug)]
+// pub struct WaltzCamera;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Reflect, Default)]
 pub(crate) enum CameraAction {
@@ -38,14 +35,14 @@ pub(crate) enum IngameCameraKind {
 
 #[derive(Debug, Clone, PartialEq, Component, Reflect, Serialize, Deserialize)]
 #[reflect(Component, Serialize, Deserialize)]
-pub(crate) struct IngameCamera {
+pub(crate) struct WaltzCamera {
     pub(crate) target: Vec3,
     pub(crate) secondary_target: Option<Vec3>,
     pub(crate) desired_distance: f32,
     pub(crate) kind: IngameCameraKind,
 }
 
-impl Default for IngameCamera {
+impl Default for WaltzCamera {
     fn default() -> Self {
         Self {
             desired_distance: 5.0,
@@ -60,8 +57,8 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Name::new("waltz-camera"),
         Camera3d::default(),
-        IngameCamera::default(),
-        WaltzCamera,
+        WaltzCamera::default(),
+        Transform::from_xyz(10.0, 10.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
         Rig::builder()
             .with(Position::default())
             .with(YawPitch::default())
@@ -73,7 +70,7 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn set_camera_focus(
-    mut camera_query: Query<&mut IngameCamera, With<WaltzCamera>>,
+    mut camera_query: Query<&mut WaltzCamera, With<WaltzCamera>>,
     player_query: Query<&Transform, With<WaltzPlayer>>,
 ) {
     let mut camera = camera_query.single_mut().unwrap();
@@ -92,18 +89,18 @@ pub struct WaltzCameraPlugin;
 impl Plugin for WaltzCameraPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<IngameCameraKind>()
-            .register_type::<IngameCamera>()
+            .register_type::<WaltzCamera>()
             .init_resource::<CameraConfig>()
             // todo: spawn camera when level load ready
             .add_systems(Startup, setup_camera)
             .add_systems(
                 FixedUpdate,
                 (
-                    Dolly::<WaltzCamera>::update_active,
+                    // Dolly::<WaltzCamera>::update_active,
                     // update_kind,
-                    set_camera_focus,
+                    // set_camera_focus,
                     update_drivers,
-                    update_rig,
+                    // update_rig,
                 )
                     .chain(),
             );

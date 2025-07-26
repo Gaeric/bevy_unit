@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_dolly::prelude::{Arm, LookAt, Rig, RigDriverTraits};
 
-use super::{IngameCamera, IngameCameraKind};
+use super::{WaltzCamera, IngameCameraKind};
 
 // pub(super) fn update_kind(
 //     mut camera_query: Query<(&mut IngameCamera, &ActionState<CameraAction>)>,
@@ -41,7 +41,7 @@ use super::{IngameCamera, IngameCameraKind};
 //     }
 // }
 
-pub(super) fn update_drivers(mut camera_query: Query<(&IngameCamera, &mut Rig)>) {
+pub(super) fn update_drivers(mut camera_query: Query<(&WaltzCamera, &mut Rig)>) {
     for (camera, mut rig) in camera_query.iter_mut() {
         match camera.kind {
             IngameCameraKind::ThirdPerson => set_third_person_drivers(&mut rig),

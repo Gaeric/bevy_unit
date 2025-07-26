@@ -14,7 +14,8 @@ impl Plugin for WaltzControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(EnhancedInputPlugin)
             .add_plugins(fixed_update_inspection::plugin)
-            .add_plugins(character_ctrl::plugin);
+            .add_plugins(character_ctrl::plugin)
+            .add_plugins(camera_ctrl::plugin);
 
         app.add_systems(Update, grab_ungrab_mouse);
     }
