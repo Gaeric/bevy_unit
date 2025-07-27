@@ -54,8 +54,12 @@ pub(crate) struct WaltzCamera {
 impl Default for WaltzCamera {
     fn default() -> Self {
         Self {
+            target: default(),
+            secondary_target: None,
             desired_distance: 5.0,
-            ..default()
+            kind: IngameCameraKind::ThirdPerson,
+            yaw_pitch: default(),
+            zoom: None,
         }
     }
 }
