@@ -98,7 +98,9 @@ fn accumulate_movement(
     trigger: Trigger<Fired<Move>>,
     mut accumulated_inputs: Single<&mut AccumulatedInput>,
 ) {
-    let direction = Vec3::new(trigger.value.x, 0.0, trigger.value.y).normalize_or_zero();
+    // w: forward to -z
+    // s: forward to z
+    let direction = Vec3::new(trigger.value.x, 0.0, -trigger.value.y).normalize_or_zero();
     accumulated_inputs.last_move.replace(direction);
 }
 
@@ -109,25 +111,26 @@ fn clear_accumulated_input(mut accumulated_inputs: Query<&mut AccumulatedInput>)
 }
 
 fn apply_tnua_ctrl(
-    single: Single<(
-        &mut TnuaController,
-        &mut TnuaSimpleAirActionsCounter,
-        &AccumulatedInput,
-    )>,
-    transform: Single<&Transform, With<WaltzCamera>>,
+    single: Single<(&mut TnuaController, &AccumulatedInput)>,
+    camera_query: Single<(&Transform, &WaltzCamera)>,
 ) {
     // info!("apply accumulate movement");
-    let (mut controller, mut air_action_counter, accumulated_input) = single.into_inner();
+    let (mut controller, accumulated_input) = single.into_inner();
     let last_move = accumulated_input.last_move.unwrap_or_default();
+    let (transform, waltz_camera) = camera_query.into_inner();
 
     let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+    info!(
+        "camera position: {:?}, target: {}, yaw: {}, last_move: {}",
+        transform, waltz_camera.target, yaw, last_move
+    );
     let yaw_quat = Quat::from_axis_angle(Vec3::Y, yaw);
 
     let direction = yaw_quat * last_move;
 
     // Feed TnuaBuiltinWalk every frame.
     controller.basis(TnuaBuiltinWalk {
-        desired_velocity: direction,
+        desired_velocity: direction * 9.0,
         desired_forward: Dir3::new(-direction.f32()).ok(),
         float_height: 0.01,
         max_slope: TAU / 8.0,
