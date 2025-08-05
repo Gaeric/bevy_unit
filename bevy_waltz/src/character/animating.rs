@@ -113,12 +113,12 @@ pub fn get_animation_prop(ani_state: &AnimationState) -> AnimationProp {
             repeat: RepeatAnimation::Forever,
         },
         AnimationState::JumpLand => AnimationProp {
-            name: "Jump_Land",
+            name: "Jump_Loop",
             speed: 1.0,
             repeat: RepeatAnimation::Never,
         },
         AnimationState::Falling => AnimationProp {
-            name: "Jump_Land",
+            name: "Jump_Loop",
             speed: 1.0,
             repeat: RepeatAnimation::Forever,
         },

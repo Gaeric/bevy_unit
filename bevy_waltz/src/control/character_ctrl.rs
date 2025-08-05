@@ -111,16 +111,20 @@ fn clear_accumulated_input(mut accumulated_inputs: Query<&mut AccumulatedInput>)
 }
 
 fn apply_tnua_ctrl(
-    single: Single<(&mut TnuaController, &AccumulatedInput)>,
+    single: Single<(
+        &mut TnuaController,
+        &AccumulatedInput,
+        &mut TnuaSimpleAirActionsCounter,
+    )>,
     camera_query: Single<(&Transform, &WaltzCamera)>,
 ) {
     // info!("apply accumulate movement");
-    let (mut controller, accumulated_input) = single.into_inner();
+    let (mut controller, accumulated_input, mut air_action_counter) = single.into_inner();
     let last_move = accumulated_input.last_move.unwrap_or_default();
     let (transform, waltz_camera) = camera_query.into_inner();
 
     let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
-    info!(
+    trace!(
         "camera position: {:?}, target: {}, yaw: {}, last_move: {}",
         transform, waltz_camera.target, yaw, last_move
     );
