@@ -39,5 +39,5 @@ fn setup_perf_ui(mut commands: Commands) {
 }
 
 fn setup_framepace(mut settings: ResMut<FramepaceSettings>) {
-    settings.limiter = Limiter::from_framerate(60.0);
+    settings.limiter = Limiter::from_framerate(120.0);
 }
