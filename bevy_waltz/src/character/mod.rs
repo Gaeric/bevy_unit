@@ -22,6 +22,7 @@ use bevy_tnua_avian3d::*;
 
 mod animating;
 pub mod config;
+mod sound;
 
 use config::{CharacterMotionConfig, Dimensionality, FallingThroughControlScheme};
 
@@ -58,6 +59,7 @@ impl Plugin for WaltzCharacterPlugin {
         app.add_plugins(TnuaControllerPlugin::new(FixedUpdate));
         app.add_plugins(TnuaCrouchEnforcerPlugin::new(FixedUpdate));
         app.add_plugins(PhysicsDebugPlugin::default());
+        app.add_plugins(sound::plugin);
 
         app.add_systems(Startup, setup_player);
         // app.add_systems(Startup, setup_demo_player);
