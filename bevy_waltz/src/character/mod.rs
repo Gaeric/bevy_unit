@@ -21,6 +21,7 @@ use bevy_tnua::{builtins::TnuaBuiltinCrouch, math::float_consts, prelude::TnuaBu
 use bevy_tnua_avian3d::*;
 
 mod animating;
+mod assets;
 pub mod config;
 mod sound;
 
