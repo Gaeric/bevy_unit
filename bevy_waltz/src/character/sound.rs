@@ -6,7 +6,7 @@ use bevy_tnua::{
     prelude::{TnuaBuiltinJump, TnuaController},
 };
 
-use crate::character::WaltzPlayer;
+use crate::character::{WaltzPlayer, assets::CharacterAssets};
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(Update, (character_jump, character_movement, character_land));
@@ -15,6 +15,7 @@ pub(super) fn plugin(app: &mut App) {
 fn character_jump(
     mut commands: Commands,
     character: Single<&TnuaController, With<WaltzPlayer>>,
+    character_assets: ResMut<CharacterAssets>,
     mut is_jumping: Local<bool>,
     mut sound_cooldown: Local<Option<Timer>>,
     time: Res<Time>,
@@ -38,7 +39,13 @@ fn character_jump(
 
     if sound_cooldown.finished() {
         // todo: play sound
+        commands.spawn((
+            AudioPlayer(character_assets.jump_sound.clone()),
+            PlaybackSettings::ONCE,
+        ));
+
         sound_cooldown.reset();
+        info!("play jump sound");
     }
 }
 

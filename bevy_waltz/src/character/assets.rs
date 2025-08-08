@@ -6,7 +6,7 @@ pub(crate) struct CharacterAssets {
     // #[dependency]
     // _modle: Handle<Scene>,
     #[dependency]
-    jump_sound: Handle<AudioSource>,
+    pub jump_sound: Handle<AudioSource>,
 }
 
 pub(super) fn plugin(app: &mut App) {
