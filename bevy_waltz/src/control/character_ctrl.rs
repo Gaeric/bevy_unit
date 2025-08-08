@@ -115,11 +115,13 @@ fn apply_tnua_ctrl(
         &mut TnuaController,
         &AccumulatedInput,
         &mut TnuaSimpleAirActionsCounter,
+        &CharacterMotionConfig,
     )>,
     camera_query: Single<(&Transform, &WaltzCamera)>,
 ) {
     // info!("apply accumulate movement");
-    let (mut controller, accumulated_input, mut air_action_counter) = single.into_inner();
+    let (mut controller, accumulated_input, mut air_action_counter, motion_config) =
+        single.into_inner();
     let last_move = accumulated_input.last_move.unwrap_or_default();
     let (transform, waltz_camera) = camera_query.into_inner();
 
@@ -134,11 +136,9 @@ fn apply_tnua_ctrl(
 
     // Feed TnuaBuiltinWalk every frame.
     controller.basis(TnuaBuiltinWalk {
-        desired_velocity: direction * 9.0,
+        desired_velocity: direction * motion_config.speed,
         desired_forward: Dir3::new(-direction.f32()).ok(),
-        float_height: 0.01,
-        max_slope: TAU / 8.0,
-        ..default()
+        ..motion_config.walk.clone()
     });
 
     air_action_counter.update(&controller);
