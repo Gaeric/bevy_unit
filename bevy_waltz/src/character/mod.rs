@@ -60,6 +60,7 @@ impl Plugin for WaltzCharacterPlugin {
         app.add_plugins(TnuaControllerPlugin::new(FixedUpdate));
         app.add_plugins(TnuaCrouchEnforcerPlugin::new(FixedUpdate));
         app.add_plugins(PhysicsDebugPlugin::default());
+        app.add_plugins(assets::plugin);
         app.add_plugins(sound::plugin);
 
         app.add_systems(Startup, setup_player);
