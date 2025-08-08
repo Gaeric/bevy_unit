@@ -110,26 +110,45 @@ fn clear_accumulated_input(mut accumulated_inputs: Query<&mut AccumulatedInput>)
     }
 }
 
+#[derive(QueryData)]
+#[query_data(mutable)]
+struct TnuaCtrlQuery {
+    controller: &'static mut TnuaController,
+    accumulated_input: &'static AccumulatedInput,
+    air_action_counter: &'static mut TnuaSimpleAirActionsCounter,
+    motion_config: &'static CharacterMotionConfig,
+}
+
+#[derive(QueryData)]
+struct TnuaCameraQuery {
+    transform: &'static Transform,
+    waltz_camera: &'static WaltzCamera,
+}
+
 fn apply_tnua_ctrl(
-    single: Single<(
-        &mut TnuaController,
-        &AccumulatedInput,
-        &mut TnuaSimpleAirActionsCounter,
-        &CharacterMotionConfig,
-    )>,
-    camera_query: Single<(&Transform, &WaltzCamera)>,
+    tnua_ctrl_query: Single<TnuaCtrlQuery>,
+    camera_query: Option<Single<TnuaCameraQuery>>,
 ) {
     // info!("apply accumulate movement");
-    let (mut controller, accumulated_input, mut air_action_counter, motion_config) =
-        single.into_inner();
-    let last_move = accumulated_input.last_move.unwrap_or_default();
-    let (transform, waltz_camera) = camera_query.into_inner();
-
-    let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
-    trace!(
-        "camera position: {:?}, target: {}, yaw: {}, last_move: {}",
-        transform, waltz_camera.target, yaw, last_move
+    let mut tnua_ctrl = tnua_ctrl_query.into_inner();
+    let (controller, accumulated_input, air_action_counter, motion_config) = (
+        &mut tnua_ctrl.controller,
+        tnua_ctrl.accumulated_input,
+        &mut tnua_ctrl.air_action_counter,
+        tnua_ctrl.motion_config,
     );
+
+    let mut yaw = 0.0;
+    let last_move = accumulated_input.last_move.unwrap_or_default();
+    if let Some(tnua_camera) = camera_query {
+        let (transform, waltz_camera) = (tnua_camera.transform, tnua_camera.waltz_camera);
+        yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+        info!(
+            "camera position: {:?}, target: {}, yaw: {}, last_move: {}",
+            transform, waltz_camera.target, yaw, last_move
+        );
+    }
+
     let yaw_quat = Quat::from_axis_angle(Vec3::Y, yaw);
 
     let direction = yaw_quat * last_move;
