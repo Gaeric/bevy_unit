@@ -87,7 +87,6 @@ fn setup_character_with_entity_cmd(mut cmd: EntityCommands) {
     cmd.insert(TnuaBlipReuseAvoidance::default());
 
     cmd.insert(CharacterMotionConfig {
-        dimensionality: Dimensionality::Dim3,
         speed: 5.0,
         walk: TnuaBuiltinWalk {
             // the float height based on the model's geometrics

@@ -25,7 +25,6 @@ pub enum FallingThroughControlScheme {
 
 #[derive(Component)]
 pub struct CharacterMotionConfig {
-    pub dimensionality: Dimensionality,
     pub speed: Float,
     pub walk: TnuaBuiltinWalk,
     pub actions_in_air: usize,
