@@ -250,8 +250,9 @@ pub fn animate_character(
                     AnimationState::Falling
                 } else {
                     let speed = basis_state.running_velocity.length();
+                    // Ensure the animation matches the actual speed
                     if 0.01 < speed {
-                        AnimationState::Running(0.1 * speed)
+                        AnimationState::Running(0.2 * speed)
                     } else {
                         AnimationState::Standing
                     }
@@ -298,6 +299,10 @@ pub fn animate_character(
                 let animation_prop = get_animation_prop(state);
                 if let Some(animation) = handler.animations.get(animation_prop.name) {
                     player.stop_all();
+                    trace!(
+                        "animation {} speed: {}",
+                        animation_prop.name, animation_prop.speed
+                    );
                     player
                         .start(*animation)
                         .set_speed(animation_prop.speed)
