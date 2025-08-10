@@ -7,17 +7,12 @@ use crate::camera::{
     config::CameraConfig,
 };
 
-use super::{WaltzCamera, IngameCameraKind};
+use super::{IngameCameraKind, WaltzCamera};
 
-fn set_yaw_pitch(
-    rig: &mut Rig,
-    camera: &WaltzCamera,
-    camera_movement: Vec2,
-    config: &CameraConfig,
-) {
+fn set_yaw_pitch(rig: &mut Rig, camera: &WaltzCamera, config: &CameraConfig) {
     let yaw_pitch = rig.driver_mut::<YawPitch>();
-    let yaw = -camera_movement.x * config.mouse_sensitivity_x;
-    let pitch = -camera_movement.y * config.mouse_sensitivity_y;
+    let yaw = -camera.yaw_pitch.x * config.mouse_sensitivity_x;
+    let pitch = -camera.yaw_pitch.y * config.mouse_sensitivity_y;
     yaw_pitch.rotate_yaw_pitch(yaw.to_degrees(), pitch.to_degrees());
     let (min_pitch, max_pitch) = get_pitch_extrema(config, camera);
     yaw_pitch.pitch_degrees = yaw_pitch.pitch_degrees.clamp(min_pitch, max_pitch);
@@ -109,7 +104,7 @@ pub(super) fn update_rig(
         } else {
             // let camera_movement = get_camera_movement(actions);
             // if !camera_movement.is_approx_zero() {
-            //     set_yaw_pitch(&mut rig, &camera, camera_movement, &config)
+            set_yaw_pitch(&mut rig, &camera, &config)
             // }
         }
 

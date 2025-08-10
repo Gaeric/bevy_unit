@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, window::CursorGrabMode};
 use bevy_enhanced_input::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -43,8 +43,8 @@ struct CameraZoom;
 pub fn plugin(app: &mut App) {
     app.add_input_context::<CameraCtrl>()
         .add_observer(setup_camera_ctrl_bind)
-        .add_observer(bind_camera_ctrl_action);
-    // .add_observer(set_yaw_pitch)
+        .add_observer(bind_camera_ctrl_action)
+        .add_observer(rotate_camera_yas_and_pitch);
 }
 
 fn setup_camera_ctrl_bind(trigger: Trigger<OnAdd, WaltzCamera>, mut commands: Commands) {
@@ -64,4 +64,18 @@ fn bind_camera_ctrl_action(
         Input::mouse_motion().with_modifiers((Scale::splat(0.1), Negate::all())),
         Axial::right_stick().with_modifiers_each((Scale::splat(2.0), Negate::x())),
     ));
+}
+
+fn rotate_camera_yas_and_pitch(
+    trigger: Trigger<Fired<CameraOrbit>>,
+    window: Single<&Window>,
+    mut camera: Single<&mut WaltzCamera>,
+) {
+    if window.cursor_options.grab_mode == CursorGrabMode::None {
+        return;
+    }
+
+    info!("trigger is {}", trigger.value);
+
+    camera.yaw_pitch += trigger.value;
 }
