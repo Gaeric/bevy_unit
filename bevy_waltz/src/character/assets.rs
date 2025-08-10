@@ -19,7 +19,7 @@ impl FromWorld for CharacterAssets {
         let assets_server = world.resource::<AssetServer>();
         Self {
             // just add a fake audio as test
-            jump_sound: assets_server.load("waltz/audio/walking.ogg"),
+            jump_sound: assets_server.load("waltz/audio/jump_grunt_1.ogg"),
         }
     }
 }
