@@ -143,7 +143,7 @@ fn apply_tnua_ctrl(
     if let Some(tnua_camera) = camera_query {
         let (transform, waltz_camera) = (tnua_camera.transform, tnua_camera.waltz_camera);
         yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
-        info!(
+        debug!(
             "camera position: {:?}, target: {}, yaw: {}, last_move: {}",
             transform, waltz_camera.target, yaw, last_move
         );
