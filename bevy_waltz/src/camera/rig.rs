@@ -9,13 +9,16 @@ use crate::camera::{
 
 use super::{IngameCameraKind, WaltzCamera};
 
-fn set_yaw_pitch(rig: &mut Rig, camera: &WaltzCamera, config: &CameraConfig) {
+fn set_yaw_pitch(rig: &mut Rig, camera: &mut WaltzCamera, config: &CameraConfig) {
     let yaw_pitch = rig.driver_mut::<YawPitch>();
-    let yaw = -camera.yaw_pitch.x * config.mouse_sensitivity_x;
-    let pitch = -camera.yaw_pitch.y * config.mouse_sensitivity_y;
+    // let yaw = -camera.yaw_pitch.x * config.mouse_sensitivity_x;
+    // let pitch = -camera.yaw_pitch.y * config.mouse_sensitivity_y;
+    let yaw = camera.yaw_pitch.x * 0.02;
+    let pitch = camera.yaw_pitch.y * 0.02;
     yaw_pitch.rotate_yaw_pitch(yaw.to_degrees(), pitch.to_degrees());
     let (min_pitch, max_pitch) = get_pitch_extrema(config, camera);
     yaw_pitch.pitch_degrees = yaw_pitch.pitch_degrees.clamp(min_pitch, max_pitch);
+    camera.yaw_pitch = Vec2::ZERO;
 }
 
 fn set_look_at(rig: &mut Rig, camera: &WaltzCamera) {
@@ -44,7 +47,8 @@ fn set_position(rig: &mut Rig, camera: &WaltzCamera) {
 fn get_pitch_extrema(config: &CameraConfig, camera: &WaltzCamera) -> (f32, f32) {
     match camera.kind {
         IngameCameraKind::ThirdPerson => {
-            (config.third_person.min_pitch, config.third_person.max_pitch)
+            // (config.third_person.min_pitch, config.third_person.max_pitch)
+            (-30.0, 30.0)
         }
         IngameCameraKind::FirstPerson => {
             (config.first_person.min_pitch, config.first_person.max_pitch)
@@ -102,10 +106,7 @@ pub(super) fn update_rig(
             let yaw_pitch = rig.driver_mut::<YawPitch>();
             yaw_pitch.yaw_degrees = config.fixed_angle.pitch;
         } else {
-            // let camera_movement = get_camera_movement(actions);
-            // if !camera_movement.is_approx_zero() {
-            set_yaw_pitch(&mut rig, &camera, &config)
-            // }
+            set_yaw_pitch(&mut rig, &mut camera, &config)
         }
 
         // set_desired_distance(&mut camera, actions, &config);

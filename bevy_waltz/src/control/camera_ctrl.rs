@@ -75,7 +75,7 @@ fn rotate_camera_yas_and_pitch(
         return;
     }
 
-    info!("trigger is {}", trigger.value);
+    debug!("trigger is {}", trigger.value);
 
     camera.yaw_pitch += trigger.value;
 }
