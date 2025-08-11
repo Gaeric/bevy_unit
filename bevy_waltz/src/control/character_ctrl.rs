@@ -100,7 +100,7 @@ fn accumulate_movement(
 ) {
     // w: forward to -z
     // s: forward to z
-    let direction = Vec3::new(trigger.value.x, 0.0, -trigger.value.y).normalize_or_zero();
+    let direction = Vec3::new(trigger.value.x, 0.0, -trigger.value.y);
     accumulated_inputs.last_move.replace(direction);
 }
 
@@ -151,7 +151,14 @@ fn apply_tnua_ctrl(
 
     let yaw_quat = Quat::from_axis_angle(Vec3::Y, yaw);
 
-    let direction = yaw_quat * last_move;
+    let mut direction = yaw_quat * last_move;
+
+    // add speed clamping to the character's movement
+    if direction.length_squared() > 0.005 {
+        debug!("direction is {direction:?}");
+    } else {
+        direction = Vec3::ZERO;
+    }
 
     // Feed TnuaBuiltinWalk every frame.
     controller.basis(TnuaBuiltinWalk {

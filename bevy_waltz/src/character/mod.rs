@@ -88,7 +88,8 @@ fn setup_character_with_entity_cmd(mut cmd: EntityCommands) {
     cmd.insert(TnuaBlipReuseAvoidance::default());
 
     cmd.insert(CharacterMotionConfig {
-        speed: 5.0,
+        // speed with direction correction factor
+        speed: 5.0 * 3.0,
         walk: TnuaBuiltinWalk {
             // the float height based on the model's geometrics
             // The origin of our model is at the origin of the world coordinates.
