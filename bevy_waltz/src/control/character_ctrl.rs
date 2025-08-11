@@ -1,5 +1,3 @@
-use std::f32::consts::TAU;
-
 use bevy::ecs::query::QueryData;
 use bevy::ecs::system::Query;
 use bevy::input::keyboard::KeyCode;
@@ -168,23 +166,6 @@ fn apply_tnua_ctrl(
     });
 
     air_action_counter.update(&controller);
-}
-
-fn apply_movement_straight(trigger: Trigger<Fired<Move>>, mut query: Query<&mut TnuaController>) {
-    let Ok(mut controller) = query.single_mut() else {
-        return;
-    };
-
-    let movement = Vec3::new(trigger.value.x, 0.0, trigger.value.y);
-
-    let walk = TnuaBuiltinWalk {
-        desired_velocity: movement.normalize_or_zero() * 9.0,
-        float_height: 1.5,
-        ..Default::default()
-    };
-    info!("tnua walk is {:?}", walk);
-
-    controller.basis(walk);
 }
 
 /// handle jump action for walk/climp/walljump
