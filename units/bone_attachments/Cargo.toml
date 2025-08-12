@@ -1,0 +1,15 @@
+[package]
+name = "bone_attachments"
+version = "0.1.0"
+edition = "2024"
+description = "Experimental implementation of bone attachments (forked from bevy#18262)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+bevy = "0.16.1"
+bevy_scene = { version = "0.16.1", optional = true }
+bevy_asset = { version = "0.16.1", optional = true }
+tracing = { version = "0.1", default-features = false }
+
+[features]
+bevy_scene = ["dep:bevy_scene", "dep:bevy_asset"]

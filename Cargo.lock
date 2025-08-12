@@ -1794,6 +1794,7 @@ dependencies = [
  "bevy",
  "bevy_shine",
  "bevy_waltz",
+ "bone_attachments",
  "crossbeam-channel",
  "tracing-appender",
 ]
@@ -1932,6 +1933,16 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "piper",
+]
+
+[[package]]
+name = "bone_attachments"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_asset",
+ "bevy_scene",
+ "tracing",
 ]
 
 [[package]]
