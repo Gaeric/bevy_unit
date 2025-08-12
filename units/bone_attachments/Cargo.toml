@@ -12,4 +12,5 @@ bevy_asset = { version = "0.16.1", optional = true }
 tracing = { version = "0.1", default-features = false }
 
 [features]
+default = ["bevy_scene"]
 bevy_scene = ["dep:bevy_scene", "dep:bevy_asset"]

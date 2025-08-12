@@ -2,7 +2,70 @@
 
 #![no_std]
 
-// pub mod relationship;
+pub mod relationship;
+
 #[cfg(feature = "bevy_scene")]
 pub mod scene;
 
+extern crate alloc;
+
+// use alloc::vec::Vec;
+
+use bevy::{
+    app::{Plugin, PostUpdate},
+    ecs::{
+        entity::Entity, relationship::RelationshipTarget, schedule::IntoScheduleConfigs,
+        system::Query,
+    },
+    transform::{TransformSystem, components::Transform},
+};
+
+use crate::relationship::AttachingModels;
+
+/// Most frequently used objects of [`bevy_bone_attachments`](self) for easy access
+pub mod prelude {
+    pub use super::{
+        // relationship::{AttachedTo, AttachingModels},
+        BoneAttachmentsPlugin,
+    };
+}
+
+#[derive(Default)]
+/// Plugin that setups bone attachments
+pub struct BoneAttachmentsPlugin;
+
+impl Plugin for BoneAttachmentsPlugin {
+    fn build(&self, app: &mut bevy::app::App) {
+        app.register_type::<relationship::AttachingModels>()
+            .register_type::<relationship::AttachedTo>();
+
+        app.add_systems(
+            PostUpdate,
+            propagate_transform_to_attachments.after(TransformSystem::TransformPropagate),
+        );
+    }
+}
+
+fn propagate_transform_to_attachments(
+    parents: Query<(Entity, &AttachingModels)>,
+    mut transforms: Query<&mut Transform>,
+) {
+    // let mut parents_without_transform = Vec::new();
+    // let mut children_without_transform = Vec::new();
+
+    for (entity, children) in parents.iter() {
+        let Ok(parent_transform) = transforms.get(entity).cloned() else {
+            // parents_without_transform.push(entity);
+            continue;
+        };
+
+        for child in children.iter() {
+            let Ok(mut transform) = transforms.get_mut(child) else {
+                // children_without_transform.push(child);
+                continue;
+            };
+
+            *transform = parent_transform
+        }
+    }
+}
