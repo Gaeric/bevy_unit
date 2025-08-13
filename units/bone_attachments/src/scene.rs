@@ -10,6 +10,7 @@ use bevy::{
         relationship::RelatedSpawnerCommands,
         system::{Commands, EntityCommands, Query},
     },
+    platform::collections::{HashMap, hash_map::Entry},
 };
 use bevy_asset::Handle;
 use bevy_scene::{Scene, SceneInstanceReady, SceneRoot};
@@ -58,5 +59,41 @@ fn scene_attachment_ready(
         unreachable!("AttachedTo must be available on SceneInstanceReady");
     };
 
-    todo!()
+    let mut duplicate_target_ids_on_parent_hierarchy = Vec::new();
+    let mut target_ids = HashMap::new();
+
+    for child in children.iter_descendants(**parent) {
+        if child == trigger.target() {
+            continue;
+        }
+
+        if let Ok(animation_target) = animation_targets.get(child) {
+            match target_ids.entry(animation_target.id) {
+                Entry::Vacant(vacancy) => {
+                    vacancy.insert(animation_target.player);
+                }
+                Entry::Occupied(_) => {
+                    duplicate_target_ids_on_parent_hierarchy.push(animation_target.id);
+                }
+            }
+        }
+    }
+
+    if !duplicate_target_ids_on_parent_hierarchy.is_empty() {
+        tracing::warn!(
+            "There where nodes with duplicate AnimationTargetId on the hierarchy if {}, suing the first appearance. {:?}",
+            **parent,
+            duplicate_target_ids_on_parent_hierarchy
+        );
+    }
+
+    // let mut count = 0;
+    // let mut unmatched_animation_target_id = Vec::new();
+    // for child in children.iter_descendants(trigger.target()) {
+
+    // }
+
+    todo!();
+
+    commands.entity(trigger.target());
 }
