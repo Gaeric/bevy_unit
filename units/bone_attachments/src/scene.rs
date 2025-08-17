@@ -39,6 +39,8 @@ impl<'a> SceneAttachmentExt for EntityCommands<'a> {
         scene: Handle<Scene>,
         extras: impl Bundle,
     ) -> &mut EntityCommands<'a> {
+        tracing::info!("attach scene with extras entity is {:?}", self.id());
+
         self.with_related_entities(|spawner: &mut RelatedSpawnerCommands<AttachedTo>| {
             spawner
                 .spawn((SceneRoot(scene), extras))
@@ -55,9 +57,15 @@ fn scene_attachment_ready(
     animation_targets: Query<&AnimationTarget>,
     // animation_target_ids: Query<&AnimationTargetId>,
 ) {
+    tracing::info!("trigger entity is {:?}", trigger.target());
+    tracing::info!("trigger caller is {:?}", trigger.caller());
+    tracing::info!("trigger observer is {:?}", trigger.observer());
+
     let Ok(parent) = scene_attachments.get(trigger.target()) else {
         unreachable!("AttachedTo must be available on SceneInstanceReady");
     };
+
+    tracing::info!("scene_attachments attach to: {:?}", parent);
 
     let mut duplicate_target_ids_on_parent_hierarchy = Vec::new();
     let mut target_ids = HashMap::new();
@@ -93,7 +101,7 @@ fn scene_attachment_ready(
 
     // }
 
-    todo!();
+    // todo!();
 
-    commands.entity(trigger.target());
+    // commands.entity(trigger.target());
 }

@@ -48,8 +48,11 @@ fn setup_mesh_and_animation(
 
     let mesh_scene = SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(GLTF_PATH)));
 
-    commands
-        .spawn((animation_to_play, mesh_scene))
+    let mut entity = commands.spawn((animation_to_play, mesh_scene));
+
+    info!("setup mesh entity is {:?}", entity.id());
+
+    entity
         .observe(play_animation_when_ready)
         .observe(attach_helm);
 }

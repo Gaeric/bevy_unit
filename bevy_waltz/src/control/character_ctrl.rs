@@ -182,7 +182,6 @@ fn apply_jump(
     // todo: climp/walljump
     let current_action_name = controller.action_name();
     let jump_counter = air_actions_counter.air_count_for(TnuaBuiltinJump::NAME);
-    info!("jump counter is {:?}", jump_counter);
 
     controller.action(TnuaBuiltinJump {
         // Jumping, like crouching, is an action that we either feed or don't. However,
