@@ -55,21 +55,14 @@ fn scene_attachment_ready(
     scene_attachments: Query<&AttachedTo>,
     children: Query<&Children>,
     animation_targets: Query<&AnimationTarget>,
-    // animation_target_ids: Query<&AnimationTargetId>,
+    animation_target_ids: Query<&AnimationTargetId>,
 ) {
-    tracing::info!("trigger entity is {:?}", trigger.target());
-    tracing::info!("trigger caller is {:?}", trigger.caller());
-    tracing::info!("trigger observer is {:?}", trigger.observer());
-
     let Ok(parent) = scene_attachments.get(trigger.target()) else {
-        unreachable!("AttachedTo must be available on SceneInstanceReady");
+        unreachable!("AttachedTo must be available on SceneInstanceReady.");
     };
-
-    tracing::info!("scene_attachments attach to: {:?}", parent);
 
     let mut duplicate_target_ids_on_parent_hierarchy = Vec::new();
     let mut target_ids = HashMap::new();
-
     for child in children.iter_descendants(**parent) {
         if child == trigger.target() {
             continue;
@@ -86,22 +79,41 @@ fn scene_attachment_ready(
             }
         }
     }
-
     if !duplicate_target_ids_on_parent_hierarchy.is_empty() {
         tracing::warn!(
-            "There where nodes with duplicate AnimationTargetId on the hierarchy if {}, suing the first appearance. {:?}",
+            "There where nodes with duplicate AnimationTargetId on the hierarchy if {}, using the first appearance. {:?}",
             **parent,
             duplicate_target_ids_on_parent_hierarchy
         );
     }
 
-    // let mut count = 0;
-    // let mut unmatched_animation_target_id = Vec::new();
-    // for child in children.iter_descendants(trigger.target()) {
+    let mut count = 0;
+    let mut unmatched_animation_target_id = Vec::new();
+    for child in children.iter_descendants(trigger.target()) {
+        if let Ok(animation_target_id) = animation_target_ids.get(child) {
+            if let Some(player) = target_ids.get(animation_target_id) {
+                commands.entity(child).insert(AnimationTarget {
+                    id: *animation_target_id,
+                    player: *player,
+                });
+                count += 1;
+            } else {
+                unmatched_animation_target_id.push(animation_target_id);
+            }
+        }
+    }
+    if !unmatched_animation_target_id.is_empty() {
+        tracing::warn!(
+            "There where nodes with unmatched AnimationTargetId on the hierarchy if {}, this may cause bone attachment to not update correctly. {:?}",
+            trigger.target(),
+            unmatched_animation_target_id
+        );
+    }
+    tracing::debug!(
+        "Attachment {} matched {} nodes with parent.",
+        trigger.target(),
+        count
+    );
 
-    // }
-
-    // todo!();
-
-    // commands.entity(trigger.target());
+    commands.entity(trigger.target());
 }
