@@ -1,6 +1,6 @@
-use bevy::{pbr::CascadeShadowConfigBuilder, prelude::*};
+use bevy::{gltf::GltfLoaderSettings, pbr::CascadeShadowConfigBuilder, prelude::*};
 use bevy_scene::SceneInstanceReady;
-use bone_attachments::scene::SceneAttachmentExt;
+use bone_attachments::{BoneAttachmentsPlugin, scene::SceneAttachmentExt};
 use std::f32::consts::PI;
 
 const GLTF_PATH: &str = "Fox.glb";
@@ -14,6 +14,7 @@ fn main() {
             ..default()
         })
         .add_plugins(DefaultPlugins)
+        .add_plugins(BoneAttachmentsPlugin)
         .add_systems(Startup, setup_mesh_and_animation)
         .add_systems(Startup, setup_camera_and_environment)
         .run();
@@ -83,7 +84,12 @@ fn attach_helm(
     asset_server: Res<AssetServer>,
 ) {
     // Start loading if the attachment.
-    let attachment_scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(ATTACHMENT_PATH));
+    let attachment_scene = asset_server.load_with_settings(
+        GltfAssetLabel::Scene(0).from_asset(ATTACHMENT_PATH),
+        |settings: &mut GltfLoaderSettings| {
+            settings.include_animation_target_ids = true;
+        },
+    );
 
     commands
         .entity(trigger.target())
