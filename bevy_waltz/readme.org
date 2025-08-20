@@ -7,11 +7,16 @@
 * Intro
   Waltz is a project inspired by foxtrot, aiming to build a complete TPS game.
 * Functions
-  - [ ] 3c system
-    - [ ] camera system
+  - [-] 3c system
+    - [X] camera system
     - [ ] chracter system
       - [ ] modular character
-    - [ ] controller system
+    - [-] controller system
+      - [X] character walk
+      - [X] character jump
+      - [ ] character shooter
+      - [X] camera orbit
+      - [ ] camera zoom
   - [ ] level scene
   - [ ] particle
   - [ ] simple ui
