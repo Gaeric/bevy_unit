@@ -84,11 +84,14 @@ fn attach_helm(
     asset_server: Res<AssetServer>,
 ) {
     // Start loading if the attachment.
-    let attachment_scene = asset_server.load_with_settings(
+    // let attachment_scene = asset_server.load_with_settings(
+    //     GltfAssetLabel::Scene(0).from_asset(ATTACHMENT_PATH),
+    //     |settings: &mut GltfLoaderSettings| {
+    //         settings.include_animation_target_ids = true;
+    //     },
+    // );
+    let attachment_scene = asset_server.load(
         GltfAssetLabel::Scene(0).from_asset(ATTACHMENT_PATH),
-        |settings: &mut GltfLoaderSettings| {
-            settings.include_animation_target_ids = true;
-        },
     );
 
     commands

@@ -5,12 +5,16 @@ use bevy::{
     animation::{AnimationTarget, AnimationTargetId},
     ecs::{
         bundle::Bundle,
-        hierarchy::Children,
+        entity::Entity,
+        hierarchy::{ChildOf, Children},
+        name::Name,
         observer::Trigger,
+        query::With,
         relationship::RelatedSpawnerCommands,
         system::{Commands, EntityCommands, Query},
     },
     platform::collections::{HashMap, hash_map::Entry},
+    render::mesh::skinning::SkinnedMesh,
 };
 use bevy_asset::Handle;
 use bevy_scene::{Scene, SceneInstanceReady, SceneRoot};
@@ -56,10 +60,47 @@ fn scene_attachment_ready(
     children: Query<&Children>,
     animation_targets: Query<&AnimationTarget>,
     animation_target_ids: Query<&AnimationTargetId>,
+    skinned_mesh: Query<&ChildOf, With<SkinnedMesh>>,
+    names: Query<(&Name, Entity)>,
 ) {
     let Ok(parent) = scene_attachments.get(trigger.target()) else {
         unreachable!("AttachedTo must be available on SceneInstanceReady.");
     };
+
+    let mut paths: Vec<Name> = Vec::new();
+    paths.push("root".into());
+    let animation_target_id = AnimationTargetId::from_names(paths.iter());
+    tracing::info!("demo animation_target_id is {:?}", animation_target_id);
+
+    tracing::info!("{:?} attach to entity is {:?}", trigger.target(), parent);
+
+    for entity in skinned_mesh {
+        tracing::info!("parent is {:?}", entity.parent());
+        for child in children.iter_descendants(entity.parent()) {
+            tracing::info!("child is {:?}", child);
+        }
+    }
+
+    for child in children.iter_descendants(trigger.target()) {
+        tracing::info!("new scene child: {:?}", child);
+    }
+
+    for (name, entity) in names {
+        tracing::info!("name {name} with entity {:?}", entity);
+        for child in children.iter_leaves(entity) {
+            tracing::info!("name {name} with child leaves: name {:?}", names.get(child));
+        }
+
+        if let Ok(childrens) = children.get(entity) {
+            for child in childrens {
+                tracing::info!("name {name} with child: name {:?}", names.get(*child));
+            }
+        }
+
+        // for child in children.iter_descendants(entity) {
+        //     tracing::info!("name {name} with child descendants: name {:?}", names.get(child));
+        // }
+    }
 
     let mut duplicate_target_ids_on_parent_hierarchy = Vec::new();
     let mut target_ids = HashMap::new();
@@ -69,6 +110,10 @@ fn scene_attachment_ready(
         }
 
         if let Ok(animation_target) = animation_targets.get(child) {
+            tracing::info!(
+                "attach to child is {child:?} with target {:?}",
+                animation_target.id
+            );
             match target_ids.entry(animation_target.id) {
                 Entry::Vacant(vacancy) => {
                     vacancy.insert(animation_target.player);
@@ -91,6 +136,7 @@ fn scene_attachment_ready(
     let mut unmatched_animation_target_id = Vec::new();
     for child in children.iter_descendants(trigger.target()) {
         if let Ok(animation_target_id) = animation_target_ids.get(child) {
+            tracing::info!("animation target id: {animation_target_id:?} entity: {child:?}");
             if let Some(player) = target_ids.get(animation_target_id) {
                 commands.entity(child).insert(AnimationTarget {
                     id: *animation_target_id,
