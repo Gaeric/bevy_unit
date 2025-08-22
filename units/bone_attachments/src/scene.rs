@@ -118,7 +118,11 @@ fn scene_attachment_ready(
     let mut entity_path: HashMap<Entity, Vec<Name>> = HashMap::new();
     collect_path(trigger.target(), &[], childrens, names, &mut entity_path);
 
-    tracing::info!("all entity path is  {:?}", entity_path);
+    // tracing::info!("all entity path is  {:?}", entity_path);
+    entity_path.iter().for_each(|(entity, path)| {
+        tracing::info!("entity {entity:?} animation target id is {:?}", AnimationTargetId::from_names(path.iter()))
+    });
+
     // for entity in roots {
     //     if let Ok((root_name, entity)) = names.get(entity) {
     //         path.push(root_name.clone());
