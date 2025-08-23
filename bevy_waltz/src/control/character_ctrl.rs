@@ -223,6 +223,5 @@ fn set_weapon(
     mut commands: Commands,
     player: Single<Entity, With<WaltzPlayer>>,
 ) {
-    info!("set weapon");
     commands.trigger_targets(EquipWeapon::new(WeaponKind::Pistol), player.into_inner());
 }

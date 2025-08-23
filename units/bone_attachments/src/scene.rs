@@ -41,7 +41,7 @@ impl<'a> SceneAttachmentExt for EntityCommands<'a> {
         scene: Handle<Scene>,
         extras: impl Bundle,
     ) -> &mut EntityCommands<'a> {
-        tracing::info!("attach scene with extras entity is {:?}", self.id());
+        tracing::debug!("attach scene with extras entity is {:?}", self.id());
 
         self.with_related_entities(|spawner: &mut RelatedSpawnerCommands<AttachedTo>| {
             spawner
@@ -124,9 +124,9 @@ fn scene_attachment_when_ready(
                 id: animation_target_id,
                 player: *player,
             });
-            tracing::debug!("path {path:?} with entity {entity:?} match attach to scene",);
+            tracing::trace!("path {path:?} with entity {entity:?} match attach to scene",);
         } else {
-            tracing::info!("path {path:?} with entity {entity:?} not match attach to scene",);
+            tracing::debug!("path {path:?} with entity {entity:?} not match attach to scene",);
         }
     });
 }
