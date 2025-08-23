@@ -17,6 +17,12 @@ pub struct EquipWeapon {
     kind: WeaponKind,
 }
 
+impl EquipWeapon {
+    pub fn new(kind: WeaponKind) -> Self {
+        Self { kind }
+    }
+}
+
 pub fn equip_weapon(
     trigger: Trigger<EquipWeapon>,
     mut commands: Commands,

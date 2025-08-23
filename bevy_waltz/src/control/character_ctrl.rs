@@ -10,6 +10,7 @@ use bevy_tnua::prelude::*;
 
 use crate::character::config::CharacterMotionConfig;
 
+use crate::character::{EquipWeapon, WeaponKind};
 use crate::control::fixed_update_inspection::did_fixed_update_happen;
 use crate::level_switch::Climable;
 use crate::{WaltzCamera, WaltzPlayer};
@@ -34,6 +35,7 @@ pub fn plugin(app: &mut App) {
     app.add_observer(accumulate_movement);
 
     app.add_observer(apply_jump);
+    app.add_observer(set_weapon);
 
     app.add_systems(
         FixedUpdate,
@@ -57,6 +59,10 @@ struct Move;
 #[derive(Debug, InputAction)]
 #[input_action(output = bool)]
 struct Jump;
+
+#[derive(Debug, InputAction)]
+#[input_action(output = bool)]
+struct SetWeapon;
 
 fn setup_character_ctrl_bind(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Commands) {
     info!("setup player bind");
@@ -90,6 +96,10 @@ fn bind_character_ctrl_action(
     actions
         .bind::<Jump>()
         .to((KeyCode::Space, GamepadButton::West));
+
+    actions
+        .bind::<SetWeapon>()
+        .to((KeyCode::Digit1, GamepadButton::North));
 }
 
 fn accumulate_movement(
@@ -206,4 +216,13 @@ fn apply_jump(
                             || current_action_name == Some(TnuaBuiltinClimb::NAME),
         ..config.jump.clone()
     });
+}
+
+fn set_weapon(
+    _trigger: Trigger<Started<SetWeapon>>,
+    mut commands: Commands,
+    player: Single<Entity, With<WaltzPlayer>>,
+) {
+    info!("set weapon");
+    commands.trigger_targets(EquipWeapon::new(WeaponKind::Pistol), player.into_inner());
 }

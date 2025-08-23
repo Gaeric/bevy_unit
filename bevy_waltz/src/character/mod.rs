@@ -31,6 +31,8 @@ use config::{CharacterMotionConfig, FallingThroughControlScheme};
 use crate::character::animating::GltfSceneHandler;
 use crate::character::weapon::equip_weapon;
 
+pub use weapon::{EquipWeapon, WeaponKind};
+
 /// Marks an entity as the player character
 #[derive(Component, Debug)]
 pub struct WaltzPlayer;
