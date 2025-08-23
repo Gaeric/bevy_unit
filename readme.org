@@ -9,7 +9,7 @@
 
   Partical examples can be found in the units direction, and bevy_waltz serves as an integration of multiple plugins demonstrating a tps implementation.
 
-  Use my patch for Bevy with the branch named [[https://github.com/Gaeric/bevy/tree/waltz_patch][waltz_patch]]
+  +Use my patch for Bevy with the branch named [[https://github.com/Gaeric/bevy/tree/waltz_patch][waltz_patch]]+
 
 * Note
   这个仓库用来记录我对bevy引擎和其相关示例的学习

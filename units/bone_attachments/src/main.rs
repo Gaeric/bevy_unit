@@ -1,4 +1,4 @@
-use bevy::{gltf::GltfLoaderSettings, pbr::CascadeShadowConfigBuilder, prelude::*};
+use bevy::{pbr::CascadeShadowConfigBuilder, prelude::*};
 use bevy_scene::SceneInstanceReady;
 use bone_attachments::{BoneAttachmentsPlugin, scene::SceneAttachmentExt};
 use std::f32::consts::PI;
@@ -84,15 +84,14 @@ fn attach_helm(
     asset_server: Res<AssetServer>,
 ) {
     // Start loading if the attachment.
-    let attachment_scene = asset_server.load_with_settings(
-        GltfAssetLabel::Scene(0).from_asset(ATTACHMENT_PATH),
-        |settings: &mut GltfLoaderSettings| {
-            settings.include_animation_target_ids = true;
-        },
-    );
-    // let attachment_scene = asset_server.load(
+    // let attachment_scene = asset_server.load_with_settings(
     //     GltfAssetLabel::Scene(0).from_asset(ATTACHMENT_PATH),
+    //     |settings: &mut GltfLoaderSettings| {
+    //         settings.include_animation_target_ids = true;
+    //     },
     // );
+
+    let attachment_scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(ATTACHMENT_PATH));
 
     commands
         .entity(trigger.target())
