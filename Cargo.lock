@@ -1730,6 +1730,7 @@ dependencies = [
  "bevy_egui",
  "bevy_enhanced_input 0.12.0",
  "bevy_framepace",
+ "bone_attachments",
  "iyes_perf_ui",
  "serde",
 ]

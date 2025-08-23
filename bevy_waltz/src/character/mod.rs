@@ -24,10 +24,12 @@ mod animating;
 mod assets;
 pub mod config;
 mod sound;
+mod weapon;
 
-use config::{CharacterMotionConfig, Dimensionality, FallingThroughControlScheme};
+use config::{CharacterMotionConfig, FallingThroughControlScheme};
 
 use crate::character::animating::GltfSceneHandler;
+use crate::character::weapon::equip_weapon;
 
 /// Marks an entity as the player character
 #[derive(Component, Debug)]
@@ -62,6 +64,7 @@ impl Plugin for WaltzCharacterPlugin {
         app.add_plugins(PhysicsDebugPlugin::default());
         app.add_plugins(assets::plugin);
         app.add_plugins(sound::plugin);
+        app.add_plugins(weapon::plugin);
 
         app.add_systems(Startup, setup_player);
         // app.add_systems(Startup, setup_demo_player);
@@ -141,6 +144,9 @@ fn setup_character_with_entity_cmd(mut cmd: EntityCommands) {
 
     // This helper keeps track of air actions like jumps or air dashes.
     cmd.insert(TnuaSimpleAirActionsCounter::default());
+
+    // handle the equip weapon action
+    cmd.observe(equip_weapon);
 }
 
 fn setup_demo_player(
