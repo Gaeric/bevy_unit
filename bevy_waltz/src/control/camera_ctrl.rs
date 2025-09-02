@@ -3,6 +3,7 @@ use bevy_enhanced_input::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::WaltzCamera;
+use crate::camera::CameraZoom::{ZoomIn, ZoomOut};
 
 #[derive(Resource, Default, Reflect, Serialize, Deserialize)]
 #[reflect(Resource, Serialize, Deserialize)]
@@ -37,7 +38,7 @@ struct CameraCtrl;
 struct CameraOrbit;
 
 #[derive(Debug, InputAction)]
-#[input_action(output = f32)]
+#[input_action(output = Vec2)]
 struct CameraZoom;
 
 pub fn plugin(app: &mut App) {
@@ -68,7 +69,7 @@ fn bind_camera_ctrl_action(
 
     actions.bind::<CameraZoom>().to((
         Input::mouse_wheel().with_modifiers((Scale::splat(0.1), Negate::all())),
-        Axial::left_stick(),
+        Axial::left_stick().with_modifiers_each((Scale::splat(2.0), Negate::x())),
     ));
 }
 
@@ -95,5 +96,11 @@ fn zoom_camera(
         return;
     }
 
-    info!("trigger is {}", trigger.value);
+    debug!("trigger is {}", trigger.value);
+
+    camera.zoom = if trigger.value.y > 0.0 {
+        Some(ZoomIn)
+    } else {
+        Some(ZoomOut)
+    };
 }
