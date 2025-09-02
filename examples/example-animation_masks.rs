@@ -98,6 +98,7 @@ fn main() {
         .add_systems(Update, setup_animation_graph_once_loaded)
         .add_systems(Update, handle_button_toggles)
         .add_systems(Update, update_ui)
+        .init_resource::<AppState>()
         .run();
 }
 
@@ -108,7 +109,7 @@ fn setup_scene(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands.spawn((
-        Camera3d::default(),
+        // Camera3d::default(),
         Transform::from_xyz(-15.0, 10.0, 20.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
     ));
 
@@ -121,12 +122,12 @@ fn setup_scene(
         Transform::from_xyz(-4.0, 8.0, 13.0),
     ));
 
-    // commands.spawn((
-    //     SceneRoot(
-    //         asset_server.load(GltfAssetLabel::Scene(0).from_asset("waltz/scenes/library/Fox.glb")),
-    //     ),
-    //     Transform::from_scale(Vec3::splat(0.07)),
-    // ));
+    commands.spawn((
+        SceneRoot(
+            asset_server.load(GltfAssetLabel::Scene(0).from_asset("waltz/scenes/library/Fox.glb")),
+        ),
+        Transform::from_scale(Vec3::splat(0.07)),
+    ));
 
     commands.spawn((
         Mesh3d(meshes.add(Circle::new(7.0))),
@@ -261,16 +262,17 @@ fn add_mask_group_control(
                 ));
 
             builder
-                .spawn(
-                    (Node {
+                .spawn((
+                    Node {
                         width: Val::Percent(100.0),
                         flex_direction: FlexDirection::Row,
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         border: UiRect::top(Val::Px(1.0)),
                         ..default()
-                    }),
-                )
+                    },
+                    BorderColor(Color::WHITE),
+                ))
                 .with_children(|builder| {
                     for (index, label) in [
                         AnimationLabel::Run,
