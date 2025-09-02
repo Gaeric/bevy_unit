@@ -1,4 +1,9 @@
-use bevy::{color::palettes::css::LIGHT_GRAY, prelude::*};
+use bevy::{
+    animation::{AnimationTarget, AnimationTargetId},
+    color::palettes::css::LIGHT_GRAY,
+    platform::collections::HashSet,
+    prelude::*,
+};
 
 const MASK_GROUP_HEAD: u32 = 0;
 const MASK_GROUP_LEFT_FRONT_LEG: u32 = 1;
@@ -54,6 +59,9 @@ const MASK_GROUP_PATHS: [(&str, &str); 6] = [
     ),
 ];
 
+#[derive(Clone, Debug, Resource)]
+struct AnimationNodes([AnimationNodeIndex; 3]);
+
 #[derive(Clone, Copy, Component)]
 struct AnimationControl {
     // The ID of the mask group that this button controls.
@@ -69,6 +77,14 @@ enum AnimationLabel {
     Off = 3,
 }
 
+#[derive(Clone, Copy, Debug, Resource)]
+struct AppState([MaskGroupState; 6]);
+
+#[derive(Clone, Copy, Debug)]
+struct MaskGroupState {
+    clip: u8,
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -79,6 +95,9 @@ fn main() {
             ..default()
         }))
         .add_systems(Startup, (setup_scene, setup_ui))
+        .add_systems(Update, setup_animation_graph_once_loaded)
+        .add_systems(Update, handle_button_toggles)
+        .add_systems(Update, update_ui)
         .run();
 }
 
@@ -302,4 +321,154 @@ fn add_mask_group_control(
                     }
                 });
         });
+}
+
+// Builds up the animation graph, including the mask groups, and adds it to the
+// entity with the `AnimationPlayer` that the gltf loader created.
+fn setup_animation_graph_once_loaded(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut animation_graphs: ResMut<Assets<AnimationGraph>>,
+    mut players: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
+    targets: Query<(Entity, &AnimationTarget)>,
+) {
+    for (entity, mut player) in &mut players {
+        // Load the animation clip from the gltf file.
+        let mut animation_graph = AnimationGraph::new();
+
+        let blend_node = animation_graph.add_additive_blend(1.0, animation_graph.root);
+
+        let animation_graph_nodes: [AnimationNodeIndex; 3] =
+            std::array::from_fn(|animation_index| {
+                let handle = asset_server.load(
+                    GltfAssetLabel::Animation(animation_index).from_asset("model/animated/Fox.glb"),
+                );
+
+                let mask = if animation_index == 0 { 0 } else { 0x3f };
+                animation_graph.add_clip_with_mask(handle, mask, 1.0, blend_node)
+            });
+
+        // Create each mask group.
+        let mut all_animation_target_ids = HashSet::new();
+        for (mask_group_index, (mask_group_prefix, mask_group_suffix)) in
+            MASK_GROUP_PATHS.iter().enumerate()
+        {
+            // Split up the prefix and suffix, and convert them into `Name's.
+            let prefix: Vec<_> = mask_group_prefix.split("/").map(Name::new).collect();
+            let suffix: Vec<_> = mask_group_suffix.split("/").map(Name::new).collect();
+
+            // Add each bone in the chain to the appropriate mask group.
+            for chain_length in 0..=suffix.len() {
+                let animation_target_id = AnimationTargetId::from_names(
+                    prefix.iter().chain(suffix[0..chain_length].iter()),
+                );
+                animation_graph
+                    .add_target_to_mask_group(animation_target_id, mask_group_index as u32);
+                all_animation_target_ids.insert(animation_target_id);
+            }
+        }
+
+        // We're doing constructing the animation graph. Add it as an asset.
+        let animation_graph = animation_graphs.add(animation_graph);
+        commands
+            .entity(entity)
+            .insert(AnimationGraphHandle(animation_graph));
+
+        // Remove animation targets that aren't in any of the mask groups. If we
+        // don't do that, those bones will play all animations at once, which is
+        // ugly.
+        for (target_entity, target) in &targets {
+            if !all_animation_target_ids.contains(&target.id) {
+                commands.entity(target_entity).remove::<AnimationTarget>();
+            }
+        }
+
+        // Play the animation
+        for animation_graph_node in animation_graph_nodes {
+            player.play(animation_graph_node).repeat();
+        }
+
+        // Record the graph nodes.
+        commands.insert_resource(AnimationNodes(animation_graph_nodes));
+    }
+}
+
+// A system that handles requests from the user to toggle mask groups an and
+// off.
+fn handle_button_toggles(
+    mut interactions: Query<(&Interaction, &mut AnimationControl), Changed<Interaction>>,
+    mut animation_players: Query<&AnimationGraphHandle, With<AnimationPlayer>>,
+    mut animation_graphs: ResMut<Assets<AnimationGraph>>,
+    mut animation_nodes: Option<ResMut<AnimationNodes>>,
+    mut app_state: ResMut<AppState>,
+) {
+    let Some(ref mut animation_nodes) = animation_nodes else {
+        return;
+    };
+
+    for (interaction, animation_control) in interactions.iter_mut() {
+        // We only care about press events.
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        // Toggle the state of the clip.
+        app_state.0[animation_control.group_id as usize].clip = animation_control.label as u8;
+
+        // Now grab the animation player. (There's only one in our case, but we
+        // iterate just for clarity's sake.)
+        for animation_graph_handle in animation_players.iter_mut() {
+            // The animation graph needs to have loaded.
+            let Some(animation_graph) = animation_graphs.get_mut(animation_graph_handle) else {
+                continue;
+            };
+
+            for (clip_index, &animation_node_index) in animation_nodes.0.iter().enumerate() {
+                let Some(animation_node) = animation_graph.get_mut(animation_node_index) else {
+                    continue;
+                };
+
+                if animation_control.label as usize == clip_index {
+                    animation_node.mask &= !(1 << animation_control.group_id);
+                } else {
+                    animation_node.mask |= 1 << animation_control.group_id;
+                }
+            }
+        }
+    }
+}
+
+// A system that updates the UI based on the current app state.
+fn update_ui(
+    mut animation_controls: Query<(&AnimationControl, &mut BackgroundColor, &Children)>,
+    texts: Query<Entity, With<Text>>,
+    mut writer: TextUiWriter,
+    app_state: Res<AppState>,
+) {
+    for (animation_control, mut background_color, kids) in animation_controls.iter_mut() {
+        let enabled =
+            app_state.0[animation_control.group_id as usize].clip == animation_control.label as u8;
+
+        *background_color = if enabled {
+            BackgroundColor(Color::WHITE)
+        } else {
+            BackgroundColor(Color::BLACK)
+        };
+
+        for &kid in kids {
+            let Ok(text) = texts.get(kid) else {
+                continue;
+            };
+
+            writer.for_each_color(text, |mut color| {
+                color.0 = if enabled { Color::BLACK } else { Color::WHITE };
+            });
+        }
+    }
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        AppState([MaskGroupState { clip: 0 }; 6])
+    }
 }
