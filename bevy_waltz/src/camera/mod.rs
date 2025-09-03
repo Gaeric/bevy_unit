@@ -33,7 +33,7 @@ pub(crate) enum IngameCameraKind {
     FixedAngle,
 }
 
-#[derive(Debug, Clone, PartialEq, Reflect, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Reflect, Serialize, Deserialize)]
 #[reflect(Serialize, Deserialize)]
 pub(crate) enum CameraZoom {
     ZoomIn,
@@ -67,7 +67,7 @@ impl Default for WaltzCamera {
 fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Name::new("waltz-camera"),
-        Camera3d::default(),
+        // Camera3d::default(),
         WaltzCamera::default(),
         Transform::from_xyz(10.0, 10.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
         Rig::builder()

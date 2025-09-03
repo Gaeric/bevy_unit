@@ -83,12 +83,7 @@ fn set_smoothness(rig: &mut Rig, config: &CameraConfig, camera: &WaltzCamera) {
 
 pub(super) fn update_rig(
     time: Res<Time<Virtual>>,
-    mut camera_query: Query<(
-        &mut WaltzCamera,
-        &mut Rig,
-        // &ActionState<CameraAction>,
-        &Transform,
-    )>,
+    mut camera_query: Query<(&mut WaltzCamera, &mut Rig, &Transform)>,
     config: Res<CameraConfig>,
     spatial_query: SpatialQuery,
     // actions_frozen: Res<ActionsFrozen>,
@@ -125,12 +120,16 @@ pub(super) fn update_rig(
 //     actions.axis_pair(&CameraAction::Orbit)
 // }
 
-fn set_desired_distance(
-    camera: &mut WaltzCamera,
-    // actions: &ActionState<CameraAction>,
-    config: &CameraConfig,
-) {
-    // let zoom = actions.clamped_value(&CameraAction::Zoom) * config.third_person.zoom_speed;
+fn set_desired_distance(camera: &mut WaltzCamera, config: &CameraConfig) {
+    let delta_distance = if let Some(zoom) = camera.zoom {
+        match zoom {
+            super::CameraZoom::ZoomIn => -config.third_person.zoom_speed,
+            super::CameraZoom::ZoomOut => config.third_person.zoom_speed,
+        }
+    } else {
+        return;
+    };
+
     let (min_distance, max_distance) = match camera.kind {
         IngameCameraKind::ThirdPerson => (
             // config.third_person.min_distance,
@@ -144,6 +143,7 @@ fn set_desired_distance(
         IngameCameraKind::FirstPerson => (0.0, 0.0),
     };
 
-    // camera.desired_distance = (camera.desired_distance - zoom).clamp(min_distance, max_distance);
-    camera.desired_distance = (camera.desired_distance).clamp(min_distance, max_distance);
+    camera.zoom = None;
+    camera.desired_distance =
+        (camera.desired_distance + delta_distance).clamp(min_distance, max_distance);
 }
