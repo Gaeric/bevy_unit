@@ -7,22 +7,38 @@
 * Intro
   Waltz is a project inspired by foxtrot, aiming to build a complete TPS game.
 * Functions
+  Here is the list of functions that I am interested in.
+
   - [-] 3c system
     - [X] camera system
-    - [ ] chracter system
+    - [-] chracter system
       - [ ] modular character
-    - [-] controller system
-      - [X] character walk
-      - [X] character jump
-      - [ ] character shooter
-      - [X] camera orbit
-      - [ ] camera zoom
+      - [-] animation system
+        - [X] basic animation
+          - [X] walk
+          - [X] jump
+        - [ ] animation blend and mask
+          - [ ] shooter
+      - [ ] physics animation
+        - [ ] cloth simulation
+        - [ ] hair
+        - [ ] soft body
+        - [ ] fluids
+    - [X] controller system
+      - [X] keyboard
+      - [X] gamepad
+      - [X] mouse
   - [ ] level scene
   - [ ] particle
-  - [ ] simple ui
+  - [ ] ui
+  - [ ] dialogue
   - [ ] navigation
   - [ ] dev/debug tools
-  - [ ] dialogue
+  - [ ] rendering
+    - [ ] GI
+    - [ ] sky box
+    - [ ] fog
+    - [ ] highlight
 * Credits
   The [assets](../assets/waltz/) in this repository are all 3rd-party.
 * Tips
