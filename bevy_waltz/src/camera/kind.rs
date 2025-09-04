@@ -33,8 +33,6 @@ pub(super) fn update_kind(mut camera_query: Query<&mut WaltzCamera>, config: Res
             _ => None,
         };
 
-        camera.zoom = None;
-
         if let Some(new_kind) = new_kind {
             camera.kind = new_kind;
         }

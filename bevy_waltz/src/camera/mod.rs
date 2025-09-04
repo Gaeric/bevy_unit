@@ -67,7 +67,7 @@ impl Default for WaltzCamera {
 fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Name::new("waltz-camera"),
-        // Camera3d::default(),
+        Camera3d::default(),
         WaltzCamera::default(),
         Transform::from_xyz(10.0, 10.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
         Rig::builder()
@@ -108,7 +108,7 @@ impl Plugin for WaltzCameraPlugin {
                 FixedUpdate,
                 (
                     Dolly::<WaltzCamera>::update_active,
-                    update_kind,
+                    // update_kind,
                     set_camera_focus,
                     update_drivers,
                     update_rig,

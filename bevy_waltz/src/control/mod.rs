@@ -33,7 +33,7 @@ pub(super) fn grab_ungrab_mouse(
 
     if window.cursor_options.visible {
         if mouse_buttons.just_pressed(MouseButton::Left) {
-            info!("cursor lock");
+            debug!("cursor lock");
             // if egui_context.ctx_mut().is_pointer_over_area() {
             //     return;
             // }
@@ -43,7 +43,7 @@ pub(super) fn grab_ungrab_mouse(
     } else if keyboard.just_released(KeyCode::Escape)
         || mouse_buttons.just_pressed(MouseButton::Left)
     {
-        info!("cursor unlock");
+        debug!("cursor unlock");
         window.cursor_options.grab_mode = CursorGrabMode::None;
         window.cursor_options.visible = true;
     }

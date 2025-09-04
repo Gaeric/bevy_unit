@@ -123,12 +123,14 @@ pub(super) fn update_rig(
 fn set_desired_distance(camera: &mut WaltzCamera, config: &CameraConfig) {
     let delta_distance = if let Some(zoom) = camera.zoom {
         match zoom {
-            super::CameraZoom::ZoomIn => -config.third_person.zoom_speed,
-            super::CameraZoom::ZoomOut => config.third_person.zoom_speed,
+            super::CameraZoom::ZoomIn => config.third_person.zoom_speed,
+            super::CameraZoom::ZoomOut => -config.third_person.zoom_speed,
         }
     } else {
         return;
     };
+
+    info!("delta distance is {delta_distance}");
 
     let (min_distance, max_distance) = match camera.kind {
         IngameCameraKind::ThirdPerson => (

@@ -11,7 +11,7 @@ pub(crate) enum CollisionLayer {
     Sensor,
 }
 
-#[derive(Resource, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
+#[derive(Resource, Clone, PartialEq, Reflect, Serialize, Deserialize)]
 #[reflect(Serialize, Deserialize)]
 pub(crate) struct CameraConfig {
     pub(crate) fixed_angle: FixedAngle,
@@ -19,6 +19,46 @@ pub(crate) struct CameraConfig {
     pub(crate) third_person: ThirdPersion,
     pub(crate) mouse_sensitivity_x: f32,
     pub(crate) mouse_sensitivity_y: f32,
+}
+
+impl Default for CameraConfig {
+    fn default() -> Self {
+        CameraConfig {
+            fixed_angle: FixedAngle {
+                min_distance: 10.0,
+                max_distance: 20.0,
+                zoom_speed: 0.7,
+                rotation_smoothing: 1.0,
+                translation_smoothing: 0.9,
+                zoom_in_smoothing: 0.2,
+                zoom_out_smoothing: 1.2,
+                pitch: -80.0,
+            },
+
+            first_person: FirstPerson {
+                translation_smoothing: 0.05,
+                rotation_smoothing: 0.1,
+                max_pitch: 80.0,
+                min_pitch: -80.0,
+                tracking_smoothing: 1.5,
+            },
+            third_person: ThirdPersion {
+                translation_smoothing: 1.2,
+                rotation_smoothing: 0.5,
+                max_pitch: 1.0,
+                min_pitch: 80.0,
+                min_distance: -80.0,
+                max_distance: 1.0,
+                zoom_speed: 0.5,
+                min_distance_to_objects: 0.7,
+                tracking_smoothing: 4e-1,
+                zoom_in_smoothing: 0.2,
+                zoom_out_smoothing: 1.2,
+            },
+            mouse_sensitivity_x: 8e-4,
+            mouse_sensitivity_y: 5e-4,
+        }
+    }
 }
 
 #[derive(Resource, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
