@@ -39,10 +39,8 @@ impl Plugin for BoneAttachmentsPlugin {
         app.register_type::<relationship::AttachingModels>()
             .register_type::<relationship::AttachedTo>();
 
-        app.add_systems(
-            PostUpdate,
-            propagate_transform_to_attachments.after(TransformSystem::TransformPropagate),
-        );
+        // app.add_systems(PostUpdate, propagate_transform_to_attachments).after(TransformSystem::TransformPropagate);
+        app.add_systems(PostUpdate, propagate_transform_to_attachments);
     }
 }
 
@@ -64,6 +62,12 @@ fn propagate_transform_to_attachments(
                 // children_without_transform.push(child);
                 continue;
             };
+
+            tracing::debug!(
+                "transform is {:?}, parent transform is {:?}",
+                transform.translation,
+                parent_transform.translation
+            );
 
             *transform = parent_transform
         }
