@@ -13,11 +13,8 @@ extern crate alloc;
 
 use bevy::{
     app::{Plugin, PostUpdate},
-    ecs::{
-        entity::Entity, relationship::RelationshipTarget, schedule::IntoScheduleConfigs,
-        system::Query,
-    },
-    transform::{TransformSystem, components::Transform},
+    ecs::{entity::Entity, relationship::RelationshipTarget, system::Query},
+    transform::components::Transform,
 };
 
 use crate::relationship::AttachingModels;

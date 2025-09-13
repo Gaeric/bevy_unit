@@ -2200,15 +2200,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_shine"
-version = "0.1.0"
-dependencies = [
- "bevy 0.17.0-rc.1",
- "bytemuck",
- "itertools 0.14.0",
-]
-
-[[package]]
 name = "bevy_sprite"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2742,7 +2733,6 @@ version = "0.1.0"
 dependencies = [
  "avian3d",
  "bevy 0.17.0-rc.1",
- "bevy_shine",
  "bevy_waltz",
  "bone_attachments",
  "crossbeam-channel",

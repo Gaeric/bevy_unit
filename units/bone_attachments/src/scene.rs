@@ -8,7 +8,7 @@ use bevy::{
         entity::Entity,
         hierarchy::Children,
         name::Name,
-        observer::Trigger,
+        observer::On,
         relationship::RelatedSpawnerCommands,
         system::{Commands, EntityCommands, Query},
     },
@@ -75,25 +75,25 @@ fn collect_path(
 }
 
 fn scene_attachment_when_ready(
-    trigger: Trigger<SceneInstanceReady>,
+    trigger: On<SceneInstanceReady>,
     mut commands: Commands,
     scene_attachments: Query<&AttachedTo>,
     childrens: Query<&Children>,
     animation_targets: Query<&AnimationTarget>,
     names: Query<(&Name, Entity)>,
 ) {
-    let Ok(parent) = scene_attachments.get(trigger.target()) else {
+    let Ok(parent) = scene_attachments.get(trigger.entity) else {
         unreachable!("AttachedTo must be available on SceneInstanceReady.");
     };
 
     let mut entity_path: HashMap<Entity, Vec<Name>> = HashMap::new();
-    collect_path(trigger.target(), &[], childrens, names, &mut entity_path);
+    collect_path(trigger.entity, &[], childrens, names, &mut entity_path);
 
     let mut duplicate_target_ids_on_parent_hierarchy = Vec::new();
     let mut target_ids = HashMap::new();
 
     for child in childrens.iter_descendants(**parent) {
-        if child == trigger.target() {
+        if child == trigger.entity {
             continue;
         }
 

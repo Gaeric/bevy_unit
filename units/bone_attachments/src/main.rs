@@ -1,4 +1,4 @@
-use bevy::{pbr::CascadeShadowConfigBuilder, prelude::*};
+use bevy::{light::CascadeShadowConfigBuilder, prelude::*};
 use bevy_scene::SceneInstanceReady;
 use bone_attachments::{BoneAttachmentsPlugin, scene::SceneAttachmentExt};
 use std::f32::consts::PI;
@@ -59,14 +59,14 @@ fn setup_mesh_and_animation(
 }
 
 fn play_animation_when_ready(
-    trigger: Trigger<SceneInstanceReady>,
+    trigger: On<SceneInstanceReady>,
     mut commands: Commands,
     children: Query<&Children>,
     animations_to_play: Query<&AnimationToPlay>,
     mut players: Query<&mut AnimationPlayer>,
 ) {
-    if let Ok(animation_to_play) = animations_to_play.get(trigger.target()) {
-        for child in children.iter_descendants(trigger.target()) {
+    if let Ok(animation_to_play) = animations_to_play.get(trigger.entity) {
+        for child in children.iter_descendants(trigger.entity) {
             if let Ok(mut player) = players.get_mut(child) {
                 player.play(animation_to_play.index).repeat();
 
@@ -79,7 +79,7 @@ fn play_animation_when_ready(
 }
 
 fn attach_helm(
-    trigger: Trigger<SceneInstanceReady>,
+    trigger: On<SceneInstanceReady>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
@@ -94,7 +94,7 @@ fn attach_helm(
     let attachment_scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(ATTACHMENT_PATH));
 
     commands
-        .entity(trigger.target())
+        .entity(trigger.entity)
         .attach_scene(attachment_scene);
 }
 
