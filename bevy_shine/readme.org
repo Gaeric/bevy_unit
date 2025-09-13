@@ -1,84 +1,7 @@
 * bevy_shine
-  ray tracing for bevy
+  My interest in high-quality rendering, particularly real-time ray tracing, led me to develop bevy_shine. This project is a ray tracing plugin I created for the Bevy engine to further my understanding of its implementation.
 ** Intro
-   这个crate基于bevy 0.15开始开发，目标是为bevy支持路径追踪技术的全局光照。
-* roadmap
-** 原理
-   Path Tracing从相机开始，向着屏幕上的每一个像素发出射线，这一条射线会击中场景中的物体，并发生弹射。
-
-   1. 射线生成：射线生成有两个部分，一是从相机开始向像素投射的初始射线，二是与场景碰撞之后的次生射线
-   2. 射线与物体相交判断
-   3. 弹射所使用的BDXF函数
-   4. 由于硬件限制，每个像素的射线数量可能不多，开发过程统一按硬件1spp来假设
-   5. 对于1spp的路径追踪，会产生大量噪点，使用双边滤波降噪
-   6. 采用Temporal类方法加权上一帧的结果
-*** 疑问
-    1. 路径追踪是图像逐像素顺序的，光栅化渲染过种是逐物体的，两者如何结合
-    2. 路径追踪的相机、屏幕像素、物体位置和光栅化过程中使用的MVPE矩阵
-       参考《Ray Tracing: GPU Edition》
-    3. render_graph如何将这些过程组合起来
-       An example with render_graph and special pipelines
-    4. blue noise参考gtao部分，以确认是否需要进行改进
-* 实现
-  PREPASS -> LIGHT -> POST_PROCESS -> OVERLAY -> BLOOM -> TONEMAPPING -> UPSCALING
-
-  以上述几个步骤拆分整个crate
-
-  prepare/light/mesh/material/post_processing
-** basic
-*** DONE 整合render graph和phaseitem，插件自定义渲染图，
-*** DONE 加入自定义shader
-    :LOGBOOK:
-    - State "DONE"       from              [2025-01-09 Thu 19:07] \\
-      close with done
-    :END:
-*** DONE 加入bindgroup和uniform buffer
-    :LOGBOOK:
-    - State "DONE"       from "TODO"       [2025-01-10 Fri 08:41] \\
-      close with finish
-    :END:
-*** 支持不同的out_texture格式
-*** ray casting with fragment shader
-*** 获取mesh数据并将这些数据传递到GPU
-*** 获取view数据并将这些数据传递到GPU
-*** 获取material数据并将这些数据传递到GPU
-** example
-   先学习并掌握如下bevy example
-*** ssao plugin
-    ScreenSpaceAmbientOcclusionPlugin
-
-    基于bevy 0.12版本学习ssao plugin的插件内容，掌握关联技术，以促进bevy-hikari miza分支在bevy-0.12版本bug的修复
-
-    增加定位信息： push_debug_group/pop_debug_group
-    
-*** headless_renderer
-    确认ScheduleRunnerPlugin的作用以及hang住流程的原因
-
-    ScheduleRunnerPlugin用于在没有winit event loop时提供一个运行时状态，可以是轮询或单次运行
-
-    流程并没有真正hang住，可能是因为打印级别设置不正确的原因。
-**** 如何更改render流程
-**** src data来源于哪里
-**** dest data何时接收
-**** 数据发送和接收流程如何同步
-*** gpu_readback
-*** shader_prepass
-*** custom_shader_instancing
-*** custom_phase_item
-*** custom_post_processing
-*** compute_shader_game_of_life
-*** fallback_image
-*** fps_overlay
-*** bloom_3d
-** prepass
-   1. ExtractComponent验证和应用
-   2. DrawFunctions验证和应用
-   3. SpecializedMeshPipelines验证和应用
-   4. add_render_command的验证和应用
-   5. RenderStage的验证和应用
-** light
-** post_process
-** overlay
+   bevy_shine is a GI plugin based on wgpu's hardware ray tracing capabilities. It draws inspiration from solari, bevy's built-in ray tracing plugin.
 * Reference
 ** bevy_hikari
    https://github.com/cryscan/bevy-hikari
@@ -125,19 +48,3 @@
    - Markov Chain Mixture Models for Real-Time Direct Illumination
      paper: https://onlinelibrary.wiley.com/doi/10.1111/cgf.14881
      demo: https://github.com/theascone/mcmm-falcor
-* Tips
-  1. 实现基础原型时不与bevy代码过度藕合，保证独立和简单的基础功能以理解原型本身是最重要的事情。
-  2. 通过UniformComponentPlugin将数据从main world传递到render world的方法，和viewnode可能无法同时协作使用，存在uniform_index未正确获取的问题。后续如果遇到类似场景，需要继续检查。
-     对应提交节点： de1004f * master origin/master bevy_shine: uniform buffer for rendering - failed
-  3. array<uniform>时遇到了对齐问题，依据提示进行了padding位的添加暂时解决，但尚不明白具体规则
-  4. renderdoc调用可执行文件时，设置CARGO_MANIFEST_DIR为bevy项目所在路径。
-     注意不要使用sh脚本包装命令，会无法捕捉画面
-  5. 在bevy 0.12版本中，遇到了未加载shader文件但bevy未报错的情况，此时shader和对应的phaseitem并未执行
-  6. 在bevy 0.12版本中，mesh对应的buffer并不需要指定dynamic offset，其offset通过batching模块进行处理，并在mesh_functions中通过instance相关函数处理
-  7. 如下打印表示着没有任何输出提交到当前的out_texture上，很有可能是render graph未正确指定
-     2025-01-22T08:01:30.766251Z ERROR present_frames: log: No work has been submitted for this frame 
-  8. bevy0.12版本out_texture不受rbga值中透明度的影响，而在bevy0.11版本中透明度值影响了实际的颜色值
-  9. BRDF影响重要性采样(光线分布)和着色(颜色累积)，但两者可以分开考虑
-  10. 检查light相关参数，以确定color计算过程符合Filament的描述
-      https://github.com/bevyengine/bevy/pull/8407
-  11. discord link: https://discord.com/channels/691052431525675048/872438954421547008/872439437164961792

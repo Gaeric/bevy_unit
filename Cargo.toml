@@ -5,7 +5,7 @@ edition = "2024"
 
 [workspace]
 members = [
-        # "bevy_shine",
+        "bevy_shine",
         "bevy_waltz",
         "units/bone_attachments",
         "units/modular_character",
