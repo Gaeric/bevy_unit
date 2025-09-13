@@ -1,18 +1,19 @@
 mod components;
-mod events;
 
 pub struct ModularPlugin;
 use std::collections::BTreeMap;
 
 use bevy::{
-    prelude::*,
-    render::{batching::NoAutomaticBatching, mesh::skinning::SkinnedMesh, primitives::Aabb},
+    camera::primitives::Aabb, mesh::skinning::SkinnedMesh, prelude::*,
+    render::batching::NoAutomaticBatching,
 };
 use components::ModularCharacter;
 pub use components::{
     ModularCharacterBody, ModularCharacterFeet, ModularCharacterHead, ModularCharacterLegs,
 };
-use events::ResetChanged;
+
+#[derive(Debug, Message, Deref)]
+pub struct ResetChanged(pub Entity);
 
 pub fn mc_model_path(path: &str) -> String {
     format!("modular_character/origin/{path}")
@@ -50,7 +51,7 @@ pub const FEET: [&str; 4] = [
 
 impl Plugin for ModularPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<ResetChanged>()
+        app.add_message::<ResetChanged>()
             .add_systems(Update, update_modular::<ModularCharacterHead>)
             .add_systems(Update, update_modular::<ModularCharacterBody>)
             .add_systems(Update, update_modular::<ModularCharacterLegs>)
@@ -104,7 +105,7 @@ fn update_modular<T: components::ModularCharacter>(
     children: Query<&Children>,
     names: Query<&Name>,
     mut scene_spawner: ResMut<SceneSpawner>,
-    mut writer: EventWriter<ResetChanged>,
+    mut writer: MessageWriter<ResetChanged>,
 ) {
     for (entity, mut modular) in &mut changed_modular {
         let Some(scene_instance) = modular.instance_id().copied() else {
@@ -270,7 +271,7 @@ fn cycle_modular_segment<T: ModularCharacter, const ID: usize>(
 
 fn reset_changed<T: ModularCharacter>(
     mut query: Query<(Entity, &mut T)>,
-    mut reader: EventReader<ResetChanged>,
+    mut reader: MessageReader<ResetChanged>,
 ) {
     for entity in reader.read() {
         if let Ok((_, mut modular)) = query.get_mut(**entity) {

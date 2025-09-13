@@ -138,7 +138,7 @@ fn setup_animation_graph(
 
 // todo: analyzer the animation process
 fn animation_player_added(
-    trigger: Trigger<OnAdd, AnimationPlayer>,
+    trigger: On<Add, AnimationPlayer>,
     mut commands: Commands,
     graph_cache: Res<AnimationGraphCache>,
     mut players: Query<&mut AnimationPlayer>,
@@ -147,14 +147,14 @@ fn animation_player_added(
 
     transitions
         .play(
-            &mut players.get_mut(trigger.target()).unwrap(),
+            &mut players.get_mut(trigger.entity).unwrap(),
             graph_cache.animations[0],
             Duration::ZERO,
         )
         .resume();
 
     commands
-        .entity(trigger.target())
+        .entity(trigger.entity)
         .insert(transitions)
         .insert(AnimationGraphHandle(graph_cache.graph.clone()));
 }
