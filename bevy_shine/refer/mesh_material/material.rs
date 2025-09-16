@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use bevy::{prelude::*, render::{render_resource::StorageBuffer, renderer::RenderDevice}};
+use bevy::{
+    prelude::*,
+    render::{render_resource::StorageBuffer, renderer::RenderDevice},
+};
 
 use super::GpuStandardMaterialBuffer;
 

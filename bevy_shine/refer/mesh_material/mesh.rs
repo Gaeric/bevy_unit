@@ -2,7 +2,11 @@ use std::collections::BTreeMap;
 
 use bevy::{
     prelude::*,
-    render::{render_asset, render_resource::StorageBuffer, renderer::{RenderDevice, RenderQueue}, Extract},
+    render::{
+        Extract, render_asset,
+        render_resource::StorageBuffer,
+        renderer::{RenderDevice, RenderQueue},
+    },
     utils::hashbrown::HashSet,
 };
 

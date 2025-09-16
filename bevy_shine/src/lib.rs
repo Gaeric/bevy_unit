@@ -1,16 +1,21 @@
 use std::ops::Range;
 
 use bevy::{
-    asset::{load_internal_asset, weak_handle, UntypedAssetId},
-    ecs::{component::Tick, system::lifetimeless::SRes},
+    asset::{UntypedAssetId, embedded_asset, load_embedded_asset},
+    ecs::{
+        component::Tick,
+        query::{QueryItem, ROQueryItem},
+        system::lifetimeless::SRes,
+    },
     pbr::RenderMeshInstances,
     prelude::*,
     render::{
+        Extract, Render, RenderApp, RenderSystems,
         batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreprocessingSupport},
         camera::ExtractedCamera,
-        mesh::{allocator::SlabId, RenderMesh},
+        mesh::{RenderMesh, allocator::SlabId},
         render_asset::RenderAssets,
-        render_graph::{NodeRunError, RenderGraphApp, ViewNode, ViewNodeRunner},
+        render_graph::{NodeRunError, RenderGraphExt, ViewNode, ViewNodeRunner},
         render_phase::{
             AddRenderCommand, BinnedPhaseItem, BinnedRenderPhaseType,
             CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions, InputUniformIndex,
@@ -18,28 +23,24 @@ use bevy::{
             RenderCommandResult, SetItemPipeline, ViewBinnedRenderPhases,
         },
         render_resource::{
-            binding_types::uniform_buffer, BindGroup, BindGroupEntries, BindGroupLayout,
-            BindGroupLayoutEntries, BufferUsages, CachedRenderPipelineId, ColorTargetState,
-            ColorWrites, FragmentState, LoadOp, MultisampleState, Operations, PipelineCache,
-            PrimitiveState, RawBufferVec, RenderPassColorAttachment, RenderPassDescriptor,
-            RenderPipelineDescriptor, ShaderStages, ShaderType, SpecializedRenderPipeline,
-            SpecializedRenderPipelines, StoreOp, TextureFormat, VertexState,
+            BindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries, BufferUsages,
+            CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState, LoadOp,
+            MultisampleState, Operations, PipelineCache, PrimitiveState, RawBufferVec,
+            RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
+            ShaderStages, ShaderType, SpecializedRenderPipeline, SpecializedRenderPipelines,
+            StoreOp, TextureFormat, VertexState, binding_types::uniform_buffer,
         },
         renderer::{RenderDevice, RenderQueue},
         sync_world::{MainEntity, RenderEntity},
         view::{
             ExtractedView, NoIndirectDrawing, RenderVisibleEntities, RetainedViewEntity, ViewTarget,
         },
-        Extract, Render, RenderApp, RenderSet,
     },
 };
 use bytemuck::{Pod, Zeroable};
 use mesh::ShineMeshPlugin;
 
 mod mesh;
-
-pub const SHINE_SHADER_HANDLE: Handle<Shader> =
-    weak_handle!("6a0298da-71cd-4bce-9553-048b4f9d7069");
 
 /// The ShinePlugin uses its own render graph
 /// Now we only have one node, use for verify the PhaseItem and Render graph node
@@ -65,13 +66,7 @@ impl Plugin for ShinePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(ShineMeshPlugin);
 
-        load_internal_asset!(
-            app,
-            SHINE_SHADER_HANDLE,
-            "shaders/shader.wgsl",
-            Shader::from_wgsl
-        );
-        // app.add_plugins(UniformComponentPlugin::<ShineUniform>::default());
+        embedded_asset!(app, "shaders/shader.wgsl");
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
@@ -85,10 +80,10 @@ impl Plugin for ShinePlugin {
             // .add_systems(ExtractSchedule, extract_shine_data)
             .add_systems(
                 Render,
-                prepare_shine_phase_item_buffers.in_set(RenderSet::Prepare),
+                prepare_shine_phase_item_buffers.in_set(RenderSystems::Prepare),
             )
             .add_systems(ExtractSchedule, extract_shine_phases)
-            .add_systems(Render, queue_shine_phase_item.in_set(RenderSet::Queue));
+            .add_systems(Render, queue_shine_phase_item.in_set(RenderSystems::Queue));
 
         render_app
             .add_render_sub_graph(graph::ShineRenderGraph)
@@ -103,7 +98,7 @@ impl Plugin for ShinePlugin {
             .init_resource::<ShinePipeline>()
             .add_systems(
                 Render,
-                prepare_shine_bind_group.in_set(RenderSet::PrepareBindGroups),
+                prepare_shine_bind_group.in_set(RenderSystems::PrepareBindGroups),
             );
     }
 }
@@ -298,7 +293,7 @@ impl FromWorld for ShinePipeline {
         );
 
         ShinePipeline {
-            shader: SHINE_SHADER_HANDLE,
+            shader: load_embedded_asset!(world, "shaders/shader.wgsl"),
             bind_group_layout,
         }
     }
@@ -318,13 +313,13 @@ impl SpecializedRenderPipeline for ShinePipeline {
             vertex: VertexState {
                 shader: self.shader.clone(),
                 shader_defs: vec![],
-                entry_point: "vertex".into(),
+                entry_point: Some("vertex".into()),
                 buffers: vec![],
             },
             fragment: Some(FragmentState {
                 shader: self.shader.clone(),
                 shader_defs: vec![],
-                entry_point: "fragment".into(),
+                entry_point: Some("fragment".into()),
                 targets: vec![Some(ColorTargetState {
                     // todo: check HDR format
                     format: TextureFormat::Bgra8UnormSrgb,
@@ -473,15 +468,15 @@ impl<P: PhaseItem> RenderCommand<P> for DrawShine {
     #[inline]
     fn render<'w>(
         item: &P,
-        _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        _entity: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        _view: ROQueryItem<'w, '_, Self::ViewQuery>,
+        _entity: Option<ROQueryItem<'w, '_, Self::ItemQuery>>,
         (shine_bindgroup, meshes, mesh_instances): bevy::ecs::system::SystemParamItem<
             'w,
             '_,
             Self::Param,
         >,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
-    ) -> bevy::render::render_phase::RenderCommandResult {
+    ) -> RenderCommandResult {
         let bind_group = &shine_bindgroup.into_inner().bindgroup;
         pass.set_bind_group(0, &bind_group, &[]);
 
@@ -522,10 +517,7 @@ impl ViewNode for ShineNode {
         graph: &mut bevy::render::render_graph::RenderGraphContext,
         render_context: &mut bevy::render::renderer::RenderContext<'w>,
         // (view, camera, view_target, _shine_uniform): bevy::ecs::query::QueryItem<
-        (_view, camera, extracted_view, view_target): bevy::ecs::query::QueryItem<
-            'w,
-            Self::ViewQuery,
-        >,
+        (_view, camera, extracted_view, view_target): QueryItem<'w, '_, Self::ViewQuery>,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
         let view_entity = graph.view_entity();
@@ -544,6 +536,7 @@ impl ViewNode for ShineNode {
             label: Some("shine node"),
             color_attachments: &[Some(RenderPassColorAttachment {
                 view: &view_target.out_texture(),
+                depth_slice: None,
                 resolve_target: None,
                 ops: Operations {
                     load: LoadOp::Clear(LinearRgba::BLACK.into()),

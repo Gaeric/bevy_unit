@@ -4,9 +4,9 @@ use bevy::{
     ecs::component,
     prelude::*,
     render::{
+        Extract,
         render_resource::{DynamicUniformBuffer, ShaderType, StorageBuffer},
         renderer::{RenderDevice, RenderQueue},
-        Extract,
     },
 };
 use bvh::bvh::Bvh;
@@ -14,8 +14,8 @@ use bvh::bvh::Bvh;
 use crate::transform::PreviousGlobalTransform;
 
 use super::{
-    mesh::{self, MeshAssetState},
     GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial,
+    mesh::{self, MeshAssetState},
 };
 
 pub struct InstancePlugin;

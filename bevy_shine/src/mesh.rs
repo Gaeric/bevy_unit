@@ -1,9 +1,7 @@
 use bevy::{
+    mesh::{PrimitiveTopology, VertexAttributeValues},
     prelude::*,
-    render::{
-        mesh::{PrimitiveTopology, VertexAttributeValues},
-        render_resource::ShaderType,
-    },
+    render::render_resource::ShaderType,
 };
 use itertools::Itertools;
 
@@ -132,7 +130,7 @@ impl GpuTriangles {
     }
 }
 
-fn collect_mesh_triangles(mut events: EventReader<AssetEvent<Mesh>>, assets: Res<Assets<Mesh>>) {
+fn collect_mesh_triangles(mut events: MessageReader<AssetEvent<Mesh>>, assets: Res<Assets<Mesh>>) {
     for event in events.read() {
         info!("mesh event: {:?}", event);
 

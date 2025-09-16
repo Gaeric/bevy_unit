@@ -3,11 +3,11 @@ use std::collections::BTreeMap;
 use bevy::{
     prelude::*,
     render::{
+        Extract, Render, RenderApp, RenderSet,
         extract_component::UniformComponentPlugin,
         mesh::{PrimitiveTopology, VertexAttributeValues},
         render_resource::{ShaderType, StorageBuffer},
         renderer::{RenderDevice, RenderQueue},
-        Extract, Render, RenderApp, RenderSet,
     },
     utils::{HashMap, HashSet},
 };
