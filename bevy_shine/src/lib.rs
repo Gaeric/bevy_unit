@@ -38,7 +38,6 @@ use bevy::{
     },
 };
 use bytemuck::{Pod, Zeroable};
-use mesh::ShineMeshPlugin;
 
 mod mesh;
 
@@ -50,13 +49,9 @@ pub mod graph {
     #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderSubGraph)]
     pub struct ShineRenderGraph;
 
-    pub mod input {
-        pub const VIEW_ENTITY: &str = "view_entity";
-    }
-
     #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
     pub enum ShineRenderNode {
-        OneNode,
+        Prepass,
     }
 }
 
@@ -64,8 +59,6 @@ pub struct ShinePlugin;
 
 impl Plugin for ShinePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ShineMeshPlugin);
-
         embedded_asset!(app, "shaders/shader.wgsl");
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
@@ -77,7 +70,6 @@ impl Plugin for ShinePlugin {
             .init_resource::<DrawFunctions<ShinePhase>>()
             .init_resource::<ViewBinnedRenderPhases<ShinePhase>>()
             .add_render_command::<ShinePhase, DrawShineCustom>()
-            // .add_systems(ExtractSchedule, extract_shine_data)
             .add_systems(
                 Render,
                 prepare_shine_phase_item_buffers.in_set(RenderSystems::Prepare),
@@ -89,7 +81,7 @@ impl Plugin for ShinePlugin {
             .add_render_sub_graph(graph::ShineRenderGraph)
             .add_render_graph_node::<ViewNodeRunner<ShineNode>>(
                 graph::ShineRenderGraph,
-                graph::ShineRenderNode::OneNode,
+                graph::ShineRenderNode::Prepass,
             );
     }
 
