@@ -39,6 +39,8 @@ use bevy::{
 };
 use bytemuck::{Pod, Zeroable};
 
+use crate::graph::{ShineRenderGraph, ShineRenderNode};
+
 mod mesh;
 
 /// The ShinePlugin uses its own render graph
@@ -52,6 +54,8 @@ pub mod graph {
     #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
     pub enum ShineRenderNode {
         Prepass,
+        LightPass,
+        OverlayPass,
     }
 }
 
@@ -60,14 +64,17 @@ pub struct ShinePlugin;
 impl Plugin for ShinePlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/shader.wgsl");
+        // embedded_asset!(app, "shaders/prepass.wgsl");
+        // embedded_asset!(app, "shaders/light.wgsl");
+        // embedded_asset!(app, "shaders/overlay.wgsl");
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
 
         render_app
-            .init_resource::<SpecializedRenderPipelines<ShinePipeline>>()
             .init_resource::<DrawFunctions<ShinePhase>>()
+            .init_resource::<SpecializedRenderPipelines<ShinePipeline>>()
             .init_resource::<ViewBinnedRenderPhases<ShinePhase>>()
             .add_render_command::<ShinePhase, DrawShineCustom>()
             .add_systems(
@@ -82,7 +89,24 @@ impl Plugin for ShinePlugin {
             .add_render_graph_node::<ViewNodeRunner<ShineNode>>(
                 graph::ShineRenderGraph,
                 graph::ShineRenderNode::Prepass,
+            )
+            .add_render_graph_node::<ViewNodeRunner<ShineNode>>(
+                graph::ShineRenderGraph,
+                graph::ShineRenderNode::LightPass,
+            )
+            .add_render_graph_node::<ViewNodeRunner<ShineNode>>(
+                graph::ShineRenderGraph,
+                graph::ShineRenderNode::OverlayPass,
             );
+
+        render_app.add_render_graph_edges(
+            ShineRenderGraph,
+            (
+                ShineRenderNode::Prepass,
+                ShineRenderNode::LightPass,
+                ShineRenderNode::OverlayPass,
+            ),
+        );
     }
 
     fn finish(&self, app: &mut App) {
@@ -517,11 +541,12 @@ impl ViewNode for ShineNode {
         trace!("shine node run");
 
         let Some(shine_phases) = world.get_resource::<ViewBinnedRenderPhases<ShinePhase>>() else {
-            panic!("shine phases not exists");
+            panic!("shine render phases not exists");
         };
 
         let Some(shine_phase) = shine_phases.get(&extracted_view.retained_view_entity) else {
-            panic!("shine phase not exists");
+            return Ok(());
+            // panic!("shine phase not exists");
         };
 
         let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
