@@ -39,9 +39,17 @@ use bevy::{
 };
 use bytemuck::{Pod, Zeroable};
 
-use crate::graph::{ShineRenderGraph, ShineRenderNode};
+use crate::{
+    graph::{ShineRenderGraph, ShineRenderNode},
+    light::LightPassNode,
+    overlay::OverlayPassNode,
+    prepass::PrepassNode,
+};
 
+mod light;
 mod mesh;
+mod overlay;
+mod prepass;
 
 /// The ShinePlugin uses its own render graph
 /// Now we only have one node, use for verify the PhaseItem and Render graph node
@@ -86,15 +94,15 @@ impl Plugin for ShinePlugin {
 
         render_app
             .add_render_sub_graph(graph::ShineRenderGraph)
-            .add_render_graph_node::<ViewNodeRunner<ShineNode>>(
+            .add_render_graph_node::<ViewNodeRunner<PrepassNode>>(
                 graph::ShineRenderGraph,
                 graph::ShineRenderNode::Prepass,
             )
-            .add_render_graph_node::<ViewNodeRunner<ShineNode>>(
+            .add_render_graph_node::<ViewNodeRunner<LightPassNode>>(
                 graph::ShineRenderGraph,
                 graph::ShineRenderNode::LightPass,
             )
-            .add_render_graph_node::<ViewNodeRunner<ShineNode>>(
+            .add_render_graph_node::<ViewNodeRunner<OverlayPassNode>>(
                 graph::ShineRenderGraph,
                 graph::ShineRenderNode::OverlayPass,
             );
