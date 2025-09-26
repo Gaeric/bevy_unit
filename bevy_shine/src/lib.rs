@@ -72,7 +72,6 @@ pub struct ShinePlugin;
 impl Plugin for ShinePlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/shader.wgsl");
-        // embedded_asset!(app, "shaders/prepass.wgsl");
         // embedded_asset!(app, "shaders/light.wgsl");
         // embedded_asset!(app, "shaders/overlay.wgsl");
 
@@ -97,7 +96,7 @@ impl Plugin for ShinePlugin {
             .add_render_graph_node::<ViewNodeRunner<PrepassNode>>(
                 graph::ShineRenderGraph,
                 graph::ShineRenderNode::Prepass,
-            )
+            );
             .add_render_graph_node::<ViewNodeRunner<LightPassNode>>(
                 graph::ShineRenderGraph,
                 graph::ShineRenderNode::LightPass,

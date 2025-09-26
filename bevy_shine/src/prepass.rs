@@ -1,34 +1,96 @@
 use std::ops::Range;
 
 use bevy::{
-    camera::{Camera3d, Viewport},
-    ecs::{component::Component, entity::Entity, query::QueryItem, world::World},
+    app::{App, Plugin},
+    asset::{Handle, UntypedAssetId, embedded_asset, load_embedded_asset},
+    camera::Camera3d,
+    ecs::{
+        component::Component,
+        entity::Entity,
+        query::QueryItem,
+        resource::Resource,
+        world::{FromWorld, World},
+    },
     log::tracing,
     math::FloatOrd,
+    mesh::{Mesh, MeshVertexBufferLayoutRef},
+    pbr::{MeshPipelineKey, MeshUniform},
     render::{
+        RenderApp,
         camera::ExtractedCamera,
+        mesh::allocator::SlabId,
         render_graph::{NodeRunError, RenderGraphContext, ViewNode},
         render_phase::{
-            DrawFunctionId, PhaseItem, PhaseItemExtraIndex, SortedPhaseItem, ViewSortedRenderPhases,
+            DrawFunctionId, DrawFunctions, PhaseItem, PhaseItemExtraIndex, SortedPhaseItem,
+            ViewSortedRenderPhases,
         },
         render_resource::{
-            LoadOp, Operations, RenderPassColorAttachment, RenderPassDepthStencilAttachment,
-            RenderPassDescriptor, StoreOp,
+            BindGroupLayout, BindGroupLayoutEntries, CachedRenderPipelineId, ColorTargetState,
+            ColorWrites, CompareFunction, DepthBiasState, DepthStencilState, FragmentState,
+            FrontFace, LoadOp, MultisampleState, Operations, PolygonMode, PrimitiveState,
+            RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor,
+            RenderPipelineDescriptor, ShaderStages, SpecializedMeshPipeline,
+            SpecializedMeshPipelineError, SpecializedMeshPipelines, StencilFaceState, StencilState,
+            StoreOp, TextureFormat, VertexState,
+            binding_types::{storage_buffer_read_only, uniform_buffer},
         },
-        renderer::RenderContext,
+        renderer::{RenderContext, RenderDevice},
         sync_world::MainEntity,
         texture::GpuImage,
-        view::{ExtractedView, ViewTarget},
+        view::{ExtractedView, ViewTarget, ViewUniform},
     },
+    shader::Shader,
 };
+
+pub const POSITION_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
+pub const NORMAL_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
+pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
+pub const VELOCITY_UV_FORMAT: TextureFormat = TextureFormat::Rgba16Snorm;
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct PrepassBinKey {
+    pub asset_id: UntypedAssetId,
+}
+
+/// [0.16] refer ShaownBatchSetKey
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct PrepassBatchSetKey {
+    /// The identifier of the render pipeline
+    pub pipeline: CachedRenderPipelineId,
+
+    /// The function used to draw
+    pub draw_function: DrawFunctionId,
+
+    /// The ID of the slab of GPU Memory that contains vertex data.
+    ///
+    /// For non-mesh items, you can fill this with 0 if your items can be
+    /// multi-drawn, or with a unique value if they can't
+    pub index_slab: Option<SlabId>,
+}
 
 #[derive(Debug, Component)]
 pub struct PrepassPhase {
+    ///Determines which objects can be placed into a *batch set*.
+    ///
+    /// Objects in a single batch set can potentially be multi-drawn together,
+    /// if it's enabled and the current platform supports it.
+    pub batch_set_key: PrepassBatchSetKey,
+
+    /// The key, which determines which can be batched.
+    pub bin_key: PrepassBinKey,
+
     pub distance: f32,
+
+    /// An entity from which data will be fetched, including the mesh if
+    /// applicable.
     pub entity: (Entity, MainEntity),
-    pub draw_function: DrawFunctionId,
+
+    /// The ranges of instances.
     pub batch_range: Range<u32>,
     pub indexed: bool,
+
+    /// An extra index, which is either a dynamic offset or an index in the
+    /// indirect parameters list.
     pub extra_index: PhaseItemExtraIndex,
 }
 
@@ -46,7 +108,7 @@ impl PhaseItem for PrepassPhase {
 
     #[inline]
     fn draw_function(&self) -> DrawFunctionId {
-        self.draw_function
+        self.batch_set_key.draw_function
     }
 
     #[inline]
@@ -89,6 +151,138 @@ impl SortedPhaseItem for PrepassPhase {
     }
 }
 
+#[derive(Debug, Resource)]
+pub struct PrepassPipeline {
+    shader: Handle<Shader>,
+    view_bg_layout: BindGroupLayout,
+    mesh_bg_layout: BindGroupLayout,
+}
+
+impl FromWorld for PrepassPipeline {
+    fn from_world(world: &mut World) -> Self {
+        let render_device = world.resource::<RenderDevice>();
+
+        let view_bg_layout = render_device.create_bind_group_layout(
+            "prepass view bg layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::VERTEX_FRAGMENT,
+                (
+                    uniform_buffer::<ViewUniform>(true),
+                    // todo
+                    // uniform_buffer::<PreviousViewUniform>(true),
+                ),
+            ),
+        );
+
+        let mesh_bg_layout = render_device.create_bind_group_layout(
+            "prepass mesh bg layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::VERTEX_FRAGMENT,
+                (
+                    storage_buffer_read_only::<MeshUniform>(true),
+                    // uniform_buffer::<PreviousViewUniform>(true),
+                    // uniform_buffer::<InstanceIndex>(true),
+                ),
+            ),
+        );
+
+        PrepassPipeline {
+            shader: load_embedded_asset!(world, "shaders/prepass.wgsl"),
+            view_bg_layout,
+            mesh_bg_layout,
+        }
+    }
+}
+
+impl SpecializedMeshPipeline for PrepassPipeline {
+    type Key = MeshPipelineKey;
+
+    fn specialize(
+        &self,
+        key: Self::Key,
+        layout: &MeshVertexBufferLayoutRef,
+    ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
+        let vertex_attributes = vec![
+            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
+        ];
+
+        let vertex_layout = layout.0.get_layout(&vertex_attributes)?;
+        let bg_layout = vec![self.view_bg_layout.clone(), self.mesh_bg_layout.clone()];
+
+        let mut vertex_shader_defs = Vec::new();
+
+        vertex_shader_defs.push("MESH_BINDGROUP_1".into());
+
+        Ok(RenderPipelineDescriptor {
+            label: Some("special prepass pipeline".into()),
+            layout: bg_layout,
+            push_constant_ranges: Vec::new(),
+            vertex: VertexState {
+                shader: self.shader.clone(),
+                shader_defs: vertex_shader_defs,
+                entry_point: Some("vertex".into()),
+                buffers: vec![vertex_layout],
+            },
+            primitive: PrimitiveState {
+                topology: key.primitive_topology(),
+                strip_index_format: None,
+                front_face: FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(DepthStencilState {
+                format: TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: CompareFunction::GreaterEqual,
+                stencil: StencilState {
+                    front: StencilFaceState::IGNORE,
+                    back: StencilFaceState::IGNORE,
+                    read_mask: 0,
+                    write_mask: 0,
+                },
+                bias: DepthBiasState {
+                    constant: 0,
+                    slope_scale: 0.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: MultisampleState::default(),
+            fragment: Some(FragmentState {
+                shader: self.shader.clone(),
+                shader_defs: vec![],
+                entry_point: Some("fragment".into()),
+                targets: vec![
+                    Some(ColorTargetState {
+                        format: POSITION_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: NORMAL_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: INSTANCE_MATERIAL_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: VELOCITY_UV_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                ],
+            }),
+            zero_initialize_workgroup_memory: true,
+        })
+    }
+}
+
 #[derive(Debug, Component)]
 pub struct PrepassTarget {
     pub position: GpuImage,
@@ -117,7 +311,7 @@ impl ViewNode for PrepassNode {
         &self,
         graph: &mut RenderGraphContext,
         render_context: &mut RenderContext<'w>,
-        (camera, view, camera3d, target, view_target): QueryItem<'w, '_, Self::ViewQuery>,
+        (camera, view, camera3d, target, _view_target): QueryItem<'w, '_, Self::ViewQuery>,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
         let ops = Operations {
@@ -191,5 +385,26 @@ impl ViewNode for PrepassNode {
         }
 
         Ok(())
+    }
+}
+
+pub struct PrepassPlugin;
+
+impl Plugin for PrepassPlugin {
+    fn build(&self, app: &mut App) {
+        embedded_asset!(app, "shaders/prepass.wgsl");
+
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+
+        render_app
+            .init_resource::<DrawFunctions<PrepassPhase>>()
+            .init_resource::<SpecializedMeshPipelines<PrepassPipeline>>();
+    }
+
+    fn finish(&self, app: &mut App) {
+        app.sub_app_mut(RenderApp)
+            .init_resource::<PrepassPipeline>();
     }
 }
