@@ -2208,6 +2208,7 @@ dependencies = [
  "bytemuck",
  "itertools 0.14.0",
  "radsort",
+ "tracing",
 ]
 
 [[package]]

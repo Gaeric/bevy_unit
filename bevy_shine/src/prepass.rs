@@ -3,6 +3,7 @@ use std::ops::Range;
 use bevy::{
     camera::{Camera3d, Viewport},
     ecs::{component::Component, entity::Entity, query::QueryItem, world::World},
+    log::tracing,
     math::FloatOrd,
     render::{
         camera::ExtractedCamera,
@@ -98,6 +99,7 @@ pub struct PrepassTarget {
 }
 
 // [0.17] refer MainTransmissivePass3dNode
+#[derive(Debug, Default)]
 pub struct PrepassNode;
 
 impl ViewNode for PrepassNode {
@@ -177,14 +179,14 @@ impl ViewNode for PrepassNode {
             render_pass.set_camera_viewport(viewport);
         }
 
-        // debug!("prepass phase render now");
+        tracing::debug!("prepass phase render now");
         for item in prepass_phase.items.iter() {
-            // debug!("prepass phase item is {:?}", item.entity());
+            tracing::debug!("prepass phase item is {:?}", item.entity());
         }
 
         if !prepass_phase.items.is_empty() {
             let view_entity = graph.view_entity();
-            // debug!("prepass phase view_entity: {:?}", view_entity);
+            tracing::debug!("prepass phase view_entity: {:?}", view_entity);
             prepass_phase.render(&mut render_pass, world, view_entity);
         }
 
