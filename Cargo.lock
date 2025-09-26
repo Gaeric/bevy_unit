@@ -2207,6 +2207,7 @@ dependencies = [
  "bevy 0.17.0-rc.1",
  "bytemuck",
  "itertools 0.14.0",
+ "radsort",
 ]
 
 [[package]]
