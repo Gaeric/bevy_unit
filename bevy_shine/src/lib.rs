@@ -43,7 +43,7 @@ use crate::{
     graph::{ShineRenderGraph, ShineRenderNode},
     light::LightPassNode,
     overlay::OverlayPassNode,
-    prepass::PrepassNode,
+    prepass::{PrepassNode, PrepassPlugin},
 };
 
 mod light;
@@ -71,6 +71,8 @@ pub struct ShinePlugin;
 
 impl Plugin for ShinePlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(PrepassPlugin);
+
         embedded_asset!(app, "shaders/shader.wgsl");
         // embedded_asset!(app, "shaders/light.wgsl");
         // embedded_asset!(app, "shaders/overlay.wgsl");

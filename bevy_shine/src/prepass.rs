@@ -7,22 +7,28 @@ use bevy::{
     ecs::{
         component::Component,
         entity::Entity,
-        query::QueryItem,
+        query::{QueryItem, ROQueryItem},
         resource::Resource,
+        system::{
+            SystemParamItem,
+            lifetimeless::{Read, SRes},
+        },
         world::{FromWorld, World},
     },
     log::tracing,
     math::FloatOrd,
     mesh::{Mesh, MeshVertexBufferLayoutRef},
-    pbr::{MeshPipelineKey, MeshUniform},
+    pbr::{DrawMesh, MeshPipelineKey, MeshUniform, RenderMeshInstances},
     render::{
         RenderApp,
         camera::ExtractedCamera,
+        render_resource::BindGroup,
         mesh::allocator::SlabId,
         render_graph::{NodeRunError, RenderGraphContext, ViewNode},
         render_phase::{
-            DrawFunctionId, DrawFunctions, PhaseItem, PhaseItemExtraIndex, SortedPhaseItem,
-            ViewSortedRenderPhases,
+            AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions,
+            PhaseItem, PhaseItemExtraIndex, RenderCommand, RenderCommandResult, SetItemPipeline,
+            SortedPhaseItem, TrackedRenderPass, ViewSortedRenderPhases,
         },
         render_resource::{
             BindGroupLayout, BindGroupLayoutEntries, CachedRenderPipelineId, ColorTargetState,
@@ -37,7 +43,7 @@ use bevy::{
         renderer::{RenderContext, RenderDevice},
         sync_world::MainEntity,
         texture::GpuImage,
-        view::{ExtractedView, ViewTarget, ViewUniform},
+        view::{ExtractedView, ViewTarget, ViewUniform, ViewUniformOffset},
     },
     shader::Shader,
 };
@@ -148,6 +154,13 @@ impl SortedPhaseItem for PrepassPhase {
     #[inline]
     fn indexed(&self) -> bool {
         self.indexed
+    }
+}
+
+impl CachedRenderPipelinePhaseItem for PrepassPhase {
+    #[inline]
+    fn cached_pipeline(&self) -> CachedRenderPipelineId {
+        self.batch_set_key.pipeline
     }
 }
 
@@ -381,12 +394,89 @@ impl ViewNode for PrepassNode {
         if !prepass_phase.items.is_empty() {
             let view_entity = graph.view_entity();
             tracing::debug!("prepass phase view_entity: {:?}", view_entity);
-            prepass_phase.render(&mut render_pass, world, view_entity);
+            let _ = prepass_phase.render(&mut render_pass, world, view_entity);
         }
 
         Ok(())
     }
 }
+
+#[derive(Resource, Debug)]
+pub struct PrepassBindGroup {
+    pub view: BindGroup,
+    pub mesh: BindGroup,
+}
+
+// [0.17] refer SetPrepassViewBindGroup
+pub struct SetPrepassViewBindGroup<const I: usize>;
+impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetPrepassViewBindGroup<I> {
+    type Param = SRes<PrepassBindGroup>;
+    type ViewQuery = (
+        Read<ViewUniformOffset>,
+        // Read<PreviousViewUniformOffset>
+    );
+    type ItemQuery = ();
+
+    #[inline]
+    fn render<'w>(
+        item: &P,
+        (view_uniform,): ROQueryItem<'w, '_, Self::ViewQuery>,
+        entity: Option<ROQueryItem<'w, '_, Self::ItemQuery>>,
+        param: SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let prepass_bind_group = param.into_inner();
+        pass.set_bind_group(I, &prepass_bind_group.view, &[view_uniform.offset]);
+
+        RenderCommandResult::Success
+    }
+}
+
+pub struct SetPrepassMeshBindGroup<const I: usize>;
+impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetPrepassMeshBindGroup<I> {
+    type Param = (SRes<PrepassBindGroup>, SRes<RenderMeshInstances>);
+
+    type ViewQuery = ();
+
+    type ItemQuery = ();
+
+    fn render<'w>(
+        item: &P,
+        view: ROQueryItem<'w, '_, Self::ViewQuery>,
+        uniform: Option<ROQueryItem<'w, '_, Self::ItemQuery>>,
+        (bind_group, mesh_instances): SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let Some(instance_index) = uniform else {
+            return RenderCommandResult::Failure("prepass uniform instance_index not valid");
+        };
+
+        let prepass_bind_group = bind_group.into_inner();
+        let mesh_instance = mesh_instances.into_inner();
+        let entity = &item.main_entity();
+
+        let Some(mesh_asset_id) = mesh_instance.mesh_asset_id(*entity) else {
+            return RenderCommandResult::Success;
+        };
+
+        let mut dynamic_offsets: [u32; 1] = Default::default();
+
+        if let PhaseItemExtraIndex::DynamicOffset(dynamic_offset) = item.extra_index() {
+            dynamic_offsets[0] = dynamic_offset;
+        }
+
+        pass.set_bind_group(I, &prepass_bind_group.mesh, &[dynamic_offsets[0]]);
+
+        RenderCommandResult::Success
+    }
+}
+
+type DrawPrepass = (
+    SetItemPipeline,
+    SetPrepassViewBindGroup<0>,
+    SetPrepassMeshBindGroup<1>,
+    DrawMesh,
+);
 
 pub struct PrepassPlugin;
 
@@ -400,7 +490,8 @@ impl Plugin for PrepassPlugin {
 
         render_app
             .init_resource::<DrawFunctions<PrepassPhase>>()
-            .init_resource::<SpecializedMeshPipelines<PrepassPipeline>>();
+            .init_resource::<SpecializedMeshPipelines<PrepassPipeline>>()
+            .add_render_command::<PrepassPhase, DrawPrepass>();
     }
 
     fn finish(&self, app: &mut App) {
