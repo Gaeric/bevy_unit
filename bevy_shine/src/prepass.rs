@@ -3,14 +3,15 @@ use std::ops::Range;
 use bevy::{
     app::{App, Plugin},
     asset::{Handle, UntypedAssetId, embedded_asset, load_embedded_asset},
-    camera::Camera3d,
+    camera::{Camera3d, visibility::VisibleEntities},
     ecs::{
         component::Component,
         entity::Entity,
         query::{QueryItem, ROQueryItem},
         resource::Resource,
+        schedule::IntoScheduleConfigs,
         system::{
-            SystemParamItem,
+            Query, Res, ResMut, SystemParamItem,
             lifetimeless::{Read, SRes},
         },
         world::{FromWorld, World},
@@ -20,10 +21,10 @@ use bevy::{
     mesh::{Mesh, MeshVertexBufferLayoutRef},
     pbr::{DrawMesh, MeshPipelineKey, MeshUniform, RenderMeshInstances},
     render::{
-        RenderApp,
+        Render, RenderApp, RenderSystems,
         camera::ExtractedCamera,
-        render_resource::BindGroup,
-        mesh::allocator::SlabId,
+        mesh::{RenderMesh, allocator::SlabId},
+        render_asset::RenderAssets,
         render_graph::{NodeRunError, RenderGraphContext, ViewNode},
         render_phase::{
             AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions,
@@ -31,19 +32,20 @@ use bevy::{
             SortedPhaseItem, TrackedRenderPass, ViewSortedRenderPhases,
         },
         render_resource::{
-            BindGroupLayout, BindGroupLayoutEntries, CachedRenderPipelineId, ColorTargetState,
-            ColorWrites, CompareFunction, DepthBiasState, DepthStencilState, FragmentState,
-            FrontFace, LoadOp, MultisampleState, Operations, PolygonMode, PrimitiveState,
-            RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor,
-            RenderPipelineDescriptor, ShaderStages, SpecializedMeshPipeline,
-            SpecializedMeshPipelineError, SpecializedMeshPipelines, StencilFaceState, StencilState,
-            StoreOp, TextureFormat, VertexState,
+            BindGroup, BindGroupLayout, BindGroupLayoutEntries, CachedRenderPipelineId,
+            ColorTargetState, ColorWrites, CompareFunction, DepthBiasState, DepthStencilState,
+            FragmentState, FrontFace, LoadOp, MultisampleState, Operations, PipelineCache,
+            PolygonMode, PrimitiveState, RenderPassColorAttachment,
+            RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
+            ShaderStages, SpecializedMeshPipeline, SpecializedMeshPipelineError,
+            SpecializedMeshPipelines, StencilFaceState, StencilState, StoreOp, TextureFormat,
+            VertexState,
             binding_types::{storage_buffer_read_only, uniform_buffer},
         },
         renderer::{RenderContext, RenderDevice},
         sync_world::MainEntity,
         texture::GpuImage,
-        view::{ExtractedView, ViewTarget, ViewUniform, ViewUniformOffset},
+        view::{ExtractedView, RenderVisibleEntities, ViewTarget, ViewUniform, ViewUniformOffset},
     },
     shader::Shader,
 };
@@ -425,6 +427,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetPrepassViewBindGroup<
         param: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
+        tracing::info!("set prepass view bind group render");
         let prepass_bind_group = param.into_inner();
         pass.set_bind_group(I, &prepass_bind_group.view, &[view_uniform.offset]);
 
@@ -478,6 +481,19 @@ type DrawPrepass = (
     DrawMesh,
 );
 
+fn queue_prepass_meshes(
+    draw_functions: Res<DrawFunctions<PrepassPhase>>,
+    render_meshes: Res<RenderAssets<RenderMesh>>,
+    prepass_pipeline: Res<PrepassPipeline>,
+    mut pipelines: ResMut<SpecializedMeshPipelines<PrepassPipeline>>,
+    mut pipeline_cache: ResMut<PipelineCache>,
+    render_mesh_instances: Res<RenderMeshInstances>,
+    mut prepass_phase: ResMut<ViewSortedRenderPhases<PrepassPhase>>,
+    mut views: Query<(&ExtractedView, &VisibleEntities)>,
+) {
+    tracing::info!("queue prepass meshes");
+}
+
 pub struct PrepassPlugin;
 
 impl Plugin for PrepassPlugin {
@@ -491,7 +507,12 @@ impl Plugin for PrepassPlugin {
         render_app
             .init_resource::<DrawFunctions<PrepassPhase>>()
             .init_resource::<SpecializedMeshPipelines<PrepassPipeline>>()
-            .add_render_command::<PrepassPhase, DrawPrepass>();
+            .init_resource::<ViewSortedRenderPhases<PrepassPhase>>()
+            .add_render_command::<PrepassPhase, DrawPrepass>()
+            .add_systems(
+                Render,
+                (queue_prepass_meshes).in_set(RenderSystems::QueueMeshes),
+            );
     }
 
     fn finish(&self, app: &mut App) {
