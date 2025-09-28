@@ -62,8 +62,8 @@ pub mod graph {
     #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
     pub enum ShineRenderNode {
         Prepass,
-        LightPass,
-        OverlayPass,
+        // LightPass,
+        // OverlayPass,
     }
 }
 
@@ -97,21 +97,22 @@ impl Plugin for ShinePlugin {
                 graph::ShineRenderGraph,
                 graph::ShineRenderNode::Prepass,
             );
-            .add_render_graph_node::<ViewNodeRunner<LightPassNode>>(
-                graph::ShineRenderGraph,
-                graph::ShineRenderNode::LightPass,
-            )
-            .add_render_graph_node::<ViewNodeRunner<OverlayPassNode>>(
-                graph::ShineRenderGraph,
-                graph::ShineRenderNode::OverlayPass,
-            );
+
+        // render_app.add_render_graph_node::<ViewNodeRunner<LightPassNode>>(
+        //     graph::ShineRenderGraph,
+        //     graph::ShineRenderNode::LightPass,
+        // );
+        // render_app.add_render_graph_node::<ViewNodeRunner<OverlayPassNode>>(
+        //     graph::ShineRenderGraph,
+        //     graph::ShineRenderNode::OverlayPass,
+        // );
 
         render_app.add_render_graph_edges(
             ShineRenderGraph,
             (
                 ShineRenderNode::Prepass,
-                ShineRenderNode::LightPass,
-                ShineRenderNode::OverlayPass,
+                // ShineRenderNode::LightPass,
+                // ShineRenderNode::OverlayPass,
             ),
         );
     }
