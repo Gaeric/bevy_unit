@@ -3,25 +3,26 @@ use std::ops::Range;
 use bevy::{
     app::{App, Plugin},
     asset::{Handle, UntypedAssetId, embedded_asset, load_embedded_asset},
-    camera::{Camera3d, visibility::VisibleEntities},
+    camera::{Camera, Camera3d, visibility::VisibleEntities},
     ecs::{
         component::Component,
         entity::Entity,
-        query::{QueryItem, ROQueryItem},
+        query::{QueryItem, ROQueryItem, With},
         resource::Resource,
         schedule::IntoScheduleConfigs,
         system::{
-            Query, Res, ResMut, SystemParamItem,
+            Local, Query, Res, ResMut, SystemParamItem,
             lifetimeless::{Read, SRes},
         },
         world::{FromWorld, World},
     },
     log::tracing,
     math::FloatOrd,
-    mesh::{Mesh, MeshVertexBufferLayoutRef},
+    mesh::{Mesh, Mesh3d, MeshVertexBufferLayoutRef},
     pbr::{DrawMesh, MeshPipelineKey, MeshUniform, RenderMeshInstances},
+    platform::collections::HashSet,
     render::{
-        Render, RenderApp, RenderSystems,
+        Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
         camera::ExtractedCamera,
         mesh::{RenderMesh, allocator::SlabId},
         render_asset::RenderAssets,
@@ -45,20 +46,23 @@ use bevy::{
         renderer::{RenderContext, RenderDevice},
         sync_world::MainEntity,
         texture::GpuImage,
-        view::{ExtractedView, RenderVisibleEntities, ViewTarget, ViewUniform, ViewUniformOffset},
+        view::{
+            ExtractedView, RenderVisibleEntities, RetainedViewEntity, ViewTarget, ViewUniform,
+            ViewUniformOffset,
+        },
     },
     shader::Shader,
 };
-
+pub const OUTPUT_FORMAT: TextureFormat = TextureFormat::Bgra8UnormSrgb;
 pub const POSITION_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const NORMAL_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
 pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
 pub const VELOCITY_UV_FORMAT: TextureFormat = TextureFormat::Rgba16Snorm;
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct PrepassBinKey {
-    pub asset_id: UntypedAssetId,
-}
+// #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+// pub struct PrepassBinKey {
+//     pub asset_id: UntypedAssetId,
+// }
 
 /// [0.16] refer ShaownBatchSetKey
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -85,8 +89,7 @@ pub struct PrepassPhase {
     pub batch_set_key: PrepassBatchSetKey,
 
     /// The key, which determines which can be batched.
-    pub bin_key: PrepassBinKey,
-
+    // pub bin_key: PrepassBinKey,
     pub distance: f32,
 
     /// An entity from which data will be fetched, including the mesh if
@@ -95,6 +98,8 @@ pub struct PrepassPhase {
 
     /// The ranges of instances.
     pub batch_range: Range<u32>,
+
+    /// Whether the mesh in question is indexed (uses an index buffer in addition to its vertex buffer).
     pub indexed: bool,
 
     /// An extra index, which is either a dynamic offset or an index in the
@@ -272,7 +277,8 @@ impl SpecializedMeshPipeline for PrepassPipeline {
                 entry_point: Some("fragment".into()),
                 targets: vec![
                     Some(ColorTargetState {
-                        format: POSITION_FORMAT,
+                        // format: POSITION_FORMAT,
+                        format: OUTPUT_FORMAT,
                         blend: None,
                         write_mask: ColorWrites::ALL,
                     }),
@@ -308,6 +314,7 @@ pub struct PrepassTarget {
 }
 
 // [0.17] refer MainTransmissivePass3dNode
+// [0.17] refer custom_render_phase example
 #[derive(Debug, Default)]
 pub struct PrepassNode;
 
@@ -329,6 +336,17 @@ impl ViewNode for PrepassNode {
         (camera, view, camera3d, target, _view_target): QueryItem<'w, '_, Self::ViewQuery>,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
+        // Get the phases resource
+        let Some(prepass_phases) = world.get_resource::<ViewSortedRenderPhases<PrepassPhase>>()
+        else {
+            return Ok(());
+        };
+
+        // get the phase for the current view running our node
+        let Some(prepass_phase) = prepass_phases.get(&view.retained_view_entity) else {
+            return Ok(());
+        };
+
         let ops = Operations {
             load: LoadOp::Load,
             store: StoreOp::Store,
@@ -338,7 +356,8 @@ impl ViewNode for PrepassNode {
             label: Some("shine prepass"),
             color_attachments: &[
                 Some(RenderPassColorAttachment {
-                    view: &target.position.texture_view,
+                    // view: &target.position.texture_view,
+                    view: &_view_target.out_texture(),
                     depth_slice: None,
                     resolve_target: None,
                     ops: ops,
@@ -372,14 +391,6 @@ impl ViewNode for PrepassNode {
             }),
             timestamp_writes: None,
             occlusion_query_set: None,
-        };
-        let Some(prepass_phases) = world.get_resource::<ViewSortedRenderPhases<PrepassPhase>>()
-        else {
-            return Ok(());
-        };
-
-        let Some(prepass_phase) = prepass_phases.get(&view.retained_view_entity) else {
-            return Ok(());
         };
 
         let mut render_pass = render_context.begin_tracked_render_pass(pass_descriptor);
@@ -481,17 +492,101 @@ type DrawPrepass = (
     DrawMesh,
 );
 
+// This is a very important step when writing a custom phase.
+//
+// This system determines which meshes will be added to the phase.
 fn queue_prepass_meshes(
     draw_functions: Res<DrawFunctions<PrepassPhase>>,
     render_meshes: Res<RenderAssets<RenderMesh>>,
     prepass_pipeline: Res<PrepassPipeline>,
     mut pipelines: ResMut<SpecializedMeshPipelines<PrepassPipeline>>,
-    mut pipeline_cache: ResMut<PipelineCache>,
+    pipeline_cache: ResMut<PipelineCache>,
     render_mesh_instances: Res<RenderMeshInstances>,
-    mut prepass_phase: ResMut<ViewSortedRenderPhases<PrepassPhase>>,
-    mut views: Query<(&ExtractedView, &VisibleEntities)>,
+    mut prepass_phases: ResMut<ViewSortedRenderPhases<PrepassPhase>>,
+    mut views: Query<(&ExtractedView, &RenderVisibleEntities)>,
 ) {
     tracing::info!("queue prepass meshes");
+
+    let draw_function = draw_functions.read().id::<DrawPrepass>();
+
+    for (view, visible_entities) in &mut views {
+        let Some(prepass_phase) = prepass_phases.get_mut(&view.retained_view_entity) else {
+            tracing::info!(
+                "no valid prepass phase for entity {:?}",
+                view.retained_view_entity
+            );
+            continue;
+        };
+
+        tracing::info!(
+            "valid prepass phase for entity {:?}",
+            view.retained_view_entity
+        );
+
+        let rangefinder = view.rangefinder3d();
+        // Since our phase can work on any 3d mesh we can reuse the default mesh 3d filter
+        for (render_entity, visible_entity) in visible_entities.iter::<Mesh3d>() {
+            // We only want meshes with the marker component to be queued to ouse phase
+            // filter
+
+            //
+            let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(*visible_entity)
+            else {
+                continue;
+            };
+
+            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+                continue;
+            };
+
+            let key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology());
+            let distance = rangefinder.distance_translation(&mesh_instance.translation);
+            let pipeline_id = pipelines
+                .specialize(&pipeline_cache, &prepass_pipeline, key, &mesh.layout)
+                .unwrap();
+
+            // At this point we have all the data we nned to create a phase item and add it ot our
+            // phase
+            prepass_phase.add(PrepassPhase {
+                batch_set_key: PrepassBatchSetKey {
+                    pipeline: pipeline_id,
+                    draw_function,
+                    index_slab: None,
+                },
+                distance,
+                entity: (*render_entity, *visible_entity),
+                batch_range: 0..1,
+                indexed: mesh.indexed(),
+                extra_index: PhaseItemExtraIndex::None,
+            });
+        }
+    }
+}
+
+// When defining a phase, we need to extract it from the main world and add it to a resource
+// that will be used by the render world. We need to give that resource all views that will use
+// that phase
+fn extract_camera_prepass_phases(
+    mut prepass_phases: ResMut<ViewSortedRenderPhases<PrepassPhase>>,
+    cameras: Extract<Query<(Entity, &Camera), With<Camera3d>>>,
+    mut live_entities: Local<HashSet<RetainedViewEntity>>,
+) {
+    live_entities.clear();
+    for (main_entity, camera) in &cameras {
+        tracing::info!("extrace main_entity {:?}", main_entity);
+        if !camera.is_active {
+            continue;
+        }
+
+        // This is the main camera, so we use the first subview index (0)
+        let retained_view_entity = RetainedViewEntity::new(main_entity.into(), None, 0);
+
+        prepass_phases.insert_or_clear(retained_view_entity);
+        live_entities.insert(retained_view_entity);
+    }
+
+    // Clear out all dead views
+    prepass_phases.retain(|camera_entity, _| live_entities.contains(camera_entity));
 }
 
 pub struct PrepassPlugin;
@@ -509,6 +604,7 @@ impl Plugin for PrepassPlugin {
             .init_resource::<SpecializedMeshPipelines<PrepassPipeline>>()
             .init_resource::<ViewSortedRenderPhases<PrepassPhase>>()
             .add_render_command::<PrepassPhase, DrawPrepass>()
+            .add_systems(ExtractSchedule, extract_camera_prepass_phases)
             .add_systems(
                 Render,
                 (queue_prepass_meshes).in_set(RenderSystems::QueueMeshes),
