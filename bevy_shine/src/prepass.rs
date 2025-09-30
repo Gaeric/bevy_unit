@@ -2,8 +2,8 @@ use std::ops::Range;
 
 use bevy::{
     app::{App, Plugin},
-    asset::{Handle, UntypedAssetId, embedded_asset, load_embedded_asset},
-    camera::{Camera, Camera3d, visibility::VisibleEntities},
+    asset::{Handle, embedded_asset, load_embedded_asset},
+    camera::{Camera, Camera3d},
     ecs::{
         component::Component,
         entity::Entity,
@@ -11,7 +11,7 @@ use bevy::{
         resource::Resource,
         schedule::IntoScheduleConfigs,
         system::{
-            Local, Query, Res, ResMut, SystemParamItem,
+            Commands, Local, Query, Res, ResMut, SystemParamItem,
             lifetimeless::{Read, SRes},
         },
         world::{FromWorld, World},
@@ -19,10 +19,11 @@ use bevy::{
     log::tracing,
     math::FloatOrd,
     mesh::{Mesh, Mesh3d, MeshVertexBufferLayoutRef},
-    pbr::{DrawMesh, MeshPipelineKey, MeshUniform, RenderMeshInstances},
+    pbr::{DrawMesh, MeshInputUniform, MeshPipelineKey, MeshUniform, RenderMeshInstances},
     platform::collections::HashSet,
     render::{
         Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
+        batching::{gpu_preprocessing, no_gpu_preprocessing},
         camera::ExtractedCamera,
         mesh::{RenderMesh, allocator::SlabId},
         render_asset::RenderAssets,
@@ -33,10 +34,10 @@ use bevy::{
             SortedPhaseItem, TrackedRenderPass, ViewSortedRenderPhases,
         },
         render_resource::{
-            BindGroup, BindGroupLayout, BindGroupLayoutEntries, CachedRenderPipelineId,
-            ColorTargetState, ColorWrites, CompareFunction, DepthBiasState, DepthStencilState,
-            FragmentState, FrontFace, LoadOp, MultisampleState, Operations, PipelineCache,
-            PolygonMode, PrimitiveState, RenderPassColorAttachment,
+            BindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries,
+            CachedRenderPipelineId, ColorTargetState, ColorWrites, CompareFunction, DepthBiasState,
+            DepthStencilState, FragmentState, FrontFace, GpuArrayBuffer, LoadOp, MultisampleState,
+            Operations, PipelineCache, PolygonMode, PrimitiveState, RenderPassColorAttachment,
             RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
             ShaderStages, SpecializedMeshPipeline, SpecializedMeshPipelineError,
             SpecializedMeshPipelines, StencilFaceState, StencilState, StoreOp, TextureFormat,
@@ -48,10 +49,11 @@ use bevy::{
         texture::GpuImage,
         view::{
             ExtractedView, RenderVisibleEntities, RetainedViewEntity, ViewTarget, ViewUniform,
-            ViewUniformOffset,
+            ViewUniformOffset, ViewUniforms,
         },
     },
     shader::Shader,
+    utils::TypeIdMap,
 };
 pub const OUTPUT_FORMAT: TextureFormat = TextureFormat::Bgra8UnormSrgb;
 pub const POSITION_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
@@ -171,7 +173,7 @@ impl CachedRenderPipelinePhaseItem for PrepassPhase {
     }
 }
 
-#[derive(Debug, Resource)]
+#[derive(Debug, Resource, Clone)]
 pub struct PrepassPipeline {
     shader: Handle<Shader>,
     view_bg_layout: BindGroupLayout,
@@ -399,14 +401,14 @@ impl ViewNode for PrepassNode {
             render_pass.set_camera_viewport(viewport);
         }
 
-        tracing::debug!("prepass phase render now");
+        tracing::info!("prepass phase render now");
         for item in prepass_phase.items.iter() {
-            tracing::debug!("prepass phase item is {:?}", item.entity());
+            tracing::info!("prepass phase item is {:?}", item.entity());
         }
 
         if !prepass_phase.items.is_empty() {
             let view_entity = graph.view_entity();
-            tracing::debug!("prepass phase view_entity: {:?}", view_entity);
+            tracing::info!("prepass phase view_entity: {:?}", view_entity);
             let _ = prepass_phase.render(&mut render_pass, world, view_entity);
         }
 
@@ -509,6 +511,8 @@ fn queue_prepass_meshes(
 
     let draw_function = draw_functions.read().id::<DrawPrepass>();
 
+    tracing::info!("draw function is {:?}", draw_function);
+
     for (view, visible_entities) in &mut views {
         let Some(prepass_phase) = prepass_phases.get_mut(&view.retained_view_entity) else {
             tracing::info!(
@@ -545,9 +549,7 @@ fn queue_prepass_meshes(
                 .specialize(&pipeline_cache, &prepass_pipeline, key, &mesh.layout)
                 .unwrap();
 
-            // At this point we have all the data we nned to create a phase item and add it ot our
-            // phase
-            prepass_phase.add(PrepassPhase {
+            let phase = PrepassPhase {
                 batch_set_key: PrepassBatchSetKey {
                     pipeline: pipeline_id,
                     draw_function,
@@ -558,7 +560,13 @@ fn queue_prepass_meshes(
                 batch_range: 0..1,
                 indexed: mesh.indexed(),
                 extra_index: PhaseItemExtraIndex::None,
-            });
+            };
+
+            tracing::info!("prepass phase is {:?}", phase);
+
+            // At this point we have all the data we nned to create a phase item and add it ot our
+            // phase
+            prepass_phase.add(phase);
         }
     }
 }
@@ -589,6 +597,107 @@ fn extract_camera_prepass_phases(
     prepass_phases.retain(|camera_entity, _| live_entities.contains(camera_entity));
 }
 
+#[allow(clippy::too_many_arguments)]
+fn prepare_prepass_bind_groups(
+    mut commands: Commands,
+    prepass_pipeline: Res<PrepassPipeline>,
+    render_device: Res<RenderDevice>,
+    view_uniforms: Res<ViewUniforms>,
+    cpu_batched_instance_buffer: Option<
+        Res<no_gpu_preprocessing::BatchedInstanceBuffer<MeshUniform>>,
+    >,
+    gpu_batched_instance_buffers: Option<
+        Res<gpu_preprocessing::BatchedInstanceBuffers<MeshUniform, MeshInputUniform>>,
+    >,
+) {
+    tracing::info!("prepare prepass bind group");
+
+    let Some(view_binding) = view_uniforms.uniforms.binding() else {
+        tracing::warn!("prepare prepass bind group view_binding not exists");
+        return;
+    };
+
+    if let Some(cpu_batched_instance_buffer) = cpu_batched_instance_buffer
+        && let Some(instance_data_binding) = cpu_batched_instance_buffer
+            .into_inner()
+            .instance_data_binding()
+    {
+        tracing::info!("cpu batch instance buffer");
+        let view = render_device.create_bind_group(
+            "prepass view bind group",
+            &prepass_pipeline.view_bg_layout,
+            &BindGroupEntries::single(view_binding),
+        );
+
+        let mesh = render_device.create_bind_group(
+            "prepass mesh bind group",
+            &prepass_pipeline.mesh_bg_layout,
+            &BindGroupEntries::single(instance_data_binding),
+        );
+
+        tracing::info!("prepass bindgroup");
+        commands.insert_resource(PrepassBindGroup { view, mesh });
+        return;
+    }
+
+    if let Some(gpu_batched_instance_buffers) = gpu_batched_instance_buffers {
+        for (_, batched_phase_instance_buffers) in
+            &gpu_batched_instance_buffers.phase_instance_buffers
+        {
+            let Some(instance_data_binding) =
+                batched_phase_instance_buffers.instance_data_binding()
+            else {
+                continue;
+            };
+
+            tracing::info!("gpu batch instance buffer");
+
+            let view = render_device.create_bind_group(
+                "prepass view bind group",
+                &prepass_pipeline.view_bg_layout,
+                &BindGroupEntries::single(view_binding.clone()),
+            );
+
+            let mesh = render_device.create_bind_group(
+                "prepass mesh bind group",
+                &prepass_pipeline.mesh_bg_layout,
+                &BindGroupEntries::single(instance_data_binding),
+            );
+
+            tracing::info!("prepass bindgroup");
+            commands.insert_resource(PrepassBindGroup { view, mesh });
+        }
+    }
+}
+
+// fn prepare_prepass_bind_group_mesh(
+//     mut commands: Commands,
+//     prepass_pipeline: Res<PrepassPipeline>,
+//     render_device: Res<RenderDevice>,
+//     view_uniforms: Res<ViewUniforms>,
+//     mesh_uniforms: Res<GpuArrayBuffer<MeshUniform>>,
+// ) {
+//     tracing::info!("prepare prepass bind group");
+//     if let (Some(view_binding), Some(instance_data_binding)) =
+//         (view_uniforms.uniforms.binding(), mesh_uniforms.binding())
+//     {
+//         let view = render_device.create_bind_group(
+//             "prepass view bind group",
+//             &prepass_pipeline.view_bg_layout,
+//             &BindGroupEntries::single(view_binding),
+//         );
+
+//         let mesh = render_device.create_bind_group(
+//             "prepass mesh bind group",
+//             &prepass_pipeline.mesh_bg_layout,
+//             &BindGroupEntries::single(instance_data_binding),
+//         );
+
+//         tracing::info!("prepass bindgroup");
+//         commands.insert_resource(PrepassBindGroup { view, mesh });
+//     }
+// }
+
 pub struct PrepassPlugin;
 
 impl Plugin for PrepassPlugin {
@@ -607,7 +716,11 @@ impl Plugin for PrepassPlugin {
             .add_systems(ExtractSchedule, extract_camera_prepass_phases)
             .add_systems(
                 Render,
-                (queue_prepass_meshes).in_set(RenderSystems::QueueMeshes),
+                (
+                    queue_prepass_meshes.in_set(RenderSystems::QueueMeshes),
+                    prepare_prepass_bind_groups.in_set(RenderSystems::PrepareBindGroups),
+                    // prepare_prepass_bind_group_mesh.in_set(RenderSystems::PrepareBindGroups),
+                ),
             );
     }
 
