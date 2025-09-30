@@ -36,24 +36,23 @@ use bevy::{
         render_resource::{
             BindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries,
             CachedRenderPipelineId, ColorTargetState, ColorWrites, CompareFunction, DepthBiasState,
-            DepthStencilState, FragmentState, FrontFace, GpuArrayBuffer, LoadOp, MultisampleState,
+            DepthStencilState, Extent3d, FragmentState, FrontFace, LoadOp, MultisampleState,
             Operations, PipelineCache, PolygonMode, PrimitiveState, RenderPassColorAttachment,
             RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
-            ShaderStages, SpecializedMeshPipeline, SpecializedMeshPipelineError,
-            SpecializedMeshPipelines, StencilFaceState, StencilState, StoreOp, TextureFormat,
-            VertexState,
+            SamplerDescriptor, ShaderStages, SpecializedMeshPipeline, SpecializedMeshPipelineError,
+            SpecializedMeshPipelines, StencilFaceState, StencilState, StoreOp, TextureDescriptor,
+            TextureDimension, TextureFormat, TextureUsages, VertexState,
             binding_types::{storage_buffer_read_only, uniform_buffer},
         },
         renderer::{RenderContext, RenderDevice},
         sync_world::MainEntity,
-        texture::GpuImage,
+        texture::{GpuImage, TextureCache},
         view::{
             ExtractedView, RenderVisibleEntities, RetainedViewEntity, ViewTarget, ViewUniform,
             ViewUniformOffset, ViewUniforms,
         },
     },
     shader::Shader,
-    utils::TypeIdMap,
 };
 pub const OUTPUT_FORMAT: TextureFormat = TextureFormat::Bgra8UnormSrgb;
 pub const POSITION_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
@@ -338,6 +337,8 @@ impl ViewNode for PrepassNode {
         (camera, view, camera3d, target, _view_target): QueryItem<'w, '_, Self::ViewQuery>,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
+        tracing::info!("prepass node run");
+
         // Get the phases resource
         let Some(prepass_phases) = world.get_resource::<ViewSortedRenderPhases<PrepassPhase>>()
         else {
@@ -434,15 +435,15 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetPrepassViewBindGroup<
 
     #[inline]
     fn render<'w>(
-        item: &P,
+        _item: &P,
         (view_uniform,): ROQueryItem<'w, '_, Self::ViewQuery>,
-        entity: Option<ROQueryItem<'w, '_, Self::ItemQuery>>,
-        param: SystemParamItem<'w, '_, Self::Param>,
+        _entity: Option<ROQueryItem<'w, '_, Self::ItemQuery>>,
+        bind_group: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        tracing::info!("set prepass view bind group render");
-        let prepass_bind_group = param.into_inner();
+        let prepass_bind_group = bind_group.into_inner();
         pass.set_bind_group(I, &prepass_bind_group.view, &[view_uniform.offset]);
+        tracing::info!("set prepass view bind group render finish");
 
         RenderCommandResult::Success
     }
@@ -458,14 +459,16 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetPrepassMeshBindGroup<
 
     fn render<'w>(
         item: &P,
-        view: ROQueryItem<'w, '_, Self::ViewQuery>,
-        uniform: Option<ROQueryItem<'w, '_, Self::ItemQuery>>,
+        _view: ROQueryItem<'w, '_, Self::ViewQuery>,
+        _uniform: Option<ROQueryItem<'w, '_, Self::ItemQuery>>,
         (bind_group, mesh_instances): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some(instance_index) = uniform else {
-            return RenderCommandResult::Failure("prepass uniform instance_index not valid");
-        };
+        tracing::info!("prepass mesh bind group render now");
+
+        // let Some(instance_index) = uniform else {
+        //     return RenderCommandResult::Failure("prepass uniform instance_index not valid");
+        // };
 
         let prepass_bind_group = bind_group.into_inner();
         let mesh_instance = mesh_instances.into_inner();
@@ -482,6 +485,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetPrepassMeshBindGroup<
         }
 
         pass.set_bind_group(I, &prepass_bind_group.mesh, &[dynamic_offsets[0]]);
+        tracing::info!("set prepass mesh bind group render finish");
 
         RenderCommandResult::Success
     }
@@ -581,7 +585,7 @@ fn extract_camera_prepass_phases(
 ) {
     live_entities.clear();
     for (main_entity, camera) in &cameras {
-        tracing::info!("extrace main_entity {:?}", main_entity);
+        tracing::info!("extract main_entity {:?}", main_entity);
         if !camera.is_active {
             continue;
         }
@@ -698,6 +702,72 @@ fn prepare_prepass_bind_groups(
 //     }
 // }
 
+// [0.17] refer prepare_view_targets
+fn prepare_prepass_target(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    mut texture_cache: ResMut<TextureCache>,
+    cameras: Query<(Entity, &ExtractedCamera, &ExtractedView)>,
+) {
+    tracing::info!("prepare prepass target");
+
+    for (entity, camera, view) in &cameras {
+        if let Some(size) = camera.physical_target_size {
+            let extent = Extent3d {
+                width: size.x,
+                height: size.y,
+                depth_or_array_layers: 1,
+            };
+
+            let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT;
+
+            let mut create_texture = |texture_format| -> GpuImage {
+                let sampler = render_device.create_sampler(&SamplerDescriptor {
+                    label: Some("prepare prepass sampler"),
+                    ..Default::default()
+                });
+                let texture = texture_cache.get(
+                    &render_device,
+                    TextureDescriptor {
+                        label: Some("prepare prepass texture"),
+                        size: extent,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: TextureDimension::D2,
+                        format: texture_format,
+                        usage: texture_usage,
+                        view_formats: &[],
+                    },
+                );
+                GpuImage {
+                    texture: texture.texture,
+                    texture_view: texture.default_view,
+                    texture_format,
+                    sampler,
+                    size: extent,
+                    mip_level_count: 1,
+                }
+            };
+
+            let position = create_texture(POSITION_FORMAT);
+            let normal = create_texture(NORMAL_FORMAT);
+            let instance_material = create_texture(INSTANCE_MATERIAL_FORMAT);
+            let velocity_uv = create_texture(VELOCITY_UV_FORMAT);
+            let depth = create_texture(TextureFormat::Depth32Float);
+
+            tracing::info!("insert prepass target component");
+
+            commands.entity(entity).insert(PrepassTarget {
+                position,
+                normal,
+                instance_material,
+                velocity_uv,
+                depth,
+            });
+        }
+    }
+}
+
 pub struct PrepassPlugin;
 
 impl Plugin for PrepassPlugin {
@@ -719,6 +789,7 @@ impl Plugin for PrepassPlugin {
                 (
                     queue_prepass_meshes.in_set(RenderSystems::QueueMeshes),
                     prepare_prepass_bind_groups.in_set(RenderSystems::PrepareBindGroups),
+                    prepare_prepass_target.in_set(RenderSystems::ManageViews),
                     // prepare_prepass_bind_group_mesh.in_set(RenderSystems::PrepareBindGroups),
                 ),
             );
