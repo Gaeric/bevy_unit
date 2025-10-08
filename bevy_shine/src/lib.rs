@@ -61,7 +61,8 @@ pub mod graph {
 
     #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
     pub enum ShineRenderNode {
-        Prepass,
+        OneNode,
+        // Prepass,
         // LightPass,
         // OverlayPass,
     }
@@ -71,7 +72,7 @@ pub struct ShinePlugin;
 
 impl Plugin for ShinePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(PrepassPlugin);
+        // app.add_plugins(PrepassPlugin);
 
         embedded_asset!(app, "shaders/shader.wgsl");
         // embedded_asset!(app, "shaders/light.wgsl");
@@ -95,9 +96,9 @@ impl Plugin for ShinePlugin {
 
         render_app
             .add_render_sub_graph(graph::ShineRenderGraph)
-            .add_render_graph_node::<ViewNodeRunner<PrepassNode>>(
+            .add_render_graph_node::<ViewNodeRunner<ShineNode>>(
                 graph::ShineRenderGraph,
-                graph::ShineRenderNode::Prepass,
+                graph::ShineRenderNode::OneNode,
             );
 
         // render_app.add_render_graph_node::<ViewNodeRunner<LightPassNode>>(
@@ -112,7 +113,7 @@ impl Plugin for ShinePlugin {
         render_app.add_render_graph_edges(
             ShineRenderGraph,
             (
-                ShineRenderNode::Prepass,
+                ShineRenderNode::OneNode,
                 // ShineRenderNode::LightPass,
                 // ShineRenderNode::OverlayPass,
             ),
@@ -143,16 +144,23 @@ pub fn queue_shine_phase_item(
     mut shine_phases: ResMut<ViewBinnedRenderPhases<ShinePhase>>,
     shine_draw_functions: Res<DrawFunctions<ShinePhase>>,
     mut specialized_render_pipelines: ResMut<SpecializedRenderPipelines<ShinePipeline>>,
-    views: Query<(&ExtractedView, &RenderVisibleEntities, &Msaa)>,
+    // views: Query<(&ExtractedView, &RenderVisibleEntities, &Msaa)>,
+    views: Query<(&ExtractedView, &RenderVisibleEntities)>,
     mut next_tick: Local<Tick>,
 ) {
+
+    info!("queue shine phase item");
+
     let draw_shine_function = shine_draw_functions.read().id::<DrawShineCustom>();
 
     // Render phases are pre-view, so we nned to iterate over all views so that
     // the entity appears in them. (In this example, we have only one view, but
     // it's good practice to loop over all views anyway.)
-    for (view, view_visible_entities, msaa) in views.iter() {
+    // for (view, view_visible_entities, msaa) in views.iter() {
+    for (view, view_visible_entities) in views.iter() {
+        info!("view is {:?}", view.retained_view_entity);
         let Some(shine_phases) = shine_phases.get_mut(&view.retained_view_entity) else {
+            info!("view {:?} skip ", view.retained_view_entity);
             continue;
         };
 
@@ -162,7 +170,7 @@ pub fn queue_shine_phase_item(
             // simplicity's sake we simply hard-code the view's characteristics,
             // with the exception of number of MSAA samples.
             let pipeline_id =
-                specialized_render_pipelines.specialize(&pipeline_cache, &shine_pipeline, *msaa);
+                specialized_render_pipelines.specialize(&pipeline_cache, &shine_pipeline, Msaa::Off);
 
             // Bump the change tick in order to force Bevy to rebuild the bin
             let this_tick = next_tick.get() + 1;
@@ -181,6 +189,7 @@ pub fn queue_shine_phase_item(
             // The asset ID is arbitrary; we simply use [`AssetId::invalid`,
             // but you can use anything you lik. Note that the asset ID need
             // not be the ID of a [`Mesh`]
+            info!("shine_phase queue item");
             shine_phases.add(
                 batch_set_key,
                 ShineBinKey {
@@ -200,23 +209,29 @@ pub fn queue_shine_phase_item(
 /// [0.16] refer extract_core_3d_camera_phases
 pub fn extract_shine_phases(
     mut shine_phases: ResMut<ViewBinnedRenderPhases<ShinePhase>>,
-    cameras_3d: Extract<Query<(RenderEntity, &Camera, Has<NoIndirectDrawing>), With<Camera3d>>>,
+    // cameras_3d: Extract<Query<(RenderEntity, &Camera, Has<NoIndirectDrawing>), With<Camera3d>>>,
+    cameras_3d: Extract<Query<(RenderEntity, &Camera), With<Camera3d>>>,
     gpu_preprocessing_support: Res<GpuPreprocessingSupport>,
 ) {
-    for (entity, camera, no_indirect_drawing) in &cameras_3d {
+    // for (entity, camera, no_indirect_drawing) in &cameras_3d {
+    for (entity, camera) in &cameras_3d {
+        info!("extract main_entity {:?}", entity);
         if !camera.is_active {
             continue;
         }
+
         // If GPU culling is in use, use it (and indirect mode); otherwise, just
         // preprocess the meshes.
-        let gpu_preprocessing_mode = gpu_preprocessing_support.min(if !no_indirect_drawing {
-            GpuPreprocessingMode::Culling
-        } else {
-            GpuPreprocessingMode::PreprocessingOnly
-        });
+        // let gpu_preprocessing_mode = gpu_preprocessing_support.min(if !no_indirect_drawing {
+        //     GpuPreprocessingMode::Culling
+        // } else {
+        //     GpuPreprocessingMode::PreprocessingOnly
+        // });
+        let gpu_preprocessing_mode = GpuPreprocessingMode::Culling;
 
         let retained_view_entity = RetainedViewEntity::new(entity.into(), None, 0);
 
+        info!("extrace shine phases for entity: {:?}", retained_view_entity);
         shine_phases.prepare_for_new_frame(retained_view_entity, gpu_preprocessing_mode);
     }
 }
@@ -531,7 +546,7 @@ pub struct ShineNode;
 
 impl ViewNode for ShineNode {
     type ViewQuery = (
-        Entity,
+        // Entity,
         &'static ExtractedCamera,
         &'static ExtractedView,
         &'static ViewTarget,
@@ -543,20 +558,20 @@ impl ViewNode for ShineNode {
         graph: &mut bevy::render::render_graph::RenderGraphContext,
         render_context: &mut bevy::render::renderer::RenderContext<'w>,
         // (view, camera, view_target, _shine_uniform): bevy::ecs::query::QueryItem<
-        (_view, camera, extracted_view, view_target): QueryItem<'w, '_, Self::ViewQuery>,
+        (camera, view, view_target): QueryItem<'w, '_, Self::ViewQuery>,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
-        let view_entity = graph.view_entity();
+        info!("shine node run");
 
-        trace!("shine node run");
+        let view_entity = graph.view_entity();
 
         let Some(shine_phases) = world.get_resource::<ViewBinnedRenderPhases<ShinePhase>>() else {
             panic!("shine render phases not exists");
         };
 
-        let Some(shine_phase) = shine_phases.get(&extracted_view.retained_view_entity) else {
-            return Ok(());
-            // panic!("shine phase not exists");
+        let Some(shine_phase) = shine_phases.get(&view.retained_view_entity) else {
+            // return Ok(());
+            panic!("shine phase not exists");
         };
 
         let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
@@ -584,6 +599,8 @@ impl ViewNode for ShineNode {
         } else {
             panic!("shine phase is empty");
         }
+
+        info!("shine render done");
 
         Ok(())
     }

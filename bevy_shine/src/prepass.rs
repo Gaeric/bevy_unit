@@ -348,7 +348,8 @@ impl ViewNode for PrepassNode {
 
         // get the phase for the current view running our node
         let Some(prepass_phase) = prepass_phases.get(&view.retained_view_entity) else {
-            return Ok(());
+            // return Ok(());
+            panic!("prepass phase not exists");
         };
 
         let ops = Operations {
