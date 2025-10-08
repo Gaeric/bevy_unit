@@ -16,6 +16,7 @@ use bevy::{
         },
         world::{FromWorld, World},
     },
+    image::BevyDefault,
     log::tracing,
     math::FloatOrd,
     mesh::{Mesh, Mesh3d, MeshVertexBufferLayoutRef},
@@ -279,7 +280,7 @@ impl SpecializedMeshPipeline for PrepassPipeline {
                 targets: vec![
                     Some(ColorTargetState {
                         // format: POSITION_FORMAT,
-                        format: OUTPUT_FORMAT,
+                        format: TextureFormat::bevy_default(),
                         blend: None,
                         write_mask: ColorWrites::ALL,
                     }),
@@ -749,7 +750,8 @@ fn prepare_prepass_target(
                 }
             };
 
-            let position = create_texture(POSITION_FORMAT);
+            // let position = create_texture(POSITION_FORMAT);
+            let position = create_texture(TextureFormat::bevy_default());
             let normal = create_texture(NORMAL_FORMAT);
             let instance_material = create_texture(INSTANCE_MATERIAL_FORMAT);
             let velocity_uv = create_texture(VELOCITY_UV_FORMAT);
