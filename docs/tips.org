@@ -170,3 +170,12 @@
     #+end_example
 
     在使用crate时，如果某个crate仅指定了使用bevy的子crate，这个子crate需要单独设置patch
+*** 将app的log写入文件
+    https://github.com/bevyengine/bevy/issues/5233
+*** 指定某个crate和module的打印级别
+    使用如下语句：
+    RUST_LOG="crate::module=debug" cargo run
+
+    例：
+    RUST_LOG="bevy_shine=debug" cargo run --example minimal
+
