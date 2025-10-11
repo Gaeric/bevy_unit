@@ -31,7 +31,7 @@ use bevy::{
             StoreOp, TextureFormat, VertexState, binding_types::uniform_buffer,
         },
         renderer::{RenderDevice, RenderQueue},
-        sync_world::{MainEntity, RenderEntity},
+        sync_world::MainEntity,
         view::{
             ExtractedView, NoIndirectDrawing, RenderVisibleEntities, RetainedViewEntity, ViewTarget,
         },
@@ -148,8 +148,7 @@ pub fn queue_shine_phase_item(
     views: Query<(&ExtractedView, &RenderVisibleEntities)>,
     mut next_tick: Local<Tick>,
 ) {
-
-    info!("queue shine phase item");
+    debug!("queue shine phase item");
 
     let draw_shine_function = shine_draw_functions.read().id::<DrawShineCustom>();
 
@@ -158,19 +157,27 @@ pub fn queue_shine_phase_item(
     // it's good practice to loop over all views anyway.)
     // for (view, view_visible_entities, msaa) in views.iter() {
     for (view, view_visible_entities) in views.iter() {
-        info!("view is {:?}", view.retained_view_entity);
-        let Some(shine_phases) = shine_phases.get_mut(&view.retained_view_entity) else {
-            info!("view {:?} skip ", view.retained_view_entity);
+        debug!("view is {:?}", view.retained_view_entity);
+        let Some(shine_phase) = shine_phases.get_mut(&view.retained_view_entity) else {
+            debug!("view {:?} skip ", view.retained_view_entity);
             continue;
         };
 
-        for &entity in view_visible_entities.iter::<With<Mesh3d>>() {
+        debug!("view_visiable_entity is {:?}", view_visible_entities);
+
+        // for &entity in view_visible_entities.iter::<With<Mesh3d>>() {
+        for &entity in view_visible_entities.iter::<Mesh3d>() {
+            debug!("entity add shine phase: {:?}", entity);
+
             // Ordinarily, the [`SpecializedRenderPipeline::Key`] would contain
             // some per-view settings, such as whether the view is HDR, but for
             // simplicity's sake we simply hard-code the view's characteristics,
             // with the exception of number of MSAA samples.
-            let pipeline_id =
-                specialized_render_pipelines.specialize(&pipeline_cache, &shine_pipeline, Msaa::Off);
+            let pipeline_id = specialized_render_pipelines.specialize(
+                &pipeline_cache,
+                &shine_pipeline,
+                Msaa::Off,
+            );
 
             // Bump the change tick in order to force Bevy to rebuild the bin
             let this_tick = next_tick.get() + 1;
@@ -189,15 +196,15 @@ pub fn queue_shine_phase_item(
             // The asset ID is arbitrary; we simply use [`AssetId::invalid`,
             // but you can use anything you lik. Note that the asset ID need
             // not be the ID of a [`Mesh`]
-            info!("shine_phase queue item");
-            shine_phases.add(
+            debug!("add shine_phase for visible entity");
+            shine_phase.add(
                 batch_set_key,
                 ShineBinKey {
                     asset_id: AssetId::<Mesh>::invalid().untyped(),
                 },
                 entity,
                 InputUniformIndex::default(),
-                BinnedRenderPhaseType::NonMesh,
+                BinnedRenderPhaseType::MultidrawableMesh,
                 *next_tick,
             )
         }
@@ -210,12 +217,12 @@ pub fn queue_shine_phase_item(
 pub fn extract_shine_phases(
     mut shine_phases: ResMut<ViewBinnedRenderPhases<ShinePhase>>,
     // cameras_3d: Extract<Query<(RenderEntity, &Camera, Has<NoIndirectDrawing>), With<Camera3d>>>,
-    cameras_3d: Extract<Query<(RenderEntity, &Camera), With<Camera3d>>>,
+    cameras_3d: Extract<Query<(Entity, &Camera), With<Camera3d>>>,
     gpu_preprocessing_support: Res<GpuPreprocessingSupport>,
 ) {
     // for (entity, camera, no_indirect_drawing) in &cameras_3d {
     for (entity, camera) in &cameras_3d {
-        info!("extract main_entity {:?}", entity);
+        debug!("extract main_entity {:?}", entity);
         if !camera.is_active {
             continue;
         }
@@ -231,8 +238,18 @@ pub fn extract_shine_phases(
 
         let retained_view_entity = RetainedViewEntity::new(entity.into(), None, 0);
 
-        info!("extrace shine phases for entity: {:?}", retained_view_entity);
+        debug!(
+            "extract shine phases for entity: {:?}",
+            retained_view_entity
+        );
         shine_phases.prepare_for_new_frame(retained_view_entity, gpu_preprocessing_mode);
+
+        let value = shine_phases.get(&retained_view_entity);
+        debug!(
+            "shine phase entity: {:?} value: {:?}",
+            retained_view_entity,
+            value.is_none()
+        );
     }
 }
 
@@ -526,12 +543,12 @@ impl<P: PhaseItem> RenderCommand<P> for DrawShine {
 
         // get mesh info, but how to set the
         if let Some(mesh_instance) = mesh_instances.render_mesh_queue_data(item.main_entity()) {
-            info!(
+            debug!(
                 "get mesh instance success: {:?}",
                 mesh_instance.mesh_asset_id
             );
             if let Some(mesh) = meshes.get(mesh_instance.mesh_asset_id) {
-                info!("get mesh success: {:?}", mesh);
+                debug!("get mesh success: {:?}", mesh);
             }
         }
 
@@ -561,7 +578,7 @@ impl ViewNode for ShineNode {
         (camera, view, view_target): QueryItem<'w, '_, Self::ViewQuery>,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
-        info!("shine node run");
+        debug!("shine node debug run");
 
         let view_entity = graph.view_entity();
 
@@ -570,8 +587,9 @@ impl ViewNode for ShineNode {
         };
 
         let Some(shine_phase) = shine_phases.get(&view.retained_view_entity) else {
-            // return Ok(());
-            panic!("shine phase not exists");
+            // panic!("shine phase not exists");
+            warn!("shine phase not exists");
+            return Ok(());
         };
 
         let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
@@ -597,10 +615,11 @@ impl ViewNode for ShineNode {
                 error!("Error encountered while rendering the shine phase {err:?}");
             }
         } else {
-            panic!("shine phase is empty");
+            // panic!("shine phase is empty");
+            debug!("shine phase is empty");
         }
 
-        info!("shine render done");
+        debug!("shine render done");
 
         Ok(())
     }
