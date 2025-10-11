@@ -75,8 +75,6 @@ impl Plugin for ShinePlugin {
         // app.add_plugins(PrepassPlugin);
 
         embedded_asset!(app, "shaders/shader.wgsl");
-        // embedded_asset!(app, "shaders/light.wgsl");
-        // embedded_asset!(app, "shaders/overlay.wgsl");
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
@@ -204,7 +202,8 @@ pub fn queue_shine_phase_item(
                 },
                 entity,
                 InputUniformIndex::default(),
-                BinnedRenderPhaseType::MultidrawableMesh,
+                BinnedRenderPhaseType::NonMesh,
+                // BinnedRenderPhaseType::MultidrawableMesh,
                 *next_tick,
             )
         }
@@ -216,12 +215,10 @@ pub fn queue_shine_phase_item(
 /// [0.16] refer extract_core_3d_camera_phases
 pub fn extract_shine_phases(
     mut shine_phases: ResMut<ViewBinnedRenderPhases<ShinePhase>>,
-    // cameras_3d: Extract<Query<(RenderEntity, &Camera, Has<NoIndirectDrawing>), With<Camera3d>>>,
-    cameras_3d: Extract<Query<(Entity, &Camera), With<Camera3d>>>,
+    cameras_3d: Extract<Query<(Entity, &Camera, Has<NoIndirectDrawing>), With<Camera3d>>>,
     gpu_preprocessing_support: Res<GpuPreprocessingSupport>,
 ) {
-    // for (entity, camera, no_indirect_drawing) in &cameras_3d {
-    for (entity, camera) in &cameras_3d {
+    for (entity, camera, no_indirect_drawing) in &cameras_3d {
         debug!("extract main_entity {:?}", entity);
         if !camera.is_active {
             continue;
@@ -229,12 +226,11 @@ pub fn extract_shine_phases(
 
         // If GPU culling is in use, use it (and indirect mode); otherwise, just
         // preprocess the meshes.
-        // let gpu_preprocessing_mode = gpu_preprocessing_support.min(if !no_indirect_drawing {
-        //     GpuPreprocessingMode::Culling
-        // } else {
-        //     GpuPreprocessingMode::PreprocessingOnly
-        // });
-        let gpu_preprocessing_mode = GpuPreprocessingMode::Culling;
+        let gpu_preprocessing_mode = gpu_preprocessing_support.min(if !no_indirect_drawing {
+            GpuPreprocessingMode::Culling
+        } else {
+            GpuPreprocessingMode::PreprocessingOnly
+        });
 
         let retained_view_entity = RetainedViewEntity::new(entity.into(), None, 0);
 
@@ -243,13 +239,6 @@ pub fn extract_shine_phases(
             retained_view_entity
         );
         shine_phases.prepare_for_new_frame(retained_view_entity, gpu_preprocessing_mode);
-
-        let value = shine_phases.get(&retained_view_entity);
-        debug!(
-            "shine phase entity: {:?} value: {:?}",
-            retained_view_entity,
-            value.is_none()
-        );
     }
 }
 
@@ -313,7 +302,6 @@ impl FromWorld for ShineUniformBuffers {
 pub struct ShinePipeline {
     shader: Handle<Shader>,
     bind_group_layout: BindGroupLayout,
-    // pipeline_id: CachedRenderPipelineId,
 }
 
 #[derive(Resource)]
@@ -362,7 +350,6 @@ impl SpecializedRenderPipeline for ShinePipeline {
 
     fn specialize(&self, _key: Self::Key) -> RenderPipelineDescriptor {
         let layout = vec![self.bind_group_layout.clone()];
-        // let layout = vec![];
 
         RenderPipelineDescriptor {
             label: Some("shine render pipeline".into()),
@@ -514,7 +501,6 @@ type DrawShineCustom = (SetItemPipeline, DrawShine);
 struct DrawShine;
 
 impl<P: PhaseItem> RenderCommand<P> for DrawShine {
-    // type Param = SRes<ShineBindGroup>;
     type Param = (
         SRes<ShineBindGroup>,
         SRes<RenderAssets<RenderMesh>>,
@@ -563,7 +549,6 @@ pub struct ShineNode;
 
 impl ViewNode for ShineNode {
     type ViewQuery = (
-        // Entity,
         &'static ExtractedCamera,
         &'static ExtractedView,
         &'static ViewTarget,
@@ -574,7 +559,6 @@ impl ViewNode for ShineNode {
         &self,
         graph: &mut bevy::render::render_graph::RenderGraphContext,
         render_context: &mut bevy::render::renderer::RenderContext<'w>,
-        // (view, camera, view_target, _shine_uniform): bevy::ecs::query::QueryItem<
         (camera, view, view_target): QueryItem<'w, '_, Self::ViewQuery>,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
@@ -587,9 +571,7 @@ impl ViewNode for ShineNode {
         };
 
         let Some(shine_phase) = shine_phases.get(&view.retained_view_entity) else {
-            // panic!("shine phase not exists");
-            warn!("shine phase not exists");
-            return Ok(());
+            panic!("shine phase not exists");
         };
 
         let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
@@ -611,12 +593,12 @@ impl ViewNode for ShineNode {
         }
 
         if !shine_phase.is_empty() {
+            debug!("shine phase render now");
             if let Err(err) = shine_phase.render(&mut render_pass, world, view_entity) {
                 error!("Error encountered while rendering the shine phase {err:?}");
             }
         } else {
-            // panic!("shine phase is empty");
-            debug!("shine phase is empty");
+            panic!("shine phase is empty");
         }
 
         debug!("shine render done");
