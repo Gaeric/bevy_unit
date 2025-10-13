@@ -4,27 +4,22 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = "0.17.0-rc.1"
+bevy = "0.17.2"
 
 # physic engine
-avian3d = "0.3.1"
+avian3d = "0.4.0-dev"
 
 # character system
-bevy-tnua = "0.24.0"
-bevy-tnua-avian3d = "0.5.0"
+bevy-tnua = "0.25.0-rc"
+bevy-tnua-avian3d = "0.6.0-rc"
 
 # control system
-bevy_enhanced_input = "0.12.0"
+bevy_enhanced_input = "0.19.0"
 
 #
 serde = { version = "1", features = ["derive"] }
 
-# frame limit
-bevy_framepace = "0.19.1"
-
 # develop ui toolkit
-bevy_egui = { version = "0.34.1", optional = true }
-bevy-inspector-egui = { version = "0.31.0", optional = true }
 iyes_perf_ui = "0.5.0"
 
 # bone attachments
@@ -33,3 +28,13 @@ bone_attachments = { path = "../units/bone_attachments" }
 [dependencies.bevy_dolly]
 git = "https://github.com/BlackPhlox/bevy_dolly/"
 branch = "bevy_0.16"
+
+# frame limit
+[dependencies.bevy_framepace]
+git = "https://github.com/aevyrie/bevy_framepace"
+branch = "main"
+
+[dependencies.bevy-inspector-egui]
+git = "https://github.com/dsgallups/bevy-inspector-egui"
+branch = "dsgallups/0.17"
+optional = true
