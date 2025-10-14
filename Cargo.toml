@@ -13,7 +13,7 @@ members = [
 ]
 
 [dependencies]
-avian3d = "0.4.0-dev"
+avian3d = "0.4.0"
 bevy = { version = "0.17.2", features = ["wayland", "dynamic_linking"] }
 # bevy_shine = { path = "bevy_shine" }
 # modular_character = { path = "units/modular_character" }
@@ -44,9 +44,9 @@ bevy_animation = { path = "../bevy_engines/bevy_0.17/crates/bevy_animation" }
 bevy_scene = { path = "../bevy_engines/bevy_0.17/crates/bevy_scene" }
 bevy_solari = { path = "../bevy_engines/bevy_0.17/crates/bevy_solari" }
 
-avian3d = { path = "../avian/crates/avian3d/" }
-bevy-tnua = { path = "../bevy-tnua/" }
-bevy-tnua-avian3d = { path = "../bevy-tnua/avian3d/" }
+# avian3d = { path = "../avian/crates/avian3d/" }
+# bevy-tnua = { path = "../bevy-tnua/" }
+# bevy-tnua-avian3d = { path = "../bevy-tnua/avian3d/" }
 
 [features]
 default = ["dev"]
