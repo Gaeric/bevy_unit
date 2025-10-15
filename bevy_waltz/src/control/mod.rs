@@ -1,6 +1,6 @@
 use bevy::{
     prelude::*,
-    window::{CursorGrabMode, PrimaryWindow},
+    window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
 use bevy_enhanced_input::prelude::*;
 
@@ -25,26 +25,24 @@ pub(super) fn grab_ungrab_mouse(
     // mut egui_context: EguiContexts,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut primary_window_query: Query<&mut Window, With<PrimaryWindow>>,
+    primary_window: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
-    let Ok(mut window) = primary_window_query.single_mut() else {
-        return;
-    };
+    let mut cursor_options = primary_window.into_inner();
 
-    if window.cursor_options.visible {
+    if cursor_options.visible {
         if mouse_buttons.just_pressed(MouseButton::Left) {
             debug!("cursor lock");
             // if egui_context.ctx_mut().is_pointer_over_area() {
             //     return;
             // }
-            window.cursor_options.grab_mode = CursorGrabMode::Locked;
-            window.cursor_options.visible = false;
+            cursor_options.grab_mode = CursorGrabMode::Locked;
+            cursor_options.visible = false;
         }
     } else if keyboard.just_released(KeyCode::Escape)
         || mouse_buttons.just_pressed(MouseButton::Left)
     {
         debug!("cursor unlock");
-        window.cursor_options.grab_mode = CursorGrabMode::None;
-        window.cursor_options.visible = true;
+        cursor_options.grab_mode = CursorGrabMode::None;
+        cursor_options.visible = true;
     }
 }

@@ -37,7 +37,7 @@ fn character_jump(
 
     *is_jumping = true;
 
-    if sound_cooldown.finished() {
+    if sound_cooldown.is_finished() {
         // todo: play sound
         commands.spawn((
             AudioPlayer(character_assets.jump_sound.clone()),

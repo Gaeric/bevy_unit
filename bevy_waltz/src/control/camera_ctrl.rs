@@ -1,3 +1,4 @@
+use bevy::window::{CursorOptions, PrimaryWindow};
 use bevy::{prelude::*, window::CursorGrabMode};
 use bevy_enhanced_input::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -30,55 +31,54 @@ pub(crate) enum UiAction {
     TogglePause,
 }
 
-#[derive(InputContext)]
+#[derive(Component, Debug)]
 struct CameraCtrl;
 
 #[derive(Debug, InputAction)]
-#[input_action(output = Vec2)]
+#[action_output(Vec2)]
 struct CameraOrbit;
 
 #[derive(Debug, InputAction)]
-#[input_action(output = Vec2)]
+#[action_output(Vec2)]
 struct CameraZoom;
 
 pub fn plugin(app: &mut App) {
     app.add_input_context::<CameraCtrl>()
         .add_observer(setup_camera_ctrl_bind)
-        .add_observer(bind_camera_ctrl_action)
         .add_observer(rotate_camera_yas_and_pitch)
         .add_observer(zoom_camera);
 }
 
-fn setup_camera_ctrl_bind(trigger: Trigger<OnAdd, WaltzCamera>, mut commands: Commands) {
+fn setup_camera_ctrl_bind(trigger: On<Add, WaltzCamera>, mut commands: Commands) {
     info!("setup camera bind");
-    commands
-        .entity(trigger.target())
-        .insert(Actions::<CameraCtrl>::default());
-}
+    commands.entity(trigger.entity).insert((
+        CameraCtrl,
+        actions!(CameraCtrl[
+            (Action::<CameraOrbit>::new(),
+                Bindings::spawn((Spawn((Binding::mouse_motion(), Scale::splat(0.1), Negate::all())), Axial::right_stick().with((Scale::splat(2.0), Negate::x())))),
+            ),
+            (
+            Action::<CameraZoom>::new(),
+                Bindings::spawn((
+                    // In Bevy, vertical scrolling maps to the Y axis,
+                    // so we apply `SwizzleAxis` to map it to our 1-dimensional action.
+                    Spawn((Binding::mouse_wheel(), SwizzleAxis::YXZ)),
+                    Bidirectional::up_down_dpad(),
+                )),
 
-fn bind_camera_ctrl_action(
-    trigger: Trigger<Binding<CameraCtrl>>,
-    mut cameras: Query<&mut Actions<CameraCtrl>>,
-) {
-    let mut actions = cameras.get_mut(trigger.target()).unwrap();
-
-    actions.bind::<CameraOrbit>().to((
-        Input::mouse_motion().with_modifiers((Scale::splat(0.1), Negate::all())),
-        Axial::right_stick().with_modifiers_each((Scale::splat(2.0), Negate::x())),
-    ));
-
-    actions.bind::<CameraZoom>().to((
-        Input::mouse_wheel().with_modifiers((Scale::splat(0.1), Negate::all())),
-        Axial::left_stick().with_modifiers_each((Scale::splat(2.0), Negate::x())),
+            )
+        ]),
     ));
 }
 
 fn rotate_camera_yas_and_pitch(
-    trigger: Trigger<Fired<CameraOrbit>>,
-    window: Single<&Window>,
+    trigger: On<Fire<CameraOrbit>>,
+    primary_window: Single<&CursorOptions, With<PrimaryWindow>>,
     mut camera: Single<&mut WaltzCamera>,
 ) {
-    if window.cursor_options.grab_mode == CursorGrabMode::None {
+    let cursor_options = primary_window.into_inner();
+
+    if cursor_options.grab_mode == CursorGrabMode::None {
         return;
     }
 
@@ -88,11 +88,12 @@ fn rotate_camera_yas_and_pitch(
 }
 
 fn zoom_camera(
-    trigger: Trigger<Fired<CameraZoom>>,
-    window: Single<&Window>,
+    trigger: On<Fire<CameraZoom>>,
+    primary_window: Single<&mut CursorOptions, With<PrimaryWindow>>,
     mut camera: Single<&mut WaltzCamera>,
 ) {
-    if window.cursor_options.grab_mode == CursorGrabMode::None {
+    let cursor_options = primary_window.into_inner();
+    if cursor_options.grab_mode == CursorGrabMode::None {
         return;
     }
 

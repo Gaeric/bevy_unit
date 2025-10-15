@@ -6,11 +6,7 @@ use bevy_dolly::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    camera::{
-        config::CameraConfig,
-        kind::{update_drivers, update_kind},
-        rig::update_rig,
-    },
+    camera::{config::CameraConfig, kind::update_drivers, rig::update_rig},
     character::WaltzPlayer,
 };
 

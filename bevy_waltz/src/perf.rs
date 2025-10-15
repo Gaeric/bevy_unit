@@ -17,8 +17,10 @@ use iyes_perf_ui::{
 
 pub fn plugin(app: &mut App) {
     app.add_plugins((
+        // Adds frame time, FPS and frame count diagnostics.
         FrameTimeDiagnosticsPlugin::default(),
-        EntityCountDiagnosticsPlugin,
+        // Adds an entity count diagnostic.
+        EntityCountDiagnosticsPlugin::default(),
         SystemInformationDiagnosticsPlugin,
         RenderDiagnosticsPlugin,
         PerfUiPlugin,

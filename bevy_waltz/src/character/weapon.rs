@@ -14,8 +14,9 @@ pub enum WeaponKind {
     Pistol,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Event, Reflect)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, EntityEvent, Reflect)]
 pub struct EquipWeapon {
+    entity: Entity,
     kind: WeaponKind,
 }
 
@@ -25,13 +26,13 @@ pub struct Weapon {
 }
 
 impl EquipWeapon {
-    pub fn new(kind: WeaponKind) -> Self {
-        Self { kind }
+    pub fn new(entity: Entity, kind: WeaponKind) -> Self {
+        Self { entity, kind }
     }
 }
 
 pub fn equip_weapon(
-    trigger: Trigger<EquipWeapon>,
+    equip_weapon: On<EquipWeapon>,
     mut commands: Commands,
     equiped_weapon: Query<(&Weapon, Entity), With<AttachedTo>>,
     asset_server: Res<AssetServer>,
@@ -39,17 +40,19 @@ pub fn equip_weapon(
     let attachment_scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(PISTOL_PATH));
 
     for (weapon, entity) in equiped_weapon {
-        if weapon.kind == trigger.event().kind {
+        if weapon.kind == equip_weapon.event().kind {
             info!("already equip weapon {:?}", weapon.kind);
             return;
         }
         commands.entity(entity).despawn();
     }
 
-    commands.entity(trigger.target()).attach_scene_with_extras(
-        attachment_scene,
-        Weapon {
-            kind: WeaponKind::Pistol,
-        },
-    );
+    commands
+        .entity(equip_weapon.entity)
+        .attach_scene_with_extras(
+            attachment_scene,
+            Weapon {
+                kind: WeaponKind::Pistol,
+            },
+        );
 }

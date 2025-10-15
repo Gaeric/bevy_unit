@@ -62,9 +62,9 @@ impl Plugin for LevelSwitchPlugin {
         };
 
         app.insert_resource(SwitchableLevels { current: 0, levels });
-        app.add_event::<SwitchToLevel>();
+        app.add_message::<SwitchToLevel>();
         app.add_systems(Update, (handle_level_switch, handle_player_position));
-        app.add_systems(Startup, move |mut writer: EventWriter<SwitchToLevel>| {
+        app.add_systems(Startup, move |mut writer: MessageWriter<SwitchToLevel>| {
             writer.write(SwitchToLevel(level_index));
         });
     }
@@ -82,7 +82,7 @@ impl SwitchableLevel {
     }
 }
 
-#[derive(Event)]
+#[derive(Message)]
 pub struct SwitchToLevel(pub usize);
 
 #[derive(Resource)]
@@ -121,7 +121,7 @@ impl From<Vec3> for PositionPlayer {
 
 // Observer maybe suitable for this function
 fn handle_level_switch(
-    mut reader: EventReader<SwitchToLevel>,
+    mut reader: MessageReader<SwitchToLevel>,
     mut switchable_levels: ResMut<SwitchableLevels>,
     query: Query<Entity, Or<(With<LevelObject>, With<PositionPlayer>)>>,
     mut commands: Commands,
@@ -167,7 +167,7 @@ fn handle_player_position(
         }
     }
 
-    if position_player.ttl.tick(time.delta()).finished() {
+    if position_player.ttl.tick(time.delta()).is_finished() {
         commands.entity(position_entity).despawn();
     }
 }

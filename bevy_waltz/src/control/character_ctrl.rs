@@ -29,7 +29,7 @@ pub struct ObstacleQueryHelper {
 pub fn plugin(app: &mut App) {
     app.add_input_context::<CharacterCtrl>();
     app.add_observer(setup_character_ctrl_bind);
-    app.add_observer(bind_character_ctrl_action);
+    // app.add_observer(bind_character_ctrl_action);
     // app.add_observer(apply_movement_straight);
     app.add_observer(setup_character_accumulated);
     app.add_observer(accumulate_movement);
@@ -40,7 +40,7 @@ pub fn plugin(app: &mut App) {
     app.add_systems(
         FixedUpdate,
         // apply_character_control.in_set(TnuaUserControlsSystemSet),
-        apply_tnua_ctrl.in_set(TnuaUserControlsSystemSet),
+        apply_tnua_ctrl.in_set(TnuaUserControlsSystems),
     );
 
     app.add_systems(
@@ -49,61 +49,66 @@ pub fn plugin(app: &mut App) {
     );
 }
 
-#[derive(InputContext)]
+#[derive(Component, Debug, Default)]
 struct CharacterCtrl;
 
 #[derive(Debug, InputAction)]
-#[input_action(output = Vec2)]
+#[action_output(Vec2)]
 struct Move;
 
 #[derive(Debug, InputAction)]
-#[input_action(output = bool)]
+#[action_output(bool)]
 struct Jump;
 
 #[derive(Debug, InputAction)]
-#[input_action(output = bool)]
+#[action_output(bool)]
 struct SetWeapon;
 
-fn setup_character_ctrl_bind(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Commands) {
+fn setup_character_ctrl_bind(add: On<Add, WaltzPlayer>, mut commands: Commands) {
     info!("setup player bind");
-    commands
-        .entity(trigger.target())
-        .insert(Actions::<CharacterCtrl>::default());
+    commands.entity(add.entity).insert((
+        CharacterCtrl,
+        actions!(CharacterCtrl[
+            (Action::<Move>::new(), Bindings::spawn((Cardinal::wasd_keys(), Axial::left_stick()))),
+            (Action::<Jump>::new(), bindings![KeyCode::Space, GamepadButton::West]),
+            (Action::<SetWeapon>::new(), bindings![KeyCode::Digit1, GamepadButton::North])
+        ]),
+    ));
 }
 
-fn setup_character_accumulated(trigger: Trigger<OnAdd, WaltzPlayer>, mut commands: Commands) {
+fn setup_character_accumulated(trigger: On<Add, WaltzPlayer>, mut commands: Commands) {
     info!("setup player accumulated");
     commands
-        .entity(trigger.target())
+        .entity(trigger.entity)
         .insert(AccumulatedInput::default());
 }
 
-fn bind_character_ctrl_action(
-    trigger: Trigger<Binding<CharacterCtrl>>,
-    mut players: Query<&mut Actions<CharacterCtrl>>,
-) {
-    let mut actions = players.get_mut(trigger.target()).unwrap();
+// fn bind_character_ctrl_action(
+//     trigger: Trigger<Binding<CharacterCtrl>>,
+//     mut players: Query<&mut Actions<CharacterCtrl>>,
+// ) {
+//     let mut actions = players.get_mut(trigger.target()).unwrap();
 
-    actions
-        .bind::<Move>()
-        .to((Cardinal::wasd_keys(), Axial::left_stick()))
-        .with_modifiers((
-            DeadZone::default(),
-            SmoothNudge::default(),
-            Scale::splat(0.3),
-        ));
+//     actions
+//         .bind::<Move>()
+//         .to((Cardinal::wasd_keys(), Axial::left_stick()))
+//         .with_modifiers((
+//             DeadZone::default(),
+//             SmoothNudge::default(),
+//             Scale::splat(0.3),
+//         ));
 
-    actions
-        .bind::<Jump>()
-        .to((KeyCode::Space, GamepadButton::West));
+//     actions
+//         .bind::<Jump>()
+//         .to((KeyCode::Space, GamepadButton::West));
 
-    actions
-        .bind::<SetWeapon>()
-        .to((KeyCode::Digit1, GamepadButton::North));
-}
+//     actions
+//         .bind::<SetWeapon>()
+//         .to((KeyCode::Digit1, GamepadButton::North));
+// }
 
 fn accumulate_movement(
-    trigger: Trigger<Fired<Move>>,
+    trigger: On<Fire<Move>>,
     mut accumulated_inputs: Single<&mut AccumulatedInput>,
 ) {
     // w: forward to -z
@@ -180,18 +185,18 @@ fn apply_tnua_ctrl(
 
 /// handle jump action for walk/climp/walljump
 fn apply_jump(
-    trigger: Trigger<Fired<Jump>>,
+    jump: On<Fire<Jump>>,
     mut query: Query<(
         &CharacterMotionConfig,
         &TnuaSimpleAirActionsCounter,
         &mut TnuaController,
     )>,
 ) {
-    let (config, air_actions_counter, mut controller) = query.get_mut(trigger.target()).unwrap();
+    let (config, air_actions_counter, mut controller) = query.get_mut(jump.context).unwrap();
 
     // todo: climp/walljump
     let current_action_name = controller.action_name();
-    let jump_counter = air_actions_counter.air_count_for(TnuaBuiltinJump::NAME);
+    let _jump_counter = air_actions_counter.air_count_for(TnuaBuiltinJump::NAME);
 
     controller.action(TnuaBuiltinJump {
         // Jumping, like crouching, is an action that we either feed or don't. However,
@@ -219,9 +224,9 @@ fn apply_jump(
 }
 
 fn set_weapon(
-    _trigger: Trigger<Started<SetWeapon>>,
+    _trigger: On<Start<SetWeapon>>,
     mut commands: Commands,
     player: Single<Entity, With<WaltzPlayer>>,
 ) {
-    commands.trigger_targets(EquipWeapon::new(WeaponKind::Pistol), player.into_inner());
+    commands.trigger(EquipWeapon::new(player.into_inner(), WeaponKind::Pistol));
 }

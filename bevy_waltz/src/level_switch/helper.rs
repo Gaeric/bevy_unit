@@ -19,12 +19,12 @@ pub struct LevelSetupHelperWithMaterial<'a, 'w, 's> {
 }
 
 impl<'w, 's> LevelSetupHelper<'w, 's> {
-    pub fn spawn_named(&mut self, name: impl ToString) -> EntityCommands {
+    pub fn spawn_named(&mut self, name: impl ToString) -> EntityCommands<'_> {
         self.commands
             .spawn((LevelObject, Name::new(name.to_string())))
     }
 
-    pub fn spawn_floor(&mut self, color: impl Into<Color>) -> EntityCommands {
+    pub fn spawn_floor(&mut self, color: impl Into<Color>) -> EntityCommands<'_> {
         let mesh = self
             .meshes
             .add(Plane3d::default().mesh().size(128.0, 128.0));
@@ -62,7 +62,7 @@ impl<'w, 's> LevelSetupHelper<'w, 's> {
         path: impl ToString,
         transform: Transform,
         size: Vector3,
-    ) -> EntityCommands {
+    ) -> EntityCommands<'_> {
         let scene = self.asset_server.load(path.to_string());
         let mut cmd = self.spawn_named(name);
 
@@ -81,7 +81,7 @@ impl LevelSetupHelperWithMaterial<'_, '_, '_> {
         name: impl ToString,
         transform: Transform,
         mesh: impl Into<Mesh>,
-    ) -> EntityCommands {
+    ) -> EntityCommands<'_> {
         let mesh = self.parent.meshes.add(mesh);
         let mut cmd = self.parent.spawn_named(name);
         cmd.insert((
@@ -97,7 +97,7 @@ impl LevelSetupHelperWithMaterial<'_, '_, '_> {
         name: impl ToString,
         transform: Transform,
         size: Vector3,
-    ) -> EntityCommands {
+    ) -> EntityCommands<'_> {
         let mut cmd =
             self.spawn_mesh_without_physics(name, transform, Cuboid::from_size(size.f32()));
 
@@ -111,7 +111,7 @@ impl LevelSetupHelperWithMaterial<'_, '_, '_> {
         name: impl ToString,
         transform: Transform,
         parts: &[(Vector3, Quaternion, Vector3)],
-    ) -> EntityCommands {
+    ) -> EntityCommands<'_> {
         let child_entity_ids = parts
             .iter()
             .map(|&(pos, rot, size)| {
@@ -153,7 +153,7 @@ impl LevelSetupHelperWithMaterial<'_, '_, '_> {
         transform: Transform,
         radius: Float,
         half_height: Float,
-    ) -> EntityCommands {
+    ) -> EntityCommands<'_> {
         let mut cmd = self.spawn_mesh_without_physics(
             name,
             transform,
@@ -176,7 +176,7 @@ impl LevelSetupHelperWithMaterial<'_, '_, '_> {
         name: impl ToString,
         transform: Transform,
         radius: Float,
-    ) -> EntityCommands {
+    ) -> EntityCommands<'_> {
         let mut cmd = self.spawn_mesh_without_physics(
             name,
             transform,
