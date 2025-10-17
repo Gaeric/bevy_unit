@@ -1,0 +1,17 @@
+[package]
+name = "winit_drag_drop"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tracing = "0.1.41"
+winit = "0.30.12"
+
+[dependencies.tracing-subscriber]
+version = "0.3.18"
+features = ["env-filter"]
+
+
+[dependencies.softbuffer]
+version = "0.4.0"
+features = ["x11", "x11-dlopen", "wayland", "wayland-dlopen"]

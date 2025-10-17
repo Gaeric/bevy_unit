@@ -1,0 +1,23 @@
+#+title: winit drag drop on wayland
+#+startup: content
+#+author: Gaeric
+#+HTML_HEAD: <link href="./worg.css" rel="stylesheet" type="text/css">
+#+HTML_HEAD: <link href="/static/css/worg.css" rel="stylesheet" type="text/css">
+#+OPTIONS: ^:{}
+* Intro
+  animation graph blend工具如果能使用drag drop功能导入不同的文件，将会提高效率，但是目前wayland上使用winit的drag_drop功能有一些问题
+
+  这里是一个非常简单的示例，从winit的example control_flow frok，用来在wayland上简单测试drag drop功能
+* tips
+  winit当前对wayland的drag drop支持有一些问题，可参考：
+
+  Support drag and drop on wayland:
+  https://github.com/rust-windowing/winit/issues/1881 
+
+  File drag and drop not working under wayland:
+  https://github.com/emilk/egui/issues/1563
+
+  https://github.com/GraphiteEditor/Graphite
+
+  去除wayland环境变量以临时通过xwayland支持drag and drop:
+  env -u WAYLAND_DISPLAY cargo run
