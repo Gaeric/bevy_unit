@@ -11,7 +11,7 @@ fn main() {
             PhysicsDebugPlugin::default(),
         ))
         .add_systems(Startup, setup)
-        .add_event::<MovementAction>()
+        .add_message::<MovementAction>()
         .add_systems(
             Update,
             (
@@ -25,7 +25,7 @@ fn main() {
         )
         .add_systems(
             PhysicsSchedule,
-            kinematic_controller_collisions.in_set(NarrowPhaseSet::Last),
+            kinematic_controller_collisions.in_set(NarrowPhaseSystems::Last),
         )
         .run();
 }
@@ -34,7 +34,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     commands.spawn((
         Mesh3d(meshes.add(Capsule3d::new(0.4, 1.0))),
@@ -78,7 +78,7 @@ fn setup(
 }
 
 /// An event sent for a movement input action.
-#[derive(Event)]
+#[derive(Message)]
 pub enum MovementAction {
     Move(Vector2),
     Jump,
@@ -335,7 +335,7 @@ fn kinematic_controller_collisions(
 
 /// Sends [`MovementAction`] events based on keyboard input.
 fn keyboard_input(
-    mut movement_event_writer: EventWriter<MovementAction>,
+    mut movement_event_writer: MessageWriter<MovementAction>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
     let up = keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
@@ -388,7 +388,7 @@ fn update_grounded(
 /// Responds to [`MovementAction`] events and moves character controllers accordingly.
 fn movement(
     time: Res<Time>,
-    mut movement_event_reader: EventReader<MovementAction>,
+    mut movement_event_reader: MessageReader<MovementAction>,
     mut controllers: Query<(
         &MovementAcceleration,
         &JumpImpulse,

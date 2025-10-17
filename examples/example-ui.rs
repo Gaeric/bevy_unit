@@ -217,7 +217,7 @@ pub fn spawn_option_button<T>(
                 padding: UiRect::axes(Val::Px(2.0), Val::Px(6.0)),
                 ..default()
             },
-            BorderColor(Color::WHITE),
+            BorderColor::all(Color::WHITE),
             BorderRadius::ZERO
                 .with_left(if is_first { Val::Px(6.0) } else { Val::Px(0.0) })
                 .with_right(if is_last { Val::Px(6.0) } else { Val::Px(0.0) }),

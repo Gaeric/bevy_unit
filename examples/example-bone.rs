@@ -1,5 +1,4 @@
-use bevy::prelude::*;
-use bevy::render::mesh::skinning::SkinnedMesh;
+use bevy::{mesh::skinning::SkinnedMesh, prelude::*};
 
 pub(crate) fn main() {
     App::new()
