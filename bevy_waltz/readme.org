@@ -29,6 +29,7 @@
       - [X] gamepad
       - [X] mouse
   - [ ] level scene
+  - [ ] hot patch
   - [ ] particle
   - [ ] ui
   - [ ] dialogue
@@ -43,3 +44,7 @@
   The [assets](../assets/waltz/) in this repository are all 3rd-party.
 * Tips
   TPS dev is complex — ship fast, squash bugs in phases
+
+  This project supports hotpathing using dx. To utilize this feature, please install dixous-cli first.
+
+  For an example of hotpatching systems within Bevy, refer to the bevy examples.

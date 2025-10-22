@@ -124,7 +124,7 @@ fn setup_scene(
 
     commands.spawn((
         SceneRoot(
-            asset_server.load(GltfAssetLabel::Scene(0).from_asset("waltz/scenes/library/Fox.glb")),
+            asset_server.load(GltfAssetLabel::Scene(0).from_asset("Fox.glb")),
         ),
         Transform::from_scale(Vec3::splat(0.07)),
     ));
@@ -343,7 +343,7 @@ fn setup_animation_graph_once_loaded(
         let animation_graph_nodes: [AnimationNodeIndex; 3] =
             std::array::from_fn(|animation_index| {
                 let handle = asset_server.load(
-                    GltfAssetLabel::Animation(animation_index).from_asset("model/animated/Fox.glb"),
+                    GltfAssetLabel::Animation(animation_index).from_asset("Fox.glb"),
                 );
 
                 let mask = if animation_index == 0 { 0 } else { 0x3f };
