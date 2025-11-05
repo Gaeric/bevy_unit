@@ -1,8 +1,15 @@
+use std::{fs::File, path::Path};
+
 use bevy::{
     animation::{AnimationTarget, AnimationTargetId},
+    asset::{
+        io::file::FileAssetReader,
+        ron::{self, ser::PrettyConfig},
+    },
     color::palettes::css::LIGHT_GRAY,
     platform::collections::HashSet,
     prelude::*,
+    tasks::IoTaskPool,
 };
 
 const MASK_GROUP_HEAD: u32 = 0;
@@ -15,6 +22,8 @@ const MASK_GROUP_TAIL: u32 = 5;
 // This width in pixel of the samll buttons that allow the user to toggle a mask
 // group on or off.
 const MASK_GROUP_BUTTON_WIDTH: f32 = 250.0;
+
+static ANIMATION_GRAPH_DIR: &str = "assets/animation_graphs";
 
 // The names of the bones that each mask group consists of. Each mask group is
 // defined as a (prefix, suffix) tuple. The mask group consists of a single
@@ -123,9 +132,7 @@ fn setup_scene(
     ));
 
     commands.spawn((
-        SceneRoot(
-            asset_server.load(GltfAssetLabel::Scene(0).from_asset("Fox.glb")),
-        ),
+        SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("Fox.glb"))),
         Transform::from_scale(Vec3::splat(0.07)),
     ));
 
@@ -325,6 +332,39 @@ fn add_mask_group_control(
         });
 }
 
+fn save_animation_graph_to_file(animation_graph: AnimationGraph) {
+    let file_path = Path::join(
+        &FileAssetReader::get_base_path(),
+        Path::join(
+            Path::new(ANIMATION_GRAPH_DIR),
+            Path::new("animation_blending.graph.ron"),
+        ),
+    );
+
+    info!("save animtion graph to file {file_path:?}");
+
+    IoTaskPool::get()
+        .spawn(async move {
+            use std::io::Write;
+
+            let animation_graph: SerializedAnimationGraph = animation_graph
+                .try_into()
+                .expect("The animation graph failed to convert to its serialized from");
+
+            let serialized_graph =
+                ron::ser::to_string_pretty(&animation_graph, PrettyConfig::default())
+                    .expect("Failed to serialize the animation graph");
+
+            let mut animation_graph_writer =
+                File::create(file_path).expect("Failed to open the animation graph asset");
+
+            animation_graph_writer
+                .write_all(serialized_graph.as_bytes())
+                .expect("Failed to write the animation graph");
+        })
+        .detach();
+}
+
 // Builds up the animation graph, including the mask groups, and adds it to the
 // entity with the `AnimationPlayer` that the gltf loader created.
 fn setup_animation_graph_once_loaded(
@@ -342,9 +382,8 @@ fn setup_animation_graph_once_loaded(
 
         let animation_graph_nodes: [AnimationNodeIndex; 3] =
             std::array::from_fn(|animation_index| {
-                let handle = asset_server.load(
-                    GltfAssetLabel::Animation(animation_index).from_asset("Fox.glb"),
-                );
+                let handle = asset_server
+                    .load(GltfAssetLabel::Animation(animation_index).from_asset("Fox.glb"));
 
                 let mask = if animation_index == 0 { 0 } else { 0x3f };
                 animation_graph.add_clip_with_mask(handle, mask, 1.0, blend_node)
@@ -369,6 +408,9 @@ fn setup_animation_graph_once_loaded(
                 all_animation_target_ids.insert(animation_target_id);
             }
         }
+
+        info!("graph is {:?} ", animation_graph);
+        save_animation_graph_to_file(animation_graph.clone());
 
         // We're doing constructing the animation graph. Add it as an asset.
         let animation_graph = animation_graphs.add(animation_graph);

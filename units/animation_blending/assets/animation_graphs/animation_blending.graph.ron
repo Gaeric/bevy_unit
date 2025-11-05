@@ -1,0 +1,62 @@
+(
+    graph: (
+        nodes: [
+            (
+                node_type: Blend,
+                mask: 0,
+                weight: 1.0,
+            ),
+            (
+                node_type: Add,
+                mask: 0,
+                weight: 1.0,
+            ),
+            (
+                node_type: Clip("Fox.glb#Animation0"),
+                mask: 0,
+                weight: 1.0,
+            ),
+            (
+                node_type: Clip("Fox.glb#Animation1"),
+                mask: 63,
+                weight: 1.0,
+            ),
+            (
+                node_type: Clip("Fox.glb#Animation2"),
+                mask: 63,
+                weight: 1.0,
+            ),
+        ],
+        node_holes: [],
+        edge_property: directed,
+        edges: [
+            Some((0, 1, ())),
+            Some((1, 2, ())),
+            Some((1, 3, ())),
+            Some((1, 4, ())),
+        ],
+    ),
+    root: 0,
+    mask_groups: {
+        ("9b859d89-7a84-5ba3-be8a-fb41d580bd7b"): 1,
+        ("a76fbc96-f753-5d24-9e50-b90f0e6cf53b"): 2,
+        ("f578d457-fda6-5de9-b743-edc1a01028d6"): 8,
+        ("ce696b64-1417-570d-9002-7a9f77db69f8"): 16,
+        ("514e6c44-795b-507d-b7b2-649040051775"): 1,
+        ("ae689251-5621-533b-b7b0-a0888da75f1a"): 8,
+        ("049598f1-7bab-515f-99e4-f526889ca1ce"): 16,
+        ("b527139b-2ea1-522b-b4da-cb118bad80bb"): 8,
+        ("ad4c4eed-8430-5796-98b3-229caa409505"): 1,
+        ("92d440c0-be62-5169-b3cb-1507532516d8"): 32,
+        ("171af7d9-4010-583e-a8c8-2ccf4800be1c"): 2,
+        ("2fb5d229-da8c-504f-a2e1-48cfcf0a9efe"): 2,
+        ("a00cd77e-b9f4-5573-9342-2d539f4819cd"): 4,
+        ("8bbccd94-7abe-507a-adab-11da31c83d90"): 16,
+        ("42a16c44-7430-50d6-b322-b59b75e6aec1"): 32,
+        ("aa960a76-445a-5fd2-93a1-30ce821abf43"): 16,
+        ("98e0cbd7-80a4-5c1f-b0f4-c1373f8f3474"): 32,
+        ("f1e8e259-906d-549b-824a-325b650782fd"): 4,
+        ("d7e83b74-d3d6-5f9b-94e6-25ada43678a5"): 8,
+        ("39ede3f3-11cf-5ec2-afd9-628491982d71"): 4,
+    },
+)
