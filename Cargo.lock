@@ -482,9 +482,9 @@ dependencies = [
 
 [[package]]
 name = "bevy-tnua-avian3d"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afe3892dfbb62e42a9033cafe20a30c914fd1f8a713a0cff54f365067d13075a"
+checksum = "6ddaa9eebc8179b18ef99c50d650abc323448d0bbcd30c73cfe48d8857946cb9"
 dependencies = [
  "avian3d",
  "bevy 0.17.2",

@@ -11,7 +11,7 @@ avian3d = "0.4.0"
 
 # character system
 bevy-tnua = "0.26.0"
-bevy-tnua-avian3d = "0.7.0"
+bevy-tnua-avian3d = "0.8.0"
 
 # control system
 bevy_enhanced_input = "0.19.1"
