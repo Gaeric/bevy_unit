@@ -15,7 +15,7 @@ members = [
 exclude = ["units/winit_drag_drop"]
 
 [dependencies]
-avian3d = "0.4.0"
+avian3d = "0.4.1"
 bevy = { version = "0.17.2", features = ["wayland", "dynamic_linking", "hotpatching"] }
 # bevy_shine = { path = "bevy_shine" }
 # modular_character = { path = "units/modular_character" }
