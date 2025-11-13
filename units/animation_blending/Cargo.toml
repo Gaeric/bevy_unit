@@ -2,6 +2,7 @@
 name = "animation_blending"
 version = "0.1.0"
 edition = "2024"
+description = "Library and GUI tool designed for blending animations."
 
 [dependencies]
 bevy = {version =  "0.17.2", features = ["hotpatching"]}
