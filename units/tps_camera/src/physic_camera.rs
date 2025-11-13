@@ -118,7 +118,7 @@ fn generic_static_cuboid(
 }
 
 fn move_camera(
-    player_query: Query<&mut Transform, (With<Character>, Without<MainCameraRoot>)>,
+    player_query: Query<&Transform, (With<Character>, Without<MainCameraRoot>)>,
     mut root_query: Query<&mut Transform, (With<MainCameraRoot>, Without<Character>)>,
 ) {
     let mut root_transform = root_query.single_mut().unwrap();

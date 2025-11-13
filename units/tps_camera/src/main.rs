@@ -4,6 +4,7 @@ use bevy::prelude::*;
 
 use crate::dolly_camera::MainCamera;
 mod dolly_camera;
+mod orbit_camera;
 mod physic_camera;
 
 #[derive(Component)]
@@ -17,8 +18,9 @@ struct CharacterMovement {
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(dolly_camera::plugin)
+        // .add_plugins(dolly_camera::plugin)
         // .add_plugins(physic_camera::plugin)
+        .add_plugins(orbit_camera::plugin)
         .add_systems(Startup, setup)
         .add_systems(FixedUpdate, movement_player)
         .add_observer(movement_character)
