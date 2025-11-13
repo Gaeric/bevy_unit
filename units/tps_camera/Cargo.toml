@@ -9,7 +9,5 @@ bevy = "0.17.2"
 rand = "0.9.1"
 
 [dependencies.bevy_dolly]
-git = "https://github.com/BlackPhlox/bevy_dolly/"
-branch = "bevy_0.16"
-default-features = false
-features = ["drivers"]
+git = "https://github.com/Gaeric/bevy_dolly/"
+branch = "main"

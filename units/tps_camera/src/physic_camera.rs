@@ -87,22 +87,14 @@ fn setup_camera(
 
     commands.spawn(
         PrismaticJoint::new(root_anchor, camera_anchor)
-            // .with_local_anchor_1(Vec3::X)
-            // .with_local_anchor_2(Vec3::X)
-            .with_free_axis(Vec3::X)
-            .with_compliance(1.0 / 1000.0)
-            .with_linear_velocity_damping(1.0)
-            .with_angular_velocity_damping(1.0)
+            .with_local_anchor1(Vec3::X)
             .with_limits(2.0, 2.0),
     );
 
     commands.spawn(
         SphericalJoint::new(camera_anchor, camera_location)
-            .with_local_anchor_1(Vec3::ZERO)
-            .with_local_anchor_2(Vec3::ZERO)
-            .with_compliance(1.0 / 1000.0)
-            .with_linear_velocity_damping(1.0)
-            .with_angular_velocity_damping(1.0),
+            .with_local_anchor1(Vec3::ZERO)
+            .with_local_anchor2(Vec3::ZERO),
     );
 
     // commands.spawn((
