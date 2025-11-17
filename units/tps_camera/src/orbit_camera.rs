@@ -26,8 +26,8 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn update_camera(
-    player: Query<&Transform, With<Character>>,
-    mut camera: Query<(&mut Transform, &mut OrbitCamera)>,
+    player: Query<&Transform, (With<Character>, Without<OrbitCamera>)>,
+    mut camera: Query<(&mut Transform, &mut OrbitCamera), Without<Character>>,
     time: Res<Time>,
 ) {
     let player_transform = player.single().unwrap();
@@ -40,7 +40,7 @@ fn update_camera(
 
     camera_transform
         .translation
-        .smooth_nudge(&target_translation, 2.0, delta_time);
+        .smooth_nudge(&target_translation, 3.0, delta_time);
     camera_transform
         .rotation
         .smooth_nudge(&target_rotation, 2.0, delta_time);
