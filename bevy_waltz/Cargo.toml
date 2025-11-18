@@ -25,10 +25,6 @@ bone_attachments = { path = "../units/bone_attachments" }
 # develop ui toolkit
 bevy-inspector-egui = "0.34.0"
 
-[dependencies.bevy_dolly]
-git = "https://github.com/Gaeric/bevy_dolly/"
-branch = "main"
-
 # develop ui toolkit
 [dependencies.iyes_perf_ui]
 git = "https://github.com/mgi388/iyes_perf_ui/"

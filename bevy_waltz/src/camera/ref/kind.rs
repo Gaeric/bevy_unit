@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use bevy_dolly::prelude::{Arm, LookAt, Rig, RigDriverTraits};
 
 use crate::camera::config::CameraConfig;
 

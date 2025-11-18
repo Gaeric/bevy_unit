@@ -1,6 +1,5 @@
 use avian3d::spatial_query::SpatialQuery;
 use bevy::prelude::*;
-use bevy_dolly::prelude::{LookAt, Position, Rig, Smooth, YawPitch};
 
 use crate::camera::{
     arm::{get_arm_distance, get_zoom_smoothness, set_arm},

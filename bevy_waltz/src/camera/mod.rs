@@ -1,20 +1,12 @@
 use bevy::prelude::*;
-use bevy_dolly::{
-    prelude::{Arm, LookAt, Position, Rig, Smooth, YawPitch},
-    system::Dolly,
-};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    camera::{config::CameraConfig, kind::update_drivers, rig::update_rig},
-    character::WaltzPlayer,
-};
+use crate::{camera::config::CameraConfig, character::WaltzPlayer};
 
 pub(crate) mod config;
 
-mod arm;
-mod kind;
-mod rig;
+mod interface;
+mod system;
 
 // /// Marks an entity as the camera that follows the player
 // #[derive(Component, Debug)]
@@ -36,26 +28,46 @@ pub(crate) enum CameraZoom {
     ZoomOut,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Reflect, Serialize, Deserialize)]
+#[reflect(Serialize, Deserialize)]
+pub struct CameraControl {
+    pub yaw_pitch: Vec2,
+    pub zoom: Option<CameraZoom>,
+}
+
+/// Rotation and distance are adjusted through the user interface,
+/// while translation by the system is influenced by anchor movement and collision.
 #[derive(Debug, Clone, PartialEq, Component, Reflect, Serialize, Deserialize)]
 #[reflect(Component, Serialize, Deserialize)]
 pub(crate) struct WaltzCamera {
-    pub(crate) target: Vec3,
-    pub(crate) secondary_target: Option<Vec3>,
+    /// the camera position follow the anchor
+    pub(crate) anchor: Vec3,
+    /// the translation between the anchor and the camera
+    pub(crate) direction: Vec3,
+    /// disired distance between camera and anchor
     pub(crate) desired_distance: f32,
+    /// look_at parameter uses the camera's own reference frame
+    pub(crate) target: Vec3,
+    /// for dialogue
+    pub(crate) secondary_target: Option<Vec3>,
     pub(crate) kind: IngameCameraKind,
-    pub(crate) yaw_pitch: Vec2,
-    pub(crate) zoom: Option<CameraZoom>,
+    /// user interface for WaltzCamera
+    pub control: CameraControl,
 }
 
 impl Default for WaltzCamera {
     fn default() -> Self {
         Self {
+            anchor: default(),
+            direction: Vec3::new(0.0, 0.0, 1.0),
             target: default(),
             secondary_target: None,
             desired_distance: 5.0,
             kind: IngameCameraKind::ThirdPerson,
-            yaw_pitch: default(),
-            zoom: None,
+            control: CameraControl {
+                yaw_pitch: default(),
+                zoom: None,
+            },
         }
     }
 }
@@ -66,13 +78,13 @@ fn setup_camera(mut commands: Commands) {
         Camera3d::default(),
         WaltzCamera::default(),
         Transform::from_xyz(10.0, 10.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
-        Rig::builder()
-            .with(Position::default())
-            .with(YawPitch::default())
-            .with(Smooth::default())
-            .with(Arm::new(Vec3::default()))
-            .with(LookAt::new(Vec3::default()).tracking_predictive(true))
-            .build(),
+        // Rig::builder()
+        //     .with(Position::default())
+        //     .with(YawPitch::default())
+        //     .with(Smooth::default())
+        //     .with(Arm::new(Vec3::default()))
+        //     .with(LookAt::new(Vec3::default()).tracking_predictive(true))
+        //     .build(),
     ));
 }
 
@@ -99,17 +111,17 @@ impl Plugin for WaltzCameraPlugin {
             .register_type::<WaltzCamera>()
             .init_resource::<CameraConfig>()
             // todo: spawn camera when level load ready
-            .add_systems(Startup, setup_camera)
-            .add_systems(
-                FixedUpdate,
-                (
-                    Dolly::<WaltzCamera>::update_active,
-                    // update_kind,
-                    set_camera_focus,
-                    update_drivers,
-                    update_rig,
-                )
-                    .chain(),
-            );
+            .add_systems(Startup, setup_camera);
+        // .add_systems(
+        //     FixedUpdate,
+        //     (
+        //         Dolly::<WaltzCamera>::update_active,
+        //         update_kind,
+        //         set_camera_focus,
+        //         update_drivers,
+        //         update_rig,
+        //     )
+        //         .chain(),
+        // );
     }
 }

@@ -4,7 +4,6 @@ use crate::camera::config::CameraConfig;
 use crate::camera::config::CollisionLayer;
 use avian3d::prelude::*;
 use bevy::prelude::*;
-use bevy_dolly::prelude::*;
 
 pub(super) fn get_arm_distance(
     camera: &WaltzCamera,

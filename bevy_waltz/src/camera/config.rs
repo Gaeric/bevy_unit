@@ -19,6 +19,7 @@ pub(crate) struct CameraConfig {
     pub(crate) third_person: ThirdPersion,
     pub(crate) mouse_sensitivity_x: f32,
     pub(crate) mouse_sensitivity_y: f32,
+    pub(crate) decay_rate: f32,
 }
 
 impl Default for CameraConfig {
@@ -57,6 +58,7 @@ impl Default for CameraConfig {
             },
             mouse_sensitivity_x: 8e-4,
             mouse_sensitivity_y: 5e-4,
+            decay_rate: 1.0,
         }
     }
 }

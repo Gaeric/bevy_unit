@@ -84,7 +84,7 @@ fn rotate_camera_yas_and_pitch(
 
     debug!("trigger is {}", trigger.value);
 
-    camera.yaw_pitch += trigger.value;
+    camera.control.yaw_pitch += trigger.value;
 }
 
 fn zoom_camera(
@@ -99,7 +99,7 @@ fn zoom_camera(
 
     debug!("trigger is {}", trigger.value);
 
-    camera.zoom = if trigger.value.y > 0.0 {
+    camera.control.zoom = if trigger.value.y > 0.0 {
         Some(ZoomIn)
     } else {
         Some(ZoomOut)
