@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.17.2", features = ["wayland", "dynamic_linking", "hotpatching"] }
+bevy = { version = "0.17.2", features = [
+        "wayland",
+        "dynamic_linking",
+        "hotpatching",
+] }
 
 # physic engine
 avian3d = "0.4.1"
@@ -25,15 +29,13 @@ bone_attachments = { path = "../units/bone_attachments" }
 # develop ui toolkit
 bevy-inspector-egui = "0.34.0"
 
+# frame limit
+bevy_framepace = "0.20.0"
+
 # develop ui toolkit
 [dependencies.iyes_perf_ui]
 git = "https://github.com/mgi388/iyes_perf_ui/"
 branch = "bevy-0.17"
-
-# frame limit
-[dependencies.bevy_framepace]
-git = "https://github.com/aevyrie/bevy_framepace"
-branch = "main"
 
 # [dependencies.bevy-inspector-egui]
 # git = "https://github.com/dsgallups/bevy-inspector-egui"
