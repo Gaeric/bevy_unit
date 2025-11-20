@@ -1,7 +1,10 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{camera::config::CameraConfig, character::WaltzPlayer};
+use crate::{
+    camera::{config::CameraConfig, interface::update_rotation, system::update_translation},
+    character::WaltzPlayer,
+};
 
 pub(crate) mod config;
 
@@ -111,7 +114,9 @@ impl Plugin for WaltzCameraPlugin {
             .register_type::<WaltzCamera>()
             .init_resource::<CameraConfig>()
             // todo: spawn camera when level load ready
-            .add_systems(Startup, setup_camera);
+            .add_systems(Startup, setup_camera)
+            .add_systems(Update, (update_translation, update_rotation));
+
         // .add_systems(
         //     FixedUpdate,
         //     (
