@@ -1804,7 +1804,6 @@ dependencies = [
 name = "bevy_workflow"
 version = "0.1.0"
 dependencies = [
- "avian3d",
  "bevy",
  "bevy_waltz",
  "bone_attachments",

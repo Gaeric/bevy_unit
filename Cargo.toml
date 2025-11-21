@@ -15,8 +15,11 @@ members = [
 exclude = ["units/winit_drag_drop"]
 
 [dependencies]
-avian3d = "0.4.1"
-bevy = { version = "0.17.2", features = ["wayland", "dynamic_linking", "hotpatching"] }
+bevy = { version = "0.17.2", features = [
+        "wayland",
+        "dynamic_linking",
+        "hotpatching",
+] }
 # bevy_shine = { path = "bevy_shine" }
 # modular_character = { path = "units/modular_character" }
 bevy_waltz = { path = "bevy_waltz" }
@@ -62,12 +65,7 @@ bevy_utils = { path = "../bevy_engines/bevy_0.17/crates/bevy_utils" }
 
 [features]
 default = ["dev"]
-dev = [
-        "bevy/dynamic_linking",
-        "bevy/bevy_dev_tools",
-        "bevy/bevy_ui_debug",
-        "avian3d/diagnostic_ui",
-]
+dev = ["bevy/dynamic_linking", "bevy/bevy_dev_tools", "bevy/bevy_ui_debug"]
 
 
 # Enable a small amount of optimization in debug mode
