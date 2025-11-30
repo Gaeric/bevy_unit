@@ -10,7 +10,7 @@ pub struct OrbitCamera {
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Startup, setup_camera)
-        .add_systems(Update, update_camera);
+        .add_systems(FixedUpdate, update_camera);
 }
 
 fn setup_camera(mut commands: Commands) {
