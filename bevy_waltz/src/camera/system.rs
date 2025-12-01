@@ -5,7 +5,7 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 
 use crate::camera::{
-    IngameCameraKind, WaltzCamera,
+    IngameCameraKind, WaltzCamera, WaltzCameraAnchor,
     config::{CameraConfig, CollisionLayer},
 };
 
@@ -20,6 +20,7 @@ fn get_distance_to_collision(
     spatial_query: &SpatialQuery,
     config: &CameraConfig,
     camera: &WaltzCamera,
+    anchor: &Transform,
 ) -> f32 {
     let _min_distance = match camera.kind {
         IngameCameraKind::ThirdPerson => config.third_person.min_distance_to_objects,
@@ -30,7 +31,7 @@ fn get_distance_to_collision(
     let filter = SpatialQueryFilter::from_mask(CollisionLayer::CameraObstacle.to_bits());
 
     let max_distance = camera.desired_distance;
-    let origin = camera.anchor;
+    let origin = anchor.translation;
     let direction = Dir3::new(camera.direction).unwrap();
 
     spatial_query
@@ -43,23 +44,27 @@ fn get_distance_to_collision(
 fn calc_target_distance(
     spatial_query: &SpatialQuery,
     camera: &WaltzCamera,
+    anchor: &Transform,
     config: &CameraConfig,
 ) -> f32 {
     match camera.kind {
-        IngameCameraKind::ThirdPerson => get_distance_to_collision(spatial_query, config, camera),
+        IngameCameraKind::ThirdPerson => {
+            get_distance_to_collision(spatial_query, config, camera, anchor)
+        }
         IngameCameraKind::FixedAngle | IngameCameraKind::FirstPerson => camera.desired_distance,
     }
 }
 
 pub(super) fn update_translation(
     mut transform: Single<&mut Transform, With<WaltzCamera>>,
+    anchor: Single<&Transform, With<WaltzCameraAnchor>>,
     time: Res<Time>,
     camera: Single<&WaltzCamera>,
     spatial_query: SpatialQuery,
     config: Res<CameraConfig>,
 ) {
-    let expect_distance = calc_target_distance(&spatial_query, &camera, &config);
-    let target_translation = camera.anchor + camera.direction * expect_distance;
+    let expect_distance = calc_target_distance(&spatial_query, &camera, &anchor, &config);
+    let target_translation = anchor.translation + camera.direction * expect_distance;
     let dt = time.delta_secs();
 
     transform

@@ -38,13 +38,15 @@ pub struct CameraControl {
     pub zoom: Option<CameraZoom>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Component, Reflect, Serialize, Deserialize)]
+#[reflect(Component, Serialize, Deserialize)]
+pub struct WaltzCameraAnchor;
+
 /// Rotation and distance are adjusted through the user interface,
 /// while translation by the system is influenced by anchor movement and collision.
 #[derive(Debug, Clone, PartialEq, Component, Reflect, Serialize, Deserialize)]
 #[reflect(Component, Serialize, Deserialize)]
 pub(crate) struct WaltzCamera {
-    /// the camera position follow the anchor
-    pub(crate) anchor: Vec3,
     /// the translation between the anchor and the camera
     pub(crate) direction: Vec3,
     /// disired distance between camera and anchor
@@ -61,7 +63,6 @@ pub(crate) struct WaltzCamera {
 impl Default for WaltzCamera {
     fn default() -> Self {
         Self {
-            anchor: default(),
             direction: Vec3::new(0.0, 0.0, 1.0),
             target: default(),
             secondary_target: None,
