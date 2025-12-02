@@ -70,11 +70,16 @@ pub(super) fn update_translation(
 
     let expect_distance = calc_target_distance(&spatial_query, &camera, &anchor, &config);
     let target_translation = anchor.translation + camera.direction * expect_distance;
+    debug!(
+        "anchor translation {}, target translation {}",
+        anchor.translation, target_translation
+    );
+
     let dt = time.delta_secs();
 
     let mut transform = queries.p0();
 
     transform
         .translation
-        .smooth_nudge(&target_translation, 1.0, dt);
+        .smooth_nudge(&target_translation, config.decay_rate, dt);
 }

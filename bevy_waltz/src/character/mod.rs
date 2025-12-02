@@ -71,6 +71,8 @@ impl Plugin for WaltzCharacterPlugin {
         app.add_systems(Startup, setup_player);
         // app.add_systems(Startup, setup_demo_player);
 
+        app.add_systems(Update, debug_character_position);
+
         app.add_systems(Update, character_control_radar_visualization_system);
         app.add_systems(Update, animation_patcher_system);
         app.add_systems(Update, animate_character);
@@ -178,7 +180,6 @@ fn setup_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     setup_character_with_entity_cmd(cmd);
 }
 
-pub fn debug_character_position(query: Query<&Transform, With<WaltzPlayer>>) {
-    let transform = query.single();
-    warn!("transform is {transform:?}");
+pub fn debug_character_position(transform: Single<&Transform, With<WaltzPlayer>>) {
+    debug!("transform is {:?}", transform.into_inner());
 }
