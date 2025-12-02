@@ -56,16 +56,23 @@ fn calc_target_distance(
 }
 
 pub(super) fn update_translation(
-    mut transform: Single<&mut Transform, With<WaltzCamera>>,
-    anchor: Single<&Transform, With<WaltzCameraAnchor>>,
+    mut queries: ParamSet<(
+        Single<&mut Transform, With<WaltzCamera>>,
+        Single<&Transform, With<WaltzCameraAnchor>>,
+    )>,
+
     time: Res<Time>,
     camera: Single<&WaltzCamera>,
     spatial_query: SpatialQuery,
     config: Res<CameraConfig>,
 ) {
+    let anchor = queries.p1();
+
     let expect_distance = calc_target_distance(&spatial_query, &camera, &anchor, &config);
     let target_translation = anchor.translation + camera.direction * expect_distance;
     let dt = time.delta_secs();
+
+    let mut transform = queries.p0();
 
     transform
         .translation
