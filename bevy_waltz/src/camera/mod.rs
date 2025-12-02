@@ -11,10 +11,6 @@ pub(crate) mod config;
 mod interface;
 mod system;
 
-// /// Marks an entity as the camera that follows the player
-// #[derive(Component, Debug)]
-// pub struct WaltzCamera;
-
 #[derive(Debug, Clone, PartialEq, Reflect, Serialize, Deserialize, Default)]
 #[reflect(Serialize, Deserialize)]
 pub(crate) enum IngameCameraKind {
@@ -82,13 +78,6 @@ fn setup_camera(mut commands: Commands) {
         Camera3d::default(),
         WaltzCamera::default(),
         Transform::from_xyz(10.0, 10.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
-        // Rig::builder()
-        //     .with(Position::default())
-        //     .with(YawPitch::default())
-        //     .with(Smooth::default())
-        //     .with(Arm::new(Vec3::default()))
-        //     .with(LookAt::new(Vec3::default()).tracking_predictive(true))
-        //     .build(),
     ));
 }
 
@@ -114,20 +103,7 @@ impl Plugin for WaltzCameraPlugin {
         app.register_type::<IngameCameraKind>()
             .register_type::<WaltzCamera>()
             .init_resource::<CameraConfig>()
-            // todo: spawn camera when level load ready
             .add_systems(Startup, setup_camera)
-            .add_systems(Update, (update_translation, update_rotation));
-
-        // .add_systems(
-        //     FixedUpdate,
-        //     (
-        //         Dolly::<WaltzCamera>::update_active,
-        //         update_kind,
-        //         set_camera_focus,
-        //         update_drivers,
-        //         update_rig,
-        //     )
-        //         .chain(),
-        // );
+            .add_systems(FixedUpdate, (update_translation, update_rotation));
     }
 }

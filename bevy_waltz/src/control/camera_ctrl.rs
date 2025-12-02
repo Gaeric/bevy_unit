@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::WaltzCamera;
 use crate::camera::CameraZoom::{ZoomIn, ZoomOut};
+use crate::camera::WaltzCameraAnchor;
+use crate::character::WaltzPlayer;
 
 #[derive(Resource, Default, Reflect, Serialize, Deserialize)]
 #[reflect(Resource, Serialize, Deserialize)]
@@ -43,10 +45,23 @@ struct CameraOrbit;
 struct CameraZoom;
 
 pub fn plugin(app: &mut App) {
-    app.add_input_context::<CameraCtrl>()
+    app.add_observer(anchor_camera_to_chracter)
+        .add_input_context::<CameraCtrl>()
         .add_observer(setup_camera_ctrl_bind)
         .add_observer(rotate_camera_yas_and_pitch)
         .add_observer(zoom_camera);
+}
+
+pub fn anchor_camera_to_chracter(
+    player: On<Add, WaltzPlayer>,
+    mut commands: Commands,
+    player_transform: Single<&Transform, With<WaltzPlayer>>,
+    mut waltz_camera: Single<&mut WaltzCamera>,
+) {
+    commands.entity(player.entity).insert(WaltzCameraAnchor);
+
+    waltz_camera.direction = Vec3::new(0.0, 1.75, -1.0);
+    waltz_camera.target = player_transform.translation + Vec3::Y * 1.75;
 }
 
 fn setup_camera_ctrl_bind(trigger: On<Add, WaltzCamera>, mut commands: Commands) {
