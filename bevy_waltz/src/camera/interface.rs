@@ -1,19 +1,22 @@
 //! The interface updates elements like yaw, pitch, and zoom, which are influenced by user input.
 use bevy::prelude::*;
 
-use crate::camera::WaltzCamera;
+use crate::camera::{CameraOrbit, WaltzCamera};
 
 pub(super) fn update_rotation(
+    mut commands: Commands,
     mut transform: Single<&mut Transform, With<WaltzCamera>>,
-    mut camera: Single<&mut WaltzCamera>,
+    querys: Query<(Entity, &mut CameraOrbit)>,
 ) {
-    let control = camera.control;
+    for (entity, orbit) in querys {
+        // pitch: rotation around the x-axis
+        transform.rotate_y(orbit.pitch);
 
-    transform.rotate_x(control.yaw_pitch.x);
-    transform.rotate_y(control.yaw_pitch.y);
+        // yaw: rotation around the y-axis
+        transform.rotate_x(orbit.yaw);
 
-    debug!("rotation {}", transform.rotation);
+        commands.entity(entity).despawn();
+    }
 
-    camera.control.yaw_pitch = Vec2::ZERO;
-    camera.control.zoom = None;
+    info!("rotation {}", transform.rotation);
 }

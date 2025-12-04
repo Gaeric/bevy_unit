@@ -22,16 +22,22 @@ pub(crate) enum IngameCameraKind {
 
 #[derive(Debug, Copy, Clone, PartialEq, Reflect, Serialize, Deserialize)]
 #[reflect(Serialize, Deserialize)]
-pub(crate) enum CameraZoom {
+pub(crate) enum CameraZoomKind {
     ZoomIn,
     ZoomOut,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Reflect, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Reflect, Component, Serialize, Deserialize)]
 #[reflect(Serialize, Deserialize)]
-pub struct CameraControl {
-    pub yaw_pitch: Vec2,
-    pub zoom: Option<CameraZoom>,
+pub struct CameraZoom {
+    pub zoom: CameraZoomKind,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Reflect, Component, Serialize, Deserialize)]
+#[reflect(Serialize, Deserialize)]
+pub struct CameraOrbit {
+    pub yaw: f32,
+    pub pitch: f32,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Component, Reflect, Serialize, Deserialize)]
@@ -52,8 +58,6 @@ pub(crate) struct WaltzCamera {
     /// for dialogue
     pub(crate) secondary_target: Option<Vec3>,
     pub(crate) kind: IngameCameraKind,
-    /// user interface for WaltzCamera
-    pub control: CameraControl,
 }
 
 impl Default for WaltzCamera {
@@ -64,10 +68,6 @@ impl Default for WaltzCamera {
             secondary_target: None,
             desired_distance: 1.0,
             kind: IngameCameraKind::ThirdPerson,
-            control: CameraControl {
-                yaw_pitch: default(),
-                zoom: None,
-            },
         }
     }
 }
