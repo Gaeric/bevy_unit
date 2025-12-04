@@ -69,8 +69,8 @@ pub(super) fn update_translation(
     let anchor = queries.p1();
 
     let expect_distance = calc_target_distance(&spatial_query, &camera, &anchor, &config);
-    let target_translation = anchor.translation + camera.direction * expect_distance;
-    debug!(
+    let target_translation = anchor.translation + camera.direction * expect_distance + camera.height * Vec3::Y;
+    info!(
         "anchor translation {}, target translation {}",
         anchor.translation, target_translation
     );

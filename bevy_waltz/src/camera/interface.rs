@@ -10,13 +10,11 @@ pub(super) fn update_rotation(
 ) {
     for (entity, orbit) in querys {
         // pitch: rotation around the x-axis
-        transform.rotate_y(orbit.pitch);
+        transform.rotate_x(orbit.pitch * 0.1);
 
         // yaw: rotation around the y-axis
-        transform.rotate_x(orbit.yaw);
+        transform.rotate_y(orbit.yaw * 0.1);
 
         commands.entity(entity).despawn();
     }
-
-    info!("rotation {}", transform.rotation);
 }

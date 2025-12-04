@@ -58,8 +58,10 @@ pub fn anchor_camera_to_chracter(
 ) {
     commands.entity(player.entity).insert(WaltzCameraAnchor);
 
-    waltz_camera.direction = Vec3::new(0.0, 1.75, -1.0);
+    waltz_camera.height = 1.75;
+    waltz_camera.direction = Vec3::new(0.0, 0.0, 1.0).normalize();
     waltz_camera.target = player_transform.translation + Vec3::Y * 1.75;
+    waltz_camera.desired_distance = 3.0;
 }
 
 fn setup_camera_ctrl_bind(trigger: On<Add, WaltzCamera>, mut commands: Commands) {

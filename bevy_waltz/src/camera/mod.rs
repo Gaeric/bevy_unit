@@ -49,6 +49,8 @@ pub struct WaltzCameraAnchor;
 #[derive(Debug, Clone, PartialEq, Component, Reflect, Serialize, Deserialize)]
 #[reflect(Component, Serialize, Deserialize)]
 pub(crate) struct WaltzCamera {
+    /// the height offset of the anchor
+    pub(crate) height: f32,
     /// the translation between the anchor and the camera
     pub(crate) direction: Vec3,
     /// disired distance between camera and anchor
@@ -63,8 +65,9 @@ pub(crate) struct WaltzCamera {
 impl Default for WaltzCamera {
     fn default() -> Self {
         Self {
-            direction: Vec3::new(0.0, 0.0, 1.0),
-            target: Vec3::new(0.0, 0.0, 0.0),
+            height: 0.0,
+            direction: Vec3::ZERO,
+            target: Vec3::ZERO,
             secondary_target: None,
             desired_distance: 1.0,
             kind: IngameCameraKind::ThirdPerson,
@@ -91,10 +94,6 @@ fn set_camera_focus(
     camera.target = player_transform.translation + Vec3::Y * 1.75;
 }
 
-fn debug_camera_anchor(transform: Single<&Transform, With<WaltzCameraAnchor>>) {
-    debug!("camera anchor translation: {:?}", transform.into_inner());
-}
-
 pub struct WaltzCameraPlugin;
 
 /// Handles systems exclusive to the character's control. Is split into the following sub-plugins:
@@ -108,7 +107,6 @@ impl Plugin for WaltzCameraPlugin {
             .register_type::<WaltzCamera>()
             .init_resource::<CameraConfig>()
             .add_systems(Startup, setup_camera)
-            .add_systems(FixedUpdate, (update_translation, update_rotation))
-            .add_systems(Update, debug_camera_anchor);
+            .add_systems(FixedUpdate, (update_translation, update_rotation));
     }
 }

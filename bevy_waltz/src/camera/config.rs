@@ -58,7 +58,7 @@ impl Default for CameraConfig {
             },
             mouse_sensitivity_x: 8e-4,
             mouse_sensitivity_y: 5e-4,
-            decay_rate: 1.0,
+            decay_rate: 10.0,
         }
     }
 }
