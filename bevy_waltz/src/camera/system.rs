@@ -21,6 +21,7 @@ fn get_distance_to_collision(
     config: &CameraConfig,
     camera: &WaltzCamera,
     anchor: &Transform,
+    direction: Dir3,
 ) -> f32 {
     let _min_distance = match camera.kind {
         IngameCameraKind::ThirdPerson => config.third_person.min_distance_to_objects,
@@ -32,7 +33,6 @@ fn get_distance_to_collision(
 
     let max_distance = camera.desired_distance;
     let origin = anchor.translation;
-    let direction = Dir3::new(camera.direction).unwrap();
 
     spatial_query
         .cast_ray(origin, direction, max_distance, solid, &filter)
@@ -43,19 +43,20 @@ fn get_distance_to_collision(
 
 fn calc_target_distance(
     spatial_query: &SpatialQuery,
+    config: &CameraConfig,
     camera: &WaltzCamera,
     anchor: &Transform,
-    config: &CameraConfig,
+    direction: Dir3,
 ) -> f32 {
     match camera.kind {
         IngameCameraKind::ThirdPerson => {
-            get_distance_to_collision(spatial_query, config, camera, anchor)
+            get_distance_to_collision(spatial_query, config, camera, anchor, direction)
         }
         IngameCameraKind::FixedAngle | IngameCameraKind::FirstPerson => camera.desired_distance,
     }
 }
 
-pub(super) fn update_translation(
+pub(super) fn follow_anchor(
     mut queries: ParamSet<(
         Single<&mut Transform, With<WaltzCamera>>,
         Single<&Transform, With<WaltzCameraAnchor>>,
@@ -66,10 +67,16 @@ pub(super) fn update_translation(
     spatial_query: SpatialQuery,
     config: Res<CameraConfig>,
 ) {
-    let anchor = queries.p1();
+    let anchor = queries.p1().clone();
+    let mut waltz_transform = queries.p0();
 
-    let expect_distance = calc_target_distance(&spatial_query, &camera, &anchor, &config);
-    let target_translation = anchor.translation + camera.direction * expect_distance + camera.height * Vec3::Y;
+    let direction = Dir3::new(waltz_transform.translation - anchor.translation)
+        .unwrap_or(Dir3::new(Vec3::NEG_Z).unwrap());
+
+    let expect_distance =
+        calc_target_distance(&spatial_query, &config, &camera, &anchor, direction);
+    let target_translation =
+        anchor.translation + direction * expect_distance + camera.height * Vec3::Y;
     info!(
         "anchor translation {}, target translation {}",
         anchor.translation, target_translation
@@ -77,9 +84,7 @@ pub(super) fn update_translation(
 
     let dt = time.delta_secs();
 
-    let mut transform = queries.p0();
-
-    transform
+    waltz_transform
         .translation
         .smooth_nudge(&target_translation, config.decay_rate, dt);
 }

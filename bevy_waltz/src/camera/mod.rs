@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    camera::{config::CameraConfig, interface::update_rotation, system::update_translation},
+    camera::{config::CameraConfig, interface::update_rotation, system::follow_anchor},
     character::WaltzPlayer,
 };
 
@@ -51,8 +51,6 @@ pub struct WaltzCameraAnchor;
 pub(crate) struct WaltzCamera {
     /// the height offset of the anchor
     pub(crate) height: f32,
-    /// the translation between the anchor and the camera
-    pub(crate) direction: Vec3,
     /// disired distance between camera and anchor
     pub(crate) desired_distance: f32,
     /// look_at parameter uses the camera's own reference frame
@@ -66,7 +64,6 @@ impl Default for WaltzCamera {
     fn default() -> Self {
         Self {
             height: 0.0,
-            direction: Vec3::ZERO,
             target: Vec3::ZERO,
             secondary_target: None,
             desired_distance: 1.0,
@@ -107,6 +104,6 @@ impl Plugin for WaltzCameraPlugin {
             .register_type::<WaltzCamera>()
             .init_resource::<CameraConfig>()
             .add_systems(Startup, setup_camera)
-            .add_systems(FixedUpdate, (update_translation, update_rotation));
+            .add_systems(FixedUpdate, (follow_anchor, update_rotation));
     }
 }
