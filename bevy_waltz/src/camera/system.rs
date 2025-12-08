@@ -86,4 +86,6 @@ pub(super) fn follow_anchor(
     waltz_transform
         .translation
         .smooth_nudge(&target_translation, config.decay_rate, dt);
+
+    waltz_transform.look_at(anchor.translation + camera.target, Vec3::Y);
 }

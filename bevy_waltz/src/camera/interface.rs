@@ -6,6 +6,7 @@ use crate::camera::{CameraOrbit, WaltzCamera, WaltzCameraAnchor};
 
 pub(super) fn orbit_rotation(
     mut commands: Commands,
+    camera: Single<&WaltzCamera>,
     mut queries: ParamSet<(
         Single<&mut Transform, With<WaltzCamera>>,
         Single<&Transform, With<WaltzCameraAnchor>>,
@@ -26,6 +27,8 @@ pub(super) fn orbit_rotation(
         let new_relative_pos = rotation_x * rotation_y * offset;
 
         waltz_transform.translation += new_relative_pos;
+
+        waltz_transform.look_at(anchor.translation + camera.target, Vec3::Y);
 
         commands.entity(entity).despawn();
     }

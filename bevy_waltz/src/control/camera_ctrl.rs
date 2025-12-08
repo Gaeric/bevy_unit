@@ -53,13 +53,13 @@ pub fn plugin(app: &mut App) {
 pub fn anchor_camera_to_chracter(
     player: On<Add, WaltzPlayer>,
     mut commands: Commands,
-    player_transform: Single<&Transform, With<WaltzPlayer>>,
+    // player_transform: Single<&Transform, With<WaltzPlayer>>,
     mut waltz_camera: Single<&mut WaltzCamera>,
 ) {
     commands.entity(player.entity).insert(WaltzCameraAnchor);
 
     waltz_camera.height = 1.75;
-    waltz_camera.target = player_transform.translation + Vec3::Y * 1.75;
+    waltz_camera.target = Vec3::Y * 1.75;
     waltz_camera.desired_distance = 3.0;
 }
 
