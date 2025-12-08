@@ -61,7 +61,6 @@ pub(super) fn follow_anchor(
         Single<&mut Transform, With<WaltzCamera>>,
         Single<&Transform, With<WaltzCameraAnchor>>,
     )>,
-
     time: Res<Time>,
     camera: Single<&WaltzCamera>,
     spatial_query: SpatialQuery,

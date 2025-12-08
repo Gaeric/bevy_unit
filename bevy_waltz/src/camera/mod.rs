@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    camera::{config::CameraConfig, interface::update_rotation, system::follow_anchor},
+    camera::{config::CameraConfig, interface::orbit_rotation, system::follow_anchor},
     character::WaltzPlayer,
 };
 
@@ -104,6 +104,6 @@ impl Plugin for WaltzCameraPlugin {
             .register_type::<WaltzCamera>()
             .init_resource::<CameraConfig>()
             .add_systems(Startup, setup_camera)
-            .add_systems(FixedUpdate, (follow_anchor, update_rotation));
+            .add_systems(FixedUpdate, (follow_anchor, orbit_rotation));
     }
 }
