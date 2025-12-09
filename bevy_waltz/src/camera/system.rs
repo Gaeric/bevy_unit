@@ -69,14 +69,13 @@ pub(super) fn follow_anchor(
     let anchor = queries.p1().clone();
     let mut waltz_transform = queries.p0();
 
-    let direction = Dir3::new(waltz_transform.translation - anchor.translation)
-        .unwrap_or(Dir3::new(Vec3::NEG_Z).unwrap());
+    let direction = Dir3::new(camera.direction).unwrap_or(Dir3::new(Vec3::NEG_Z).unwrap());
 
     let expect_distance =
         calc_target_distance(&spatial_query, &config, &camera, &anchor, direction);
     let target_translation =
         anchor.translation + direction * expect_distance + camera.height * Vec3::Y;
-    info!(
+    debug!(
         "anchor translation {}, target translation {}",
         anchor.translation, target_translation
     );

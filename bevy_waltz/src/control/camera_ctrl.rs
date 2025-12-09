@@ -96,7 +96,7 @@ fn orbit_camera(
         return;
     }
 
-    debug!("trigger is {}", trigger.value);
+    info!("trigger is {}", trigger.value);
 
     commands.spawn(CameraOrbit {
         yaw: trigger.value.x,

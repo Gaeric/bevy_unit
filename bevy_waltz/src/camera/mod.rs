@@ -49,6 +49,8 @@ pub struct WaltzCameraAnchor;
 #[derive(Debug, Clone, PartialEq, Component, Reflect, Serialize, Deserialize)]
 #[reflect(Component, Serialize, Deserialize)]
 pub(crate) struct WaltzCamera {
+    /// the xz-plane offset of the anchor
+    pub(crate) direction: Vec3,
     /// the height offset of the anchor
     pub(crate) height: f32,
     /// disired distance between camera and anchor
@@ -63,6 +65,7 @@ pub(crate) struct WaltzCamera {
 impl Default for WaltzCamera {
     fn default() -> Self {
         Self {
+            direction: Vec3::NEG_Z,
             height: 0.0,
             target: Vec3::ZERO,
             secondary_target: None,
