@@ -2,7 +2,7 @@
 use bevy::prelude::*;
 use std::f32::consts::PI;
 
-use crate::camera::{CameraOrbit, WaltzCamera, WaltzCameraAnchor};
+use crate::camera::{CameraOrbit, WaltzCamera};
 
 pub(super) fn orbit_rotation(
     mut commands: Commands,
@@ -10,11 +10,11 @@ pub(super) fn orbit_rotation(
     querys: Query<(Entity, &mut CameraOrbit)>,
 ) {
     for (entity, orbit) in querys {
-
         // pitch: rotation around the x-axis
-        let rotation_x = Quat::from_rotation_x(PI / 16.0 * orbit.pitch);
+        // todo: pitch action independent of rotation
+        let rotation_x = Quat::from_rotation_x(-PI / 32.0 * orbit.pitch );
         // yaw: rotation around the y-axis
-        let rotation_y = Quat::from_rotation_y(PI / 16.0 * orbit.yaw);
+        let rotation_y = Quat::from_rotation_y(PI / 32.0 * orbit.yaw);
 
         camera.direction = rotation_x * rotation_y * camera.direction;
 
