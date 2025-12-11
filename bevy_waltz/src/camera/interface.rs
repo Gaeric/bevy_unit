@@ -11,12 +11,13 @@ pub(super) fn orbit_rotation(
 ) {
     for (entity, orbit) in querys {
         // pitch: rotation around the x-axis
-        // todo: pitch action independent of rotation
-        let rotation_x = Quat::from_rotation_x(-PI / 32.0 * orbit.pitch );
-        // yaw: rotation around the y-axis
-        let rotation_y = Quat::from_rotation_y(PI / 32.0 * orbit.yaw);
+        let right_vec = camera.direction.cross(Vec3::Y).normalize_or_zero();
+        let pitch_quat = Quat::from_axis_angle(right_vec, -PI / 32.0 * orbit.pitch);
 
-        camera.direction = rotation_x * rotation_y * camera.direction;
+        // yaw: rotation around the y-axis
+        let yaw_quat = Quat::from_rotation_y(PI / 32.0 * orbit.yaw);
+
+        camera.direction = pitch_quat * yaw_quat * camera.direction;
 
         debug!("new direction is {}", camera.direction);
 
