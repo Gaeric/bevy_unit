@@ -13,6 +13,7 @@ fn custom_layer(_app: &mut App) -> Option<BoxedLayer> {
     Some(
         bevy::log::tracing_subscriber::fmt::layer()
             .with_writer(non_blocking)
+            .with_ansi(false)
             .with_file(true)
             .with_line_number(true)
             .boxed(),
@@ -25,5 +26,10 @@ fn main() {
         custom_layer,
         ..default()
     }))
+    .add_systems(Startup, setup)
     .run();
+}
+
+fn setup() {
+    info!("log system build");
 }

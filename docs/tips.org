@@ -178,4 +178,7 @@
 
     例：
     RUST_LOG="bevy_shine=debug" cargo run --example minimal
+*** hot patch
+    bevy目前使用dioxus-cli工具链用于hot patch
 
+    命令形式形如：dx serve --hot-patch --example feathers --features="experimental_bevy_feathers,hotpatching"
