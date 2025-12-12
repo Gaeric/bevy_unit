@@ -7,7 +7,8 @@ edition = "2024"
 members = [
         "bevy_shine",
         "bevy_waltz",
-        "units/animation_blending", "units/bevy_cloth",
+        "units/animation_blending",
+        "units/bevy_cloth",
         "units/bone_attachments",
         "units/modular_character",
         "units/tps_camera",
@@ -19,6 +20,7 @@ bevy = { version = "0.17.2", features = [
         "wayland",
         "dynamic_linking",
         "hotpatching",
+        "experimental_bevy_feathers",
 ] }
 # bevy_shine = { path = "bevy_shine" }
 # modular_character = { path = "units/modular_character" }
@@ -58,6 +60,7 @@ bevy_light = { path = "../bevy_engines/bevy_0.17/crates/bevy_light" }
 bevy_pbr = { path = "../bevy_engines/bevy_0.17/crates/bevy_pbr" }
 bevy_state = { path = "../bevy_engines/bevy_0.17/crates/bevy_state" }
 bevy_utils = { path = "../bevy_engines/bevy_0.17/crates/bevy_utils" }
+bevy_feathers = { path = "../bevy_engines/bevy_0.17/crates/bevy_feathers" }
 
 # avian3d = { path = "../avian/crates/avian3d/" }
 # bevy-tnua = { path = "../bevy-tnua/" }

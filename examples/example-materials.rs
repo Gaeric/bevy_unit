@@ -1,4 +1,8 @@
-use bevy::prelude::*;
+use bevy::{
+    feathers::{theme::ThemeBackgroundColor, tokens},
+    input_focus::tab_navigation::TabGroup,
+    prelude::*,
+};
 
 fn main() {
     App::new()
@@ -23,4 +27,33 @@ fn setup(
         MeshMaterial3d(materials.add(Color::from(Hsla::hsl(300.0, 1.0, 0.5)))),
         Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
     ));
+
+    commands.spawn((
+        Node {
+            width: percent(100),
+            height: percent(100),
+            align_items: AlignItems::Start,
+            justify_content: JustifyContent::Start,
+            display: Display::Flex,
+            flex_direction: FlexDirection::Column,
+            row_gap: px(10),
+            ..default()
+        },
+        TabGroup::default(),
+        ThemeBackgroundColor(tokens::WINDOW_BG),
+        children![],
+    ));
+}
+
+fn update_materials(
+    material_handles: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for material_handle in material_handles.iter() {
+        if let Some(material) = materials.get_mut(material_handle)
+            && let Color::Hsla(ref mut hsla) = material.base_color
+        {
+            *hsla = hsla.rotate_hue(1.0 / 60.0 * 100.0);
+        }
+    }
 }
