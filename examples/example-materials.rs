@@ -12,6 +12,7 @@ use bevy::{
     },
     input_focus::tab_navigation::TabGroup,
     prelude::*,
+    ui_widgets::{SliderValue, ValueChange, observe},
 };
 
 #[derive(Component)]
@@ -86,27 +87,48 @@ fn setup(
                     },
                     children![Text("Hsl".to_owned()), color_swatch(HslSwatch),]
                 ),
-                (color_slider(
-                    ColorSliderProps {
-                        value: 0.5,
-                        channel: ColorChannel::HslHue
-                    },
-                    ()
-                ),),
-                (color_slider(
-                    ColorSliderProps {
-                        value: 0.5,
-                        channel: ColorChannel::HslSaturation
-                    },
-                    ()
-                )),
-                (color_slider(
-                    ColorSliderProps {
-                        value: 0.5,
-                        channel: ColorChannel::HslLightness
-                    },
-                    ()
-                ))
+                (
+                    color_slider(
+                        ColorSliderProps {
+                            value: 0.5,
+                            channel: ColorChannel::HslHue
+                        },
+                        ()
+                    ),
+                    observe(
+                        |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
+                            color.hsl_color.hue = change.value
+                        }
+                    )
+                ),
+                (
+                    color_slider(
+                        ColorSliderProps {
+                            value: 0.5,
+                            channel: ColorChannel::HslSaturation
+                        },
+                        ()
+                    ),
+                    observe(
+                        |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
+                            color.hsl_color.saturation = change.value
+                        }
+                    )
+                ),
+                (
+                    color_slider(
+                        ColorSliderProps {
+                            value: 0.5,
+                            channel: ColorChannel::HslLightness
+                        },
+                        ()
+                    ),
+                    observe(
+                        |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
+                            color.hsl_color.lightness = change.value
+                        }
+                    )
+                )
             ]
         ),],
     ));
@@ -126,18 +148,43 @@ fn update_materials(
 }
 
 fn update_colors(
-    colors: Res<HslWidgetStates>,
+    color: Res<HslWidgetStates>,
     mut sliders: Query<(Entity, &ColorSlider, &mut SliderBaseColor)>,
-    swatches: Query<(&HslSwatch, &Children)>,
+    swatches: Query<&Children, With<HslSwatch>>,
     mut commands: Commands,
 ) {
-    if colors.is_changed() {
+    if color.is_changed() {
         for (slider_ent, slider, mut base) in sliders.iter_mut() {
             match slider.channel {
-                _ => {
-                    info!("12341234241234")
+                ColorChannel::HslHue => {
+                    base.0 = color.hsl_color.into();
+                    commands
+                        .entity(slider_ent)
+                        .insert(SliderValue(color.hsl_color.hue));
                 }
+
+                ColorChannel::HslSaturation => {
+                    base.0 = color.hsl_color.into();
+                    commands
+                        .entity(slider_ent)
+                        .insert(SliderValue(color.hsl_color.saturation));
+                }
+
+                ColorChannel::HslLightness => {
+                    base.0 = color.hsl_color.into();
+                    commands
+                        .entity(slider_ent)
+                        .insert(SliderValue(color.hsl_color.lightness));
+                }
+
+                _ => {}
             }
+        }
+
+        for children in swatches.iter() {
+            commands
+                .entity(children[0])
+                .insert(BackgroundColor(color.hsl_color.into()));
         }
     }
 }
