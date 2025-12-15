@@ -181,4 +181,6 @@
 *** hot patch
     bevy目前使用dioxus-cli工具链用于hot patch
 
-    命令形式形如：dx serve --hot-patch --example feathers --features="experimental_bevy_feathers,hotpatching"
+    命令形式形如：BEVY_ASSET_ROOT="." dx serve --hot-patch --example feathers --features="experimental_bevy_feathers,hotpatching"
+
+    注意需要使用BEVY_ASSET_ROOT，以便于正常加载资源文件
