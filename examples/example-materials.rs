@@ -22,6 +22,10 @@ struct HslSwatch;
 struct HslWidgetStates {
     hsl_color: Hsla,
 }
+
+#[derive(Component)]
+struct ActiveEntity;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -30,12 +34,13 @@ fn main() {
         .insert_resource(HslWidgetStates {
             hsl_color: AMBER_800.into(),
         })
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup_cube, setup_ui))
         .add_systems(Update, update_colors)
+        .add_systems(Update, update_materials)
         .run();
 }
 
-fn setup(
+fn setup_cube(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -50,12 +55,15 @@ fn setup(
         Mesh3d(cube.clone()),
         MeshMaterial3d(materials.add(Color::from(Hsla::hsl(300.0, 1.0, 0.5)))),
         Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+        ActiveEntity,
     ));
+}
 
+fn setup_ui(mut commands: Commands) {
     commands.spawn((
         Node {
-            width: percent(100),
-            height: percent(100),
+            width: percent(20),
+            height: percent(30),
             align_items: AlignItems::Start,
             justify_content: JustifyContent::Start,
             display: Display::Flex,
@@ -135,14 +143,15 @@ fn setup(
 }
 
 fn update_materials(
-    material_handles: Query<&MeshMaterial3d<StandardMaterial>>,
+    material_handles: Query<&MeshMaterial3d<StandardMaterial>, With<ActiveEntity>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    color: Res<HslWidgetStates>,
 ) {
     for material_handle in material_handles.iter() {
         if let Some(material) = materials.get_mut(material_handle)
             && let Color::Hsla(ref mut hsla) = material.base_color
         {
-            *hsla = hsla.rotate_hue(1.0 / 60.0 * 100.0);
+            *hsla = color.hsl_color
         }
     }
 }
