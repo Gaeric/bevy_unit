@@ -7,8 +7,10 @@ use bevy::{
         ron::{self, ser::PrettyConfig},
     },
     color::palettes::css::LIGHT_GRAY,
+    mesh::skinning::SkinnedMesh,
     platform::collections::HashSet,
     prelude::*,
+    scene::SceneInstanceReady,
     tasks::IoTaskPool,
 };
 
@@ -107,6 +109,7 @@ fn main() {
         .add_systems(Update, setup_animation_graph_once_loaded)
         .add_systems(Update, handle_button_toggles)
         .add_systems(Update, update_ui)
+        .add_observer(show_joints)
         .init_resource::<AppState>()
         .run();
 }
@@ -507,6 +510,24 @@ fn update_ui(
             writer.for_each_color(text, |mut color| {
                 color.0 = if enabled { Color::BLACK } else { Color::WHITE };
             });
+        }
+    }
+}
+
+fn show_joints(
+    scene_ready: On<SceneInstanceReady>,
+    children: Query<&Children>,
+    query: Query<&SkinnedMesh>,
+    names: Query<&Name>,
+) {
+    for descendant in children.iter_descendants(scene_ready.entity) {
+        if let Ok(skinned_mesh) = query.get(descendant) {
+            info!("skinned mesh is {skinned_mesh:?}");
+            for entity in &skinned_mesh.joints {
+                if let Ok(name) = names.get(*entity) {
+                    info!("joint name is {name}");
+                }
+            }
         }
     }
 }
