@@ -3,8 +3,8 @@ use bevy::{
     feathers::{
         FeathersPlugins,
         controls::{
-            ColorChannel, ColorSlider, ColorSliderProps, SliderBaseColor, color_slider,
-            color_swatch,
+            ColorChannel, ColorSlider, ColorSliderProps, SliderBaseColor, SliderProps,
+            color_slider, color_swatch, slider,
         },
         dark_theme::create_dark_theme,
         theme::{ThemeBackgroundColor, UiTheme},
@@ -12,7 +12,9 @@ use bevy::{
     },
     input_focus::tab_navigation::TabGroup,
     prelude::*,
-    ui_widgets::{SliderValue, ValueChange, observe},
+    ui_widgets::{
+        SliderPrecision, SliderStep, SliderValue, ValueChange, observe, slider_self_update,
+    },
 };
 
 #[derive(Component)]
@@ -136,7 +138,18 @@ fn setup_ui(mut commands: Commands) {
                             color.hsl_color.lightness = change.value
                         }
                     )
-                )
+                ),
+                (
+                    slider(
+                        SliderProps {
+                            max: 100.0,
+                            value: 20.0,
+                            ..default()
+                        },
+                        (SliderStep(1.0), SliderPrecision(2),)
+                    ),
+                    observe(slider_self_update)
+                ),
             ]
         ),],
     ));
