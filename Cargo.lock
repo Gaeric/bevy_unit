@@ -393,7 +393,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bevy"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_dylib",
  "bevy_internal",
@@ -481,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_a11y"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "accesskit",
  "bevy_app",
@@ -492,14 +492,14 @@ dependencies = [
 
 [[package]]
 name = "bevy_android"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "android-activity",
 ]
 
 [[package]]
 name = "bevy_animation"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_animation_macros",
  "bevy_app",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_animation_macros"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_macro_utils",
  "quote",
@@ -539,14 +539,14 @@ dependencies = [
 
 [[package]]
 name = "bevy_anti_alias"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
  "bevy_camera",
  "bevy_core_pipeline",
  "bevy_derive",
- "bevy_diagnostic 0.17.2",
+ "bevy_diagnostic 0.17.3",
  "bevy_ecs",
  "bevy_image",
  "bevy_math",
@@ -559,13 +559,13 @@ dependencies = [
 
 [[package]]
 name = "bevy_app"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_derive",
  "bevy_ecs",
  "bevy_platform",
  "bevy_reflect",
- "bevy_tasks 0.17.2",
+ "bevy_tasks 0.17.3",
  "bevy_utils",
  "cfg-if",
  "console_error_panic_hook",
@@ -582,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_asset"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "async-broadcast",
  "async-fs",
@@ -594,7 +594,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_platform",
  "bevy_reflect",
- "bevy_tasks 0.17.2",
+ "bevy_tasks 0.17.3",
  "bevy_utils",
  "bitflags 2.9.4",
  "blake3",
@@ -620,7 +620,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_asset_macros"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_macro_utils",
  "proc-macro2",
@@ -630,7 +630,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_audio"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_camera"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -678,7 +678,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_color"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_math",
  "bevy_reflect",
@@ -692,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_core_pipeline"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_derive"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_macro_utils",
  "quote",
@@ -728,13 +728,13 @@ dependencies = [
 
 [[package]]
 name = "bevy_dev_tools"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
  "bevy_camera",
  "bevy_color",
- "bevy_diagnostic 0.17.2",
+ "bevy_diagnostic 0.17.3",
  "bevy_ecs",
  "bevy_math",
  "bevy_picking",
@@ -753,6 +753,8 @@ dependencies = [
 [[package]]
 name = "bevy_diagnostic"
 version = "0.17.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f12fa32312818c08aa4035bebe9fb3f62aaf7efae33688e718dd6ee6c0147493"
 dependencies = [
  "atomic-waker",
  "bevy_app",
@@ -762,24 +764,22 @@ dependencies = [
  "bevy_time",
  "const-fnv1a-hash",
  "log",
- "serde",
- "sysinfo",
 ]
 
 [[package]]
 name = "bevy_diagnostic"
-version = "0.17.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f12fa32312818c08aa4035bebe9fb3f62aaf7efae33688e718dd6ee6c0147493"
+version = "0.17.3"
 dependencies = [
  "atomic-waker",
  "bevy_app",
  "bevy_ecs",
  "bevy_platform",
- "bevy_tasks 0.17.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bevy_tasks 0.17.3",
  "bevy_time",
  "const-fnv1a-hash",
  "log",
+ "serde",
+ "sysinfo",
 ]
 
 [[package]]
@@ -792,21 +792,21 @@ dependencies = [
 
 [[package]]
 name = "bevy_dylib"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_internal",
 ]
 
 [[package]]
 name = "bevy_ecs"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "arrayvec",
  "bevy_ecs_macros",
  "bevy_platform",
  "bevy_ptr",
  "bevy_reflect",
- "bevy_tasks 0.17.2",
+ "bevy_tasks 0.17.3",
  "bevy_utils",
  "bitflags 2.9.4",
  "bumpalo",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_ecs_macros"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_macro_utils",
  "proc-macro2",
@@ -882,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_encase_derive"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_macro_utils",
  "encase_derive_impl",
@@ -915,7 +915,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_feathers"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "accesskit",
  "bevy_a11y",
@@ -947,7 +947,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98664324f1ee21f2f19ada3a2c108662d1b4fbf7806eb84780f5d4d5814eb051"
 dependencies = [
  "bevy_app",
- "bevy_diagnostic 0.17.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bevy_diagnostic 0.17.2",
  "bevy_ecs",
  "bevy_log",
  "bevy_platform",
@@ -961,7 +961,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_gilrs"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_gizmos"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1002,7 +1002,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_gizmos_macros"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_macro_utils",
  "quote",
@@ -1011,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_gltf"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "base64",
  "bevy_animation",
@@ -1029,7 +1029,7 @@ dependencies = [
  "bevy_reflect",
  "bevy_render",
  "bevy_scene",
- "bevy_tasks 0.17.2",
+ "bevy_tasks 0.17.3",
  "bevy_transform",
  "fixedbitset",
  "gltf",
@@ -1055,7 +1055,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_image"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1082,7 +1082,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_input"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1097,7 +1097,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_input_focus"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1112,7 +1112,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_internal"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_a11y",
  "bevy_android",
@@ -1126,7 +1126,7 @@ dependencies = [
  "bevy_core_pipeline",
  "bevy_derive",
  "bevy_dev_tools",
- "bevy_diagnostic 0.17.2",
+ "bevy_diagnostic 0.17.3",
  "bevy_ecs",
  "bevy_feathers",
  "bevy_gilrs",
@@ -1152,7 +1152,7 @@ dependencies = [
  "bevy_sprite",
  "bevy_sprite_render",
  "bevy_state",
- "bevy_tasks 0.17.2",
+ "bevy_tasks 0.17.3",
  "bevy_text",
  "bevy_time",
  "bevy_transform",
@@ -1166,7 +1166,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_light"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1185,7 +1185,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_log"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "android_log-sys",
  "bevy_app",
@@ -1201,7 +1201,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_macro_utils"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "parking_lot",
  "proc-macro2",
@@ -1212,7 +1212,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_math"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "approx",
  "bevy_reflect",
@@ -1230,7 +1230,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_mesh"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1259,7 +1259,7 @@ checksum = "7ef8e4b7e61dfe7719bb03c884dc270cd46a82efb40f93e9933b990c5c190c59"
 
 [[package]]
 name = "bevy_pbr"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1267,7 +1267,7 @@ dependencies = [
  "bevy_color",
  "bevy_core_pipeline",
  "bevy_derive",
- "bevy_diagnostic 0.17.2",
+ "bevy_diagnostic 0.17.3",
  "bevy_ecs",
  "bevy_image",
  "bevy_light",
@@ -1293,7 +1293,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_picking"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1315,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_platform"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "critical-section",
  "foldhash 0.2.0",
@@ -1334,7 +1334,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_post_process"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1362,11 +1362,11 @@ dependencies = [
 
 [[package]]
 name = "bevy_ptr"
-version = "0.17.2"
+version = "0.17.3"
 
 [[package]]
 name = "bevy_reflect"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "assert_type_match",
  "bevy_platform",
@@ -1392,7 +1392,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_reflect_derive"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_macro_utils",
  "indexmap",
@@ -1404,7 +1404,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_render"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "async-channel",
  "bevy_app",
@@ -1412,7 +1412,7 @@ dependencies = [
  "bevy_camera",
  "bevy_color",
  "bevy_derive",
- "bevy_diagnostic 0.17.2",
+ "bevy_diagnostic 0.17.3",
  "bevy_ecs",
  "bevy_encase_derive",
  "bevy_image",
@@ -1422,7 +1422,7 @@ dependencies = [
  "bevy_reflect",
  "bevy_render_macros",
  "bevy_shader",
- "bevy_tasks 0.17.2",
+ "bevy_tasks 0.17.3",
  "bevy_time",
  "bevy_transform",
  "bevy_utils",
@@ -1451,7 +1451,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_render_macros"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_macro_utils",
  "proc-macro2",
@@ -1461,7 +1461,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_scene"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1480,7 +1480,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_shader"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_asset",
  "bevy_platform",
@@ -1506,7 +1506,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_solari"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_anti_alias",
  "bevy_app",
@@ -1515,7 +1515,7 @@ dependencies = [
  "bevy_color",
  "bevy_core_pipeline",
  "bevy_derive",
- "bevy_diagnostic 0.17.2",
+ "bevy_diagnostic 0.17.3",
  "bevy_ecs",
  "bevy_image",
  "bevy_math",
@@ -1534,7 +1534,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_sprite"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1557,7 +1557,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_sprite_render"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1587,7 +1587,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_state"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1601,28 +1601,11 @@ dependencies = [
 
 [[package]]
 name = "bevy_state_macros"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_macro_utils",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "bevy_tasks"
-version = "0.17.2"
-dependencies = [
- "async-channel",
- "async-executor",
- "async-task",
- "atomic-waker",
- "bevy_platform",
- "concurrent-queue",
- "crossbeam-queue",
- "derive_more",
- "futures-lite",
- "heapless",
- "pin-project",
 ]
 
 [[package]]
@@ -1643,8 +1626,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_tasks"
+version = "0.17.3"
+dependencies = [
+ "async-channel",
+ "async-executor",
+ "async-task",
+ "atomic-waker",
+ "bevy_platform",
+ "concurrent-queue",
+ "crossbeam-queue",
+ "derive_more",
+ "futures-lite",
+ "heapless",
+ "pin-project",
+]
+
+[[package]]
 name = "bevy_text"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1668,7 +1668,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_time"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1681,14 +1681,14 @@ dependencies = [
 
 [[package]]
 name = "bevy_transform"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_log",
  "bevy_math",
  "bevy_reflect",
- "bevy_tasks 0.17.2",
+ "bevy_tasks 0.17.3",
  "bevy_utils",
  "derive_more",
  "serde",
@@ -1706,7 +1706,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_ui"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "accesskit",
  "bevy_a11y",
@@ -1737,7 +1737,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_ui_render"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1766,7 +1766,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_ui_widgets"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "accesskit",
  "bevy_a11y",
@@ -1783,7 +1783,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_utils"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_platform",
  "disqualified",
@@ -1808,7 +1808,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_window"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1825,7 +1825,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_winit"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "accesskit",
  "accesskit_winit",
@@ -1843,10 +1843,11 @@ dependencies = [
  "bevy_math",
  "bevy_platform",
  "bevy_reflect",
- "bevy_tasks 0.17.2",
+ "bevy_tasks 0.17.3",
  "bevy_window",
  "bytemuck",
  "cfg-if",
+ "js-sys",
  "tracing",
  "wasm-bindgen",
  "web-sys",
@@ -2780,7 +2781,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4168,7 +4169,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5208,7 +5209,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6548,7 +6549,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

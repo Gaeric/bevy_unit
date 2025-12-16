@@ -6,9 +6,9 @@ description = "Experimental implementation of bone attachments (forked from bevy
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-bevy = "0.17.2"
-bevy_scene = { version = "0.17.2", optional = true }
-bevy_asset = { version = "0.17.2", optional = true }
+bevy = "0.17.3"
+bevy_scene = { version = "0.17.3", optional = true }
+bevy_asset = { version = "0.17.3", optional = true }
 tracing = { version = "0.1", default-features = false }
 
 [features]
