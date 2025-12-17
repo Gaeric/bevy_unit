@@ -184,3 +184,36 @@
     命令形式形如：BEVY_ASSET_ROOT="." dx serve --hot-patch --example feathers --features="experimental_bevy_feathers,hotpatching"
 
     注意需要使用BEVY_ASSET_ROOT，以便于正常加载资源文件
+*** ecs note
+    ecs中update函数在对应schedule时一定执行，并不依赖于Query中的查询结果，验证代码如下：
+    #+begin_src rust-ts
+      fn check_archetype(query: Query<&PrivateCheck>) {
+          info!("check for archetype filter")
+      }
+
+      fn check_added(query: Query<Entity, Added<PrivateCheck>>) {
+          info!("check for added")
+      }
+
+      #[derive(Component)]
+      struct PrivateCheck;
+
+      pub fn plugin(app: &mut App) {
+          app.add_systems(Update, check_added)
+              .add_systems(Update, check_archetype);
+      }
+    #+end_src
+
+    使用for方式获取query的结果，才会受到query查询的影响
+
+    或者使用single方式查询，在组件不存在时跳过该system
+    #+begin_src rust-ts
+      /// [System parameter] that provides access to single entity's components, much like [`Query::single`]/[`Query::single_mut`].
+      ///
+      /// This [`SystemParam`](crate::system::SystemParam) fails validation if zero or more than one matching entity exists.
+      /// This will cause the system to be skipped, according to the rules laid out in [`SystemParamValidationError`](crate::system::SystemParamValidationError).
+
+      fn check_archetype(query: Single<&PrivateCheck>) {
+          info!("check for archetype filter")
+      }
+    #+end_src
