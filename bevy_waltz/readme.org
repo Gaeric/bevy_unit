@@ -35,9 +35,9 @@
   - [ ] dialogue
   - [ ] navigation
   - [ ] dev/debug tools
-  - [ ] rendering
+  - [-] rendering
     - [ ] GI
-    - [ ] sky box
+    - [X] sky box
     - [ ] fog
     - [ ] highlight
 * Credits
