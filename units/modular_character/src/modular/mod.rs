@@ -49,53 +49,42 @@ pub const FEET: [&str; 4] = [
     "Adventurer.gltf#Scene5",
 ];
 
+// macro_rules! register_modular {
+//     ($($component:ty, $idx:expr), *) => {
+//         $(app.add_systems(Update, (
+//             update_modular::<$component>,
+//             cycle_modular_segment::<$component, $idx>,
+//             reset_changed::<$component>,
+//         ).chain());
+//         )*
+//     };
+// }
+
+trait ModularAppExt {
+    fn register_modular_component<T: ModularCharacter>(&mut self) -> &mut Self;
+}
+
+impl ModularAppExt for App {
+    fn register_modular_component<T: ModularCharacter>(&mut self) -> &mut Self {
+        self.add_systems(
+            Update,
+            (
+                update_modular::<T>,
+                cycle_modular_segment::<T>,
+                reset_changed::<T>,
+            )
+                .chain(),
+        )
+    }
+}
+
 impl Plugin for ModularPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ResetChanged>()
-            .add_systems(Update, update_modular::<ModularCharacterHead>)
-            .add_systems(Update, update_modular::<ModularCharacterBody>)
-            .add_systems(Update, update_modular::<ModularCharacterLegs>)
-            .add_systems(Update, update_modular::<ModularCharacterFeet>)
-            .add_systems(
-                Update,
-                cycle_modular_segment::<ModularCharacterHead, 0>
-                    .after(update_modular::<ModularCharacterHead>),
-            )
-            .add_systems(
-                Update,
-                cycle_modular_segment::<ModularCharacterBody, 1>
-                    .after(update_modular::<ModularCharacterBody>),
-            )
-            .add_systems(
-                Update,
-                cycle_modular_segment::<ModularCharacterLegs, 2>
-                    .after(update_modular::<ModularCharacterLegs>),
-            )
-            .add_systems(
-                Update,
-                cycle_modular_segment::<ModularCharacterFeet, 3>
-                    .after(update_modular::<ModularCharacterFeet>),
-            )
-            .add_systems(
-                Update,
-                reset_changed::<ModularCharacterHead>
-                    .after(cycle_modular_segment::<ModularCharacterHead, 0>),
-            )
-            .add_systems(
-                Update,
-                reset_changed::<ModularCharacterBody>
-                    .after(cycle_modular_segment::<ModularCharacterBody, 1>),
-            )
-            .add_systems(
-                Update,
-                reset_changed::<ModularCharacterLegs>
-                    .after(cycle_modular_segment::<ModularCharacterLegs, 2>),
-            )
-            .add_systems(
-                Update,
-                reset_changed::<ModularCharacterFeet>
-                    .after(cycle_modular_segment::<ModularCharacterFeet, 3>),
-            );
+        app.add_message::<ResetChanged>();
+        app.register_modular_component::<ModularCharacterHead>();
+        app.register_modular_component::<ModularCharacterBody>();
+        app.register_modular_component::<ModularCharacterLegs>();
+        app.register_modular_component::<ModularCharacterFeet>();
     }
 }
 
@@ -243,7 +232,8 @@ fn update_modular<T: components::ModularCharacter>(
     }
 }
 
-fn cycle_modular_segment<T: ModularCharacter, const ID: usize>(
+// fn cycle_modular_segment<T: ModularCharacter, const ID: usize>(
+fn cycle_modular_segment<T: ModularCharacter>(
     mut modular: Query<&mut T>,
     key_input: Res<ButtonInput<KeyCode>>,
     mut scene_spawner: ResMut<SceneSpawner>,
@@ -262,6 +252,7 @@ fn cycle_modular_segment<T: ModularCharacter, const ID: usize>(
         return;
     };
 
+    let ID = module.component_id();
     *module.id_mut() = if key_input.just_pressed(KEYS[ID].0) {
         module.id().wrapping_sub(1).min(MODULES[ID].len() - 1)
     } else if key_input.just_pressed(KEYS[ID].1) {
