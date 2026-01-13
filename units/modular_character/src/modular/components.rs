@@ -17,6 +17,7 @@ pub trait ModularCharacter: Component<Mutability = Mutable> {
     fn entities(&self) -> &Vec<Entity>;
 }
 
+#[macro_export]
 macro_rules! create_modular_segment {
     ($name:ident, $index:expr) => {
         paste::paste! {
@@ -58,8 +59,3 @@ macro_rules! create_modular_segment {
         }
     };
 }
-
-create_modular_segment!(Head, 0);
-create_modular_segment!(Body, 1);
-create_modular_segment!(Legs, 2);
-create_modular_segment!(Feet, 3);

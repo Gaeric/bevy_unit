@@ -6,11 +6,10 @@ use std::collections::BTreeMap;
 use bevy::{
     camera::primitives::Aabb, mesh::skinning::SkinnedMesh, prelude::*,
     render::batching::NoAutomaticBatching,
+    scene::InstanceId,
 };
 use components::ModularCharacter;
-pub use components::{
-    ModularCharacterBody, ModularCharacterFeet, ModularCharacterHead, ModularCharacterLegs,
-};
+use crate::create_modular_segment;
 
 #[derive(Debug, Message, Deref)]
 pub struct ResetChanged(pub Entity);
@@ -49,16 +48,10 @@ pub const FEET: [&str; 4] = [
     "Adventurer.gltf#Scene5",
 ];
 
-// macro_rules! register_modular {
-//     ($($component:ty, $idx:expr), *) => {
-//         $(app.add_systems(Update, (
-//             update_modular::<$component>,
-//             cycle_modular_segment::<$component, $idx>,
-//             reset_changed::<$component>,
-//         ).chain());
-//         )*
-//     };
-// }
+create_modular_segment!(Head, 0);
+create_modular_segment!(Body, 1);
+create_modular_segment!(Legs, 2);
+create_modular_segment!(Feet, 3);
 
 trait ModularAppExt {
     fn register_modular_component<T: ModularCharacter>(&mut self) -> &mut Self;
@@ -252,11 +245,14 @@ fn cycle_modular_segment<T: ModularCharacter>(
         return;
     };
 
-    let ID = module.component_id();
-    *module.id_mut() = if key_input.just_pressed(KEYS[ID].0) {
-        module.id().wrapping_sub(1).min(MODULES[ID].len() - 1)
-    } else if key_input.just_pressed(KEYS[ID].1) {
-        (module.id() + 1) % MODULES[ID].len()
+    let component_id = module.component_id();
+    *module.id_mut() = if key_input.just_pressed(KEYS[component_id].0) {
+        module
+            .id()
+            .wrapping_sub(1)
+            .min(MODULES[component_id].len() - 1)
+    } else if key_input.just_pressed(KEYS[component_id].1) {
+        (module.id() + 1) % MODULES[component_id].len()
     } else {
         return;
     };
@@ -266,8 +262,9 @@ fn cycle_modular_segment<T: ModularCharacter>(
     if let Some(instance) = module.instance_id() {
         scene_spawner.despawn_instance(*instance);
     }
-    *module.instance_id_mut() =
-        Some(scene_spawner.spawn(asset_server.load(mc_model_path(MODULES[ID][*module.id()]))));
+    *module.instance_id_mut() = Some(
+        scene_spawner.spawn(asset_server.load(mc_model_path(MODULES[component_id][*module.id()]))),
+    );
 }
 
 fn reset_changed<T: ModularCharacter>(
