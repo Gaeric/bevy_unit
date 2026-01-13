@@ -73,8 +73,8 @@ impl Plugin for ModularPlugin {
             )
             .add_systems(
                 Update,
-                cycle_modular_segment::<ModularCharacterLegs, 3>
-                    .after(update_modular::<ModularCharacterBody>),
+                cycle_modular_segment::<ModularCharacterFeet, 3>
+                    .after(update_modular::<ModularCharacterFeet>),
             )
             .add_systems(
                 Update,
@@ -85,6 +85,16 @@ impl Plugin for ModularPlugin {
                 Update,
                 reset_changed::<ModularCharacterBody>
                     .after(cycle_modular_segment::<ModularCharacterBody, 1>),
+            )
+            .add_systems(
+                Update,
+                reset_changed::<ModularCharacterLegs>
+                    .after(cycle_modular_segment::<ModularCharacterLegs, 2>),
+            )
+            .add_systems(
+                Update,
+                reset_changed::<ModularCharacterFeet>
+                    .after(cycle_modular_segment::<ModularCharacterFeet, 3>),
             );
     }
 }
