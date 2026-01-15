@@ -3,13 +3,12 @@ mod components;
 pub struct ModularPlugin;
 use std::collections::BTreeMap;
 
+use crate::create_modular_segment;
 use bevy::{
     camera::primitives::Aabb, mesh::skinning::SkinnedMesh, prelude::*,
-    render::batching::NoAutomaticBatching,
-    scene::InstanceId,
+    render::batching::NoAutomaticBatching, scene::InstanceId,
 };
 use components::ModularCharacter;
-use crate::create_modular_segment;
 
 #[derive(Debug, Message, Deref)]
 pub struct ResetChanged(pub Entity);
@@ -90,7 +89,7 @@ type MeshPrimitiveParamSet = (
     &'static Aabb,
 );
 
-fn update_modular<T: components::ModularCharacter>(
+fn update_modular<T: ModularCharacter>(
     mut commands: Commands,
     mut changed_modular: Query<(Entity, &mut T), Changed<T>>,
     mesh_primitives_query: Query<MeshPrimitiveParamSet>,
@@ -265,6 +264,8 @@ fn cycle_modular_segment<T: ModularCharacter>(
     *module.instance_id_mut() = Some(
         scene_spawner.spawn(asset_server.load(mc_model_path(MODULES[component_id][*module.id()]))),
     );
+
+    info!("modular id is {:?}", module.instance_id());
 }
 
 fn reset_changed<T: ModularCharacter>(
