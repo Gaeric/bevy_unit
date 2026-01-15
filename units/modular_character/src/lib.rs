@@ -1,16 +1,12 @@
 mod modular;
 
 use std::{
-    collections::{btree_map::Entry, BTreeMap},
+    collections::{BTreeMap, btree_map::Entry},
     time::Duration,
 };
 
 use bevy::prelude::*;
 use modular::*;
-
-#[cfg(feature = "with-inspector")]
-use bevy_inspector_egui::quick::WorldInspectorPlugin;
-
 pub struct ModularCharacterPlugin;
 
 impl Plugin for ModularCharacterPlugin {
@@ -20,7 +16,12 @@ impl Plugin for ModularCharacterPlugin {
             .add_plugins(ModularPlugin);
 
         #[cfg(feature = "with-inspector")]
-        app.add_plugins(WorldInspectorPlugin::new());
+        {
+            use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
+
+            app.add_plugins(EguiPlugin::default())
+                .add_plugins(WorldInspectorPlugin::new());
+        }
 
         // AmbientLight Resource
         app.insert_resource(AmbientLight {
