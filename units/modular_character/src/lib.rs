@@ -12,8 +12,8 @@ pub struct ModularCharacterPlugin;
 impl Plugin for ModularCharacterPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         // plugins
-        app.add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
-            .add_plugins(ModularPlugin);
+        app.add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()));
+        app.add_plugins(ModularPlugin);
 
         #[cfg(feature = "with-inspector")]
         {
@@ -98,13 +98,13 @@ fn spawn_models(mut commands: Commands, asset_server: Res<AssetServer>) {
         Name::new("Witch"),
     ));
 
-    commands.spawn((
-        SceneRoot(
-            asset_server.load(GltfAssetLabel::Scene(0).from_asset(mc_model_path("SciFi.gltf"))),
-        ),
-        Transform::from_xyz(-1.0, 0., 0.0),
-        Name::new("SciFi"),
-    ));
+    // commands.spawn((
+    //     SceneRoot(
+    //         asset_server.load(GltfAssetLabel::Scene(0).from_asset(mc_model_path("SciFi.gltf"))),
+    //     ),
+    //     Transform::from_xyz(-1.0, 0., 0.0),
+    //     Name::new("SciFi"),
+    // ));
 }
 
 #[derive(Debug, Resource)]

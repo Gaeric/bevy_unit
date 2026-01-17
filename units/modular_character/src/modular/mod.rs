@@ -17,32 +17,32 @@ pub fn mc_model_path(path: &str) -> String {
     format!("modular_character/origin/{path}")
 }
 
-pub const HEADS: [&str; 4] = [
+pub const HEADS: [&str; 3] = [
     "Witch.gltf#Scene2",
-    "SciFi.gltf#Scene2",
+    // "SciFi.gltf#Scene2",
     "Soldier.gltf#Scene2",
     "Adventurer.gltf#Scene2",
 ];
 
-pub const BODIES: [&str; 5] = [
+pub const BODIES: [&str; 4] = [
     "Witch.gltf#Scene3",
-    "SciFi.gltf#Scene3",
+    // "SciFi.gltf#Scene3",
     "Soldier.gltf#Scene3",
     "Adventurer.gltf#Scene3",
     "scifi_torso.glb#Scene0",
 ];
 
-pub const LEGS: [&str; 5] = [
+pub const LEGS: [&str; 4] = [
     "Witch.gltf#Scene4",
-    "SciFi.gltf#Scene4",
+    // "SciFi.gltf#Scene4",
     "Soldier.gltf#Scene4",
     "Adventurer.gltf#Scene4",
     "witch_legs.glb#Scene0",
 ];
 
-pub const FEET: [&str; 4] = [
+pub const FEET: [&str; 3] = [
     "Witch.gltf#Scene5",
-    "SciFi.gltf#Scene5",
+    // "SciFi.gltf#Scene5",
     "Soldier.gltf#Scene5",
     "Adventurer.gltf#Scene5",
 ];
@@ -224,7 +224,6 @@ fn update_modular<T: ModularCharacter>(
     }
 }
 
-// fn cycle_modular_segment<T: ModularCharacter, const ID: usize>(
 fn cycle_modular_segment<T: ModularCharacter>(
     mut modular: Query<&mut T>,
     key_input: Res<ButtonInput<KeyCode>>,
@@ -265,7 +264,11 @@ fn cycle_modular_segment<T: ModularCharacter>(
         scene_spawner.spawn(asset_server.load(mc_model_path(MODULES[component_id][*module.id()]))),
     );
 
-    info!("modular id is {:?}", module.instance_id());
+    info!(
+        "modular id is {}, instance id {:?}",
+        module.id(),
+        module.instance_id()
+    );
 }
 
 fn reset_changed<T: ModularCharacter>(
