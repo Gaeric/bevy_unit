@@ -8,18 +8,20 @@ use bevy::{
 };
 
 pub trait ModularCharacter: Component<Mutability = Mutable> {
-    fn component_id(&self) -> usize;
     fn id_mut(&mut self) -> &mut usize;
     fn instance_id_mut(&mut self) -> &mut Option<InstanceId>;
     fn entities_mut(&mut self) -> &mut Vec<Entity>;
     fn id(&self) -> &usize;
     fn instance_id(&self) -> Option<&InstanceId>;
     fn entities(&self) -> &Vec<Entity>;
+    // for modular systems
+    fn component_id(&self) -> usize;
+    fn assets(&self) -> &[&'static str];
 }
 
 #[macro_export]
 macro_rules! create_modular_segment {
-    ($name:ident, $index:expr) => {
+    ($name:ident, $index:expr, $assets:ident) => {
         paste::paste! {
             #[derive(Debug, Component)]
             pub struct [<ModularCharacter $name>] {
@@ -51,8 +53,13 @@ macro_rules! create_modular_segment {
                 fn entities(&self) -> &Vec<Entity> {
                    &self.entities
                 }
+
                 fn component_id(&self) -> usize {
                     return $index;
+                }
+
+                fn assets(&self) -> &[&'static str] {
+                    &$assets
                 }
             }
 

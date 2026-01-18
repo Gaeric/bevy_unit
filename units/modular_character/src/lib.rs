@@ -1,242 +1,231 @@
-mod modular;
+mod components;
 
-use std::{
-    collections::{BTreeMap, btree_map::Entry},
-    time::Duration,
-};
+use std::collections::BTreeMap;
 
 use bevy::prelude::*;
-use modular::*;
-pub struct ModularCharacterPlugin;
 
-impl Plugin for ModularCharacterPlugin {
-    fn build(&self, app: &mut bevy::prelude::App) {
-        // plugins
-        app.add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()));
-        app.add_plugins(ModularPlugin);
+use bevy::{
+    camera::primitives::Aabb, mesh::skinning::SkinnedMesh, render::batching::NoAutomaticBatching,
+};
 
-        #[cfg(feature = "with-inspector")]
-        {
-            use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
+pub use components::ModularCharacter;
 
-            app.add_plugins(EguiPlugin::default())
-                .add_plugins(WorldInspectorPlugin::new());
-        }
+#[derive(Debug, Message, Deref)]
+pub struct ResetChanged(pub Entity);
 
-        // AmbientLight Resource
-        app.insert_resource(AmbientLight {
-            color: Color::default(),
-            brightness: 1000.0,
-            ..default()
-        });
+pub trait ModularAppExt {
+    fn register_modular_component<T: ModularCharacter>(&mut self) -> &mut Self;
+}
 
-        // Systems
-        app.add_systems(Startup, spawn_camera)
-            .add_systems(Startup, spawn_text)
-            .add_systems(Startup, spawn_models)
-            .add_systems(Startup, spawn_modular)
-            .add_systems(Startup, setup_animation_graph)
-            .add_systems(Update, cycle_through_animations);
-
-        // Observers
-        app.add_observer(animation_player_added);
+impl ModularAppExt for App {
+    fn register_modular_component<T: ModularCharacter>(&mut self) -> &mut Self {
+        self.add_systems(
+            Update,
+            (
+                update_modular::<T>,
+                cycle_modular_segment::<T>,
+                reset_changed::<T>,
+            )
+                .chain(),
+        )
     }
 }
 
-fn spawn_camera(mut commands: Commands) {
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(0.0, 0.5, 5.0).looking_at(Vec3::new(0.0, 0.5, 0.0), Vec3::Y),
-    ));
-}
+type MeshPrimitiveParamSet = (
+    &'static ChildOf,
+    &'static Name,
+    &'static SkinnedMesh,
+    &'static Mesh3d,
+    &'static MeshMaterial3d<StandardMaterial>,
+    &'static Aabb,
+);
 
-fn spawn_text(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let text_font = TextFont {
-        font: asset_server.load("modular_character/FiraSans-Regular.ttf"),
-        font_size: 16.0,
-        ..Default::default()
-    };
-
-    let text_color = TextColor(Color::WHITE);
-    commands
-        .spawn(Node {
-            top: Val::Px(3.0),
-            left: Val::Px(3.0),
-            flex_direction: FlexDirection::Column,
-            ..Default::default()
-        })
-        .with_children(|parent| {
-            parent.spawn((
-                Text::new("Cycle through heads with Q and W"),
-                text_font.clone(),
-                text_color,
-            ));
-            parent.spawn((
-                Text::new("Cycle through bodies with E and R"),
-                text_font.clone(),
-                text_color,
-            ));
-            parent.spawn((
-                Text::new("Cycle through legs with T and Y"),
-                text_font.clone(),
-                text_color,
-            ));
-            parent.spawn((
-                Text::new("Cycle through feet with U and I"),
-                text_font.clone(),
-                text_color,
-            ));
-        });
-}
-
-fn spawn_models(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.spawn((
-        SceneRoot(
-            asset_server.load(GltfAssetLabel::Scene(0).from_asset(mc_model_path("Witch.gltf"))),
-        ),
-        Transform::from_xyz(1.0, 0.0, 0.0),
-        Name::new("Witch"),
-    ));
-
-    // commands.spawn((
-    //     SceneRoot(
-    //         asset_server.load(GltfAssetLabel::Scene(0).from_asset(mc_model_path("SciFi.gltf"))),
-    //     ),
-    //     Transform::from_xyz(-1.0, 0., 0.0),
-    //     Name::new("SciFi"),
-    // ));
-}
-
-#[derive(Debug, Resource)]
-struct AnimationGraphCache {
-    animations: Vec<AnimationNodeIndex>,
-    graph: Handle<AnimationGraph>,
-}
-
-fn setup_animation_graph(
+fn update_modular<T: ModularCharacter>(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    mut graphs: ResMut<Assets<AnimationGraph>>,
+    mut changed_modular: Query<(Entity, &mut T), Changed<T>>,
+    mesh_primitives_query: Query<MeshPrimitiveParamSet>,
+    children: Query<&Children>,
+    names: Query<&Name>,
+    mut scene_spawner: ResMut<SceneSpawner>,
+    mut writer: MessageWriter<ResetChanged>,
 ) {
-    let mut graph = AnimationGraph::new();
-    let animations = graph
-        .add_clips(
-            (0..24).map(|index| {
-                asset_server
-                    .load(GltfAssetLabel::Animation(index).from_asset(mc_model_path("Witch.gltf")))
-            }),
-            1.0,
-            graph.root,
-        )
-        .collect();
+    for (entity, mut modular) in &mut changed_modular {
+        let Some(scene_instance) = modular.instance_id().copied() else {
+            continue;
+        };
+        info!("for entity {entity}, change to scene_instance is {scene_instance:?}");
 
-    let graph_handle = graphs.add(graph);
-    commands.insert_resource(AnimationGraphCache {
-        animations,
-        graph: graph_handle,
-    });
-}
-
-// todo: analyzer the animation process
-fn animation_player_added(
-    trigger: On<Add, AnimationPlayer>,
-    mut commands: Commands,
-    graph_cache: Res<AnimationGraphCache>,
-    mut players: Query<&mut AnimationPlayer>,
-) {
-    let mut transitions = AnimationTransitions::new();
-
-    transitions
-        .play(
-            &mut players.get_mut(trigger.entity).unwrap(),
-            graph_cache.animations[0],
-            Duration::ZERO,
-        )
-        .resume();
-
-    commands
-        .entity(trigger.entity)
-        .insert(transitions)
-        .insert(AnimationGraphHandle(graph_cache.graph.clone()));
-}
-
-fn cycle_through_animations(
-    mut players: Query<(Entity, &mut AnimationPlayer, &mut AnimationTransitions)>,
-    mut animation_id: Local<BTreeMap<Entity, usize>>,
-    graph_cache: Res<AnimationGraphCache>,
-) {
-    for (entity, mut player, mut transition) in &mut players {
-        let next_to_play = match animation_id.entry(entity) {
-            Entry::Vacant(e) => {
-                e.insert(0);
-                Some(0)
+        // the scene.spawn() operation executes asynchronously.
+        //  accessing mesh_primitives requires waiting for all dependent resources to complete loading.
+        // the modular.entities container remains empty upon initialization.
+        // data is populated only after processing by the update_modular system.
+        if scene_spawner.instance_is_ready(scene_instance) {
+            // Delete old
+            info!("deleting old modular segment");
+            if !modular.entities().is_empty() {
+                trace!("remove entities children.");
+                commands.entity(entity).remove_children(modular.entities());
             }
-            Entry::Occupied(mut e) => {
-                if player.all_finished() | player.all_paused() {
-                    *e.get_mut() = (e.get() + 1) % 24;
-                    Some(*e.get())
-                } else {
-                    None
+            for entity in modular.entities_mut().drain(..) {
+                trace!("despawn entities children.");
+                commands.entity(entity).despawn();
+            }
+
+            // Get MeshPrimitives
+            trace!("get mesh_primitives from scene");
+            let mesh_primitives = scene_spawner
+                .iter_instance_entities(scene_instance)
+                .filter(|node| mesh_primitives_query.contains(*node))
+                .collect::<Vec<_>>();
+
+            // Get Meshs
+            trace!("get meshs from mesh_primitives");
+            let mut meshes = BTreeMap::new();
+            for mesh_primitive in mesh_primitives {
+                match mesh_primitives_query.get(mesh_primitive) {
+                    Ok((childof, _, _, _, _, _)) => {
+                        meshes
+                            .entry(childof.parent())
+                            .and_modify(|v: &mut Vec<_>| v.push(mesh_primitive))
+                            .or_insert(vec![mesh_primitive]);
+                    }
+                    Err(err) => {
+                        error!("MeshPrimitive {mesh_primitive:?} did not have a parent. '{err:?}'");
+                    }
                 }
             }
-        };
 
-        if let Some(next_ani) = next_to_play {
-            transition
-                .play(
-                    &mut player,
-                    graph_cache.animations[next_ani],
-                    Duration::from_millis(250),
-                )
-                .resume();
+            // Rebuild Mesh Hierarchy on Modular entity
+            for (mesh, primitives) in meshes {
+                let mesh_entity = match names.get(mesh) {
+                    Ok(name) => {
+                        commands.spawn((Transform::default(), Visibility::default(), name.clone()))
+                    }
+                    Err(_) => {
+                        warn!("Mesh {mesh:?} did not have a name");
+                        commands.spawn((Transform::default(), Visibility::default()))
+                    }
+                }
+                .with_children(|parent| {
+                    for primitive in primitives {
+                        let Ok((_, name, skinned_mesh, mesh, material, aabb)) =
+                            mesh_primitives_query.get(primitive)
+                        else {
+                            unreachable!();
+                        };
+
+                        let new_joints: Vec<_> = skinned_mesh
+                            .joints
+                            .iter()
+                            .flat_map(|joint| {
+                                names
+                                    .get(*joint)
+                                    .inspect_err(|_| {
+                                        bevy::log::error!("Joint {joint:?} had no name")
+                                    })
+                                    .ok()
+                                    .map(|joint_name| {
+                                        children.iter_descendants(entity).find(|node_on_modular| {
+                                            names
+                                                .get(*node_on_modular)
+                                                .ok()
+                                                .filter(|node_on_modular_name| {
+                                                    node_on_modular_name
+                                                        .as_str()
+                                                        .eq(joint_name.as_str())
+                                                })
+                                                .is_some()
+                                        })
+                                    })
+                            })
+                            .flatten()
+                            .collect();
+
+                        parent.spawn((
+                            name.clone(),
+                            mesh.clone(),
+                            material.clone(),
+                            SkinnedMesh {
+                                inverse_bindposes: skinned_mesh.inverse_bindposes.clone(),
+                                joints: new_joints,
+                            },
+                            *aabb,
+                            NoAutomaticBatching,
+                        ));
+                    }
+                })
+                .id();
+
+                info!("modular entities push mesh entities");
+                modular.entities_mut().push(mesh_entity);
+                commands.entity(entity).add_child(mesh_entity);
+            }
+
+            // the scene_spawner instance has been regenerated at the parent location
+            // with correct parent/child hierarchy relationships.
+            // the original instance in scene_spawner must now be deleted
+            // to ensure proper mesh hierarchy in the active scene.
+            if let Some(instance) = modular.instance_id_mut().take() {
+                trace!("scene spawner despawn instance");
+                scene_spawner.despawn_instance(instance);
+            }
+        } else {
+            writer.write(ResetChanged(entity));
         }
     }
 }
 
-fn spawn_modular(
-    mut commands: Commands,
+fn cycle_modular_segment<T: ModularCharacter>(
+    mut modular: Query<&mut T>,
+    key_input: Res<ButtonInput<KeyCode>>,
     mut scene_spawner: ResMut<SceneSpawner>,
     asset_server: Res<AssetServer>,
 ) {
-    let entity = commands
-        .spawn((
-            Transform::default(),
-            Visibility::default(),
-            Name::new("Modular"),
-            ModularCharacterHead {
-                id: 0,
-                instance_id: Some(
-                    scene_spawner.spawn(asset_server.load(mc_model_path(modular::HEADS[0]))),
-                ),
-                entities: vec![],
-            },
-            ModularCharacterBody {
-                id: 0,
-                instance_id: Some(
-                    scene_spawner.spawn(asset_server.load(mc_model_path(modular::BODIES[0]))),
-                ),
-                entities: vec![],
-            },
-            ModularCharacterLegs {
-                id: 0,
-                instance_id: Some(
-                    scene_spawner.spawn(asset_server.load(mc_model_path(modular::LEGS[0]))),
-                ),
-                entities: vec![],
-            },
-            ModularCharacterFeet {
-                id: 0,
-                instance_id: Some(
-                    scene_spawner.spawn(asset_server.load(mc_model_path(modular::FEET[0]))),
-                ),
-                entities: vec![],
-            },
-        ))
-        .id();
+    const KEYS: [(KeyCode, KeyCode); 4] = [
+        (KeyCode::KeyQ, KeyCode::KeyW),
+        (KeyCode::KeyE, KeyCode::KeyR),
+        (KeyCode::KeyT, KeyCode::KeyY),
+        (KeyCode::KeyU, KeyCode::KeyI),
+    ];
 
-    // Armature
-    scene_spawner.spawn_as_child(
-        asset_server.load(GltfAssetLabel::Scene(1).from_asset(mc_model_path("Witch.gltf"))),
-        entity,
+    let Ok(mut module) = modular.single_mut() else {
+        bevy::log::error!("Couldn't get single module.");
+        return;
+    };
+
+    let component_id = module.component_id();
+    let assets = module.assets();
+    let new_id = if key_input.just_pressed(KEYS[component_id].0) {
+        module.id().wrapping_sub(1).min(assets.len() - 1)
+    } else if key_input.just_pressed(KEYS[component_id].1) {
+        (module.id() + 1) % assets.len()
+    } else {
+        return;
+    };
+
+    info!("modular changed");
+
+    if let Some(instance) = module.instance_id() {
+        scene_spawner.despawn_instance(*instance);
+    }
+    let path = format!("modular_character/origin/{}", assets[new_id]);
+    *module.id_mut() = new_id;
+    *module.instance_id_mut() = Some(scene_spawner.spawn(asset_server.load(path)));
+
+    info!(
+        "modular id is {}, instance id {:?}",
+        module.id(),
+        module.instance_id()
     );
+}
+
+fn reset_changed<T: ModularCharacter>(
+    mut query: Query<(Entity, &mut T)>,
+    mut reader: MessageReader<ResetChanged>,
+) {
+    for entity in reader.read() {
+        if let Ok((_, mut modular)) = query.get_mut(**entity) {
+            modular.set_changed();
+        }
+    }
 }
