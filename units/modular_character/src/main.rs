@@ -31,6 +31,7 @@ pub const LEGS: [&str; 4] = [
     // "SciFi.gltf#Scene4",
     "Soldier.gltf#Scene4",
     "Adventurer.gltf#Scene4",
+    // todo: model incorrect, remove the feet from this scene
     "witch_legs.glb#Scene0",
 ];
 
