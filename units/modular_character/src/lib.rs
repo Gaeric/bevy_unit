@@ -2,6 +2,7 @@ mod components;
 
 use std::collections::BTreeMap;
 
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 
 use bevy::{
@@ -66,9 +67,9 @@ fn update_modular<T: ModularCharacter>(
                 trace!("remove entities children.");
                 commands.entity(entity).remove_children(modular.entities());
             }
-            for entity in modular.entities_mut().drain(..) {
+            for modular_entity in modular.entities_mut().drain(..) {
                 trace!("despawn entities children.");
-                commands.entity(entity).despawn();
+                commands.entity(modular_entity).despawn();
             }
 
             // Get MeshPrimitives
@@ -95,6 +96,13 @@ fn update_modular<T: ModularCharacter>(
                 }
             }
 
+            let mut joint_name_to_entity = HashMap::new();
+            for descendant in children.iter_descendants(entity) {
+                if let Ok(name) = names.get(descendant) {
+                    joint_name_to_entity.insert(name.as_str(), descendant);
+                }
+            }
+
             // Rebuild Mesh Hierarchy on Modular entity
             for (mesh, primitives) in meshes {
                 let mesh_entity = match names.get(mesh) {
@@ -114,31 +122,55 @@ fn update_modular<T: ModularCharacter>(
                             unreachable!();
                         };
 
-                        let new_joints: Vec<_> = skinned_mesh
+                        // let new_joints: Vec<_> = skinned_mesh
+                        //     .joints
+                        //     .iter()
+                        //     .flat_map(|joint| {
+                        //         names
+                        //             .get(*joint)
+                        //             .inspect_err(|_| {
+                        //                 bevy::log::error!("Joint {joint:?} had no name")
+                        //             })
+                        //             .ok()
+                        //             .map(|joint_name| {
+                        //                 children.iter_descendants(entity).find(|node_on_modular| {
+                        //                     names
+                        //                         .get(*node_on_modular)
+                        //                         .ok()
+                        //                         .filter(|node_on_modular_name| {
+                        //                             node_on_modular_name
+                        //                                 .as_str()
+                        //                                 .eq(joint_name.as_str())
+                        //                         })
+                        //                         .is_some()
+                        //                 })
+                        //             })
+                        //     })
+                        //     .flatten()
+                        //     .collect();
+
+                        let new_joints: Vec<Entity> = skinned_mesh
                             .joints
                             .iter()
-                            .flat_map(|joint| {
-                                names
-                                    .get(*joint)
-                                    .inspect_err(|_| {
-                                        bevy::log::error!("Joint {joint:?} had no name")
-                                    })
-                                    .ok()
-                                    .map(|joint_name| {
-                                        children.iter_descendants(entity).find(|node_on_modular| {
-                                            names
-                                                .get(*node_on_modular)
-                                                .ok()
-                                                .filter(|node_on_modular_name| {
-                                                    node_on_modular_name
-                                                        .as_str()
-                                                        .eq(joint_name.as_str())
-                                                })
-                                                .is_some()
-                                        })
-                                    })
+                            .filter_map(|origin_joint_entity| {
+                                // 1. retrieve the bone name from the newly spawned scene entity,
+                                // these entities are temporary and will be despawned later.
+                                let joint_name = names.get(*origin_joint_entity).ok()?;
+
+                                // perform an O(1) lookup in our pre-built HashMap to find
+                                // the matching bone on the actual character's skeleton.
+                                let target_entity =
+                                    joint_name_to_entity.get(joint_name.as_str()).copied();
+
+                                // log an error if a required bone is missing from the character hierarchy.
+                                // this usually happens if the modular part's rig doesn't match the base rig.
+                                if target_entity.is_none() {
+                                    error!("Joint {} not found in modular hierarchy", joint_name);
+                                }
+
+                                // return the persistent entity to be used in the final SkinnedMesh
+                                target_entity
                             })
-                            .flatten()
                             .collect();
 
                         parent.spawn((
