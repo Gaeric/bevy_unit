@@ -24,11 +24,12 @@ impl ModularAppExt for App {
             Update,
             (
                 update_modular::<T>,
-                cycle_modular_segment::<T>,
+                // cycle_modular_segment::<T>,
                 reset_changed::<T>,
             )
                 .chain(),
         )
+        .add_observer(cycle_modular_observer::<T>)
     }
 }
 
@@ -205,6 +206,39 @@ fn update_modular<T: ModularCharacter>(
             writer.write(ResetChanged(entity));
         }
     }
+}
+
+#[derive(EntityEvent)]
+pub struct NewModularAsset {
+    pub entity: Entity,
+    pub id: usize,
+    pub path: String,
+}
+
+fn cycle_modular_observer<T: ModularCharacter>(
+    asset: On<NewModularAsset>,
+    modular_query: Single<(Entity, &mut T)>,
+    mut scene_spawner: ResMut<SceneSpawner>,
+    asset_server: Res<AssetServer>,
+) {
+    let (entity, mut modular) = modular_query.into_inner();
+    if entity != asset.entity {
+        return;
+    }
+
+    // asset.path
+    if let Some(instance) = modular.instance_id() {
+        scene_spawner.despawn_instance(*instance);
+    }
+
+    *modular.id_mut() = asset.id;
+    *modular.instance_id_mut() = Some(scene_spawner.spawn(asset_server.load(asset.path.clone())));
+
+    info!(
+        "modular id is {}, instance id {:?}",
+        modular.id(),
+        modular.instance_id()
+    );
 }
 
 fn cycle_modular_segment<T: ModularCharacter>(
