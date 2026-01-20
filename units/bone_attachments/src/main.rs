@@ -8,7 +8,7 @@ const ATTACHMENT_PATH: &str = "FoxAttachment.glb";
 
 fn main() {
     App::new()
-        .insert_resource(AmbientLight {
+        .insert_resource(GlobalAmbientLight {
             color: Color::WHITE,
             brightness: 2000.,
             ..default()

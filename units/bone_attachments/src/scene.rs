@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 use bevy::{
-    animation::{AnimationTarget, AnimationTargetId},
+    animation::AnimationTargetId,
     ecs::{
         bundle::Bundle,
         entity::Entity,
@@ -79,7 +79,7 @@ fn scene_attachment_when_ready(
     mut commands: Commands,
     scene_attachments: Query<&AttachedTo>,
     childrens: Query<&Children>,
-    animation_targets: Query<&AnimationTarget>,
+    animation_targets: Query<&AnimationTargetId>,
     names: Query<(&Name, Entity)>,
 ) {
     let Ok(parent) = scene_attachments.get(trigger.entity) else {
@@ -98,12 +98,12 @@ fn scene_attachment_when_ready(
         }
 
         if let Ok(animation_target) = animation_targets.get(child) {
-            match target_ids.entry(animation_target.id) {
+            match target_ids.entry(animation_target) {
                 Entry::Vacant(vacancy) => {
-                    vacancy.insert(animation_target.player);
+                    vacancy.insert(child);
                 }
                 Entry::Occupied(_) => {
-                    duplicate_target_ids_on_parent_hierarchy.push(animation_target.id);
+                    duplicate_target_ids_on_parent_hierarchy.push(animation_target);
                 }
             }
         }
@@ -119,11 +119,8 @@ fn scene_attachment_when_ready(
 
     entity_path.iter().for_each(|(entity, path)| {
         let animation_target_id = AnimationTargetId::from_names(path.iter());
-        if let Some(player) = target_ids.get(&animation_target_id) {
-            commands.entity(*entity).insert(AnimationTarget {
-                id: animation_target_id,
-                player: *player,
-            });
+        if let Some(_player) = target_ids.get(&animation_target_id) {
+            commands.entity(*entity).insert(animation_target_id);
             tracing::trace!("path {path:?} with entity {entity:?} match attach to scene",);
         } else {
             tracing::debug!("path {path:?} with entity {entity:?} not match attach to scene",);

@@ -4,21 +4,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.17.3", features = [
+bevy = { version = "0.18.0", features = [
         "wayland",
         "dynamic_linking",
         "hotpatching",
 ] }
 
 # physic engine
-avian3d = { version = "0.4.1", features = ["diagnostic_ui"] }
+avian3d = { version = "0.5.0", features = ["diagnostic_ui"] }
 
 # character system
-bevy-tnua = "0.26.0"
-bevy-tnua-avian3d = "0.8.0"
+bevy-tnua = "0.29.0"
+bevy-tnua-avian3d = "0.10.0"
 
 # control system
-bevy_enhanced_input = "0.19.1"
+bevy_enhanced_input = "0.22"
 
 #
 serde = { version = "1", features = ["derive"] }
@@ -27,17 +27,14 @@ serde = { version = "1", features = ["derive"] }
 bone_attachments = { path = "../units/bone_attachments" }
 
 # develop ui toolkit
-bevy-inspector-egui = "0.34.0"
+bevy-inspector-egui = "0.36.0"
 
 # frame limit
-bevy_framepace = "0.20.0"
+[dependencies.bevy_framepace]
+git = "https://github.com/aevyrie/bevy_framepace/"
+branch = "main"
 
 # develop ui toolkit
 [dependencies.iyes_perf_ui]
-git = "https://github.com/mgi388/iyes_perf_ui/"
-branch = "bevy-0.17"
-
-# [dependencies.bevy-inspector-egui]
-# git = "https://github.com/dsgallups/bevy-inspector-egui"
-# branch = "dsgallups/0.17"
-# optional = true
+git = "https://github.com/blip-radar/iyes_perf_ui/"
+branch = "bevy-0-18"

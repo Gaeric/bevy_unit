@@ -1,12 +1,5 @@
 use bevy::prelude::*;
-use bevy_tnua::{
-    builtins::{
-        TnuaBuiltinClimb, TnuaBuiltinCrouch, TnuaBuiltinDash, TnuaBuiltinKnockback,
-        TnuaBuiltinWallSlide,
-    },
-    math::Float,
-    prelude::{TnuaBuiltinJump, TnuaBuiltinWalk},
-};
+use bevy_tnua::math::Float;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dimensionality {
@@ -26,16 +19,8 @@ pub enum FallingThroughControlScheme {
 #[derive(Component)]
 pub struct CharacterMotionConfig {
     pub speed: Float,
-    pub walk: TnuaBuiltinWalk,
     pub actions_in_air: usize,
-    pub jump: TnuaBuiltinJump,
-    pub crouch: TnuaBuiltinCrouch,
     pub dash_distance: Float,
-    pub dash: TnuaBuiltinDash,
     pub one_way_platforms_min_proximity: Float,
-    pub falling_through: FallingThroughControlScheme,
-    pub knockback: TnuaBuiltinKnockback,
-    pub wall_slide: TnuaBuiltinWallSlide,
     pub climb_speed: Float,
-    pub climb: TnuaBuiltinClimb,
 }

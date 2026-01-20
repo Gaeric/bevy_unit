@@ -1,7 +1,10 @@
 use bevy::{
     camera::Exposure,
-    light::{AtmosphereEnvironmentMapLight, CascadeShadowConfigBuilder, light_consts::lux},
-    pbr::{Atmosphere, AtmosphereSettings},
+    core_pipeline::tonemapping::Tonemapping,
+    light::{
+        AtmosphereEnvironmentMapLight, CascadeShadowConfigBuilder, VolumetricFog, light_consts::lux,
+    },
+    pbr::{Atmosphere, AtmosphereSettings, ScatteringMedium},
     post_process::bloom::Bloom,
     prelude::*,
 };
@@ -17,18 +20,31 @@ fn dynamic_atmosphere(mut suns: Query<&mut Transform, With<DirectionalLight>>, t
 fn added_atmosphere(
     camera: Single<Entity, (With<WaltzCamera>, Added<Camera3d>)>,
     mut commands: Commands,
+    mut scattering_mediums: ResMut<Assets<ScatteringMedium>>,
 ) {
     let entity = camera.into_inner();
     info!("entity is {}", entity);
 
     commands.entity(entity).insert((
-        Atmosphere::EARTH,
-        Exposure::SUNLIGHT,
+        // Earthlike atmosphere
+        Atmosphere::earthlike(scattering_mediums.add(ScatteringMedium::default())),
+        // Can be adjusted to change the scene scale and rendering quality
+        AtmosphereSettings::default(),
+        // The directional light illuminance used in this scene
+        // (the one recommended for use with this feature) is
+        // quite bright, so raising the exposure compensation helps
+        // bring the scene to a nicer brightness range.
+        Exposure { ev100: 13.0 },
+        // Tonemapper chosen just because it looked good with the scene, any
+        // tonemapper would be fine :)
+        Tonemapping::AcesFitted,
+        // Bloom gives the sun a much more natural look.
         Bloom::NATURAL,
+        // Enables the atmosphere to drive reflections and ambient lighting (IBL) for this view
         AtmosphereEnvironmentMapLight::default(),
-        AtmosphereSettings {
-            scene_units_to_m: 20.0,
-            ..Default::default()
+        VolumetricFog {
+            ambient_intensity: 0.0,
+            ..default()
         },
     ));
 

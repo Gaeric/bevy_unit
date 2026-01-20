@@ -5,4 +5,4 @@ edition = "2024"
 description = "Library and GUI tool designed for blending animations."
 
 [dependencies]
-bevy = {version =  "0.17.3", features = ["hotpatching"]}
+bevy = {version =  "0.18.0", features = ["hotpatching"]}

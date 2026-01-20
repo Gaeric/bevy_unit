@@ -16,7 +16,7 @@ members = [
 exclude = ["units/winit_drag_drop"]
 
 [dependencies]
-bevy = { version = "0.17.3", features = [
+bevy = { version = "0.18.0", features = [
         "wayland",
         "dynamic_linking",
         "hotpatching",
@@ -24,43 +24,43 @@ bevy = { version = "0.17.3", features = [
 ] }
 # bevy_shine = { path = "bevy_shine" }
 # modular_character = { path = "units/modular_character" }
+bone_attachments = { path = "units/bone_attachments" }
 bevy_waltz = { path = "bevy_waltz" }
 crossbeam-channel = "0.5.15"
 tracing-appender = "0.2.3"
-bone_attachments = { path = "units/bone_attachments" }
 
 [patch.crates-io]
-bevy = { path = "../bevy_engines/bevy_0.17/" }
-bevy_math = { path = "../bevy_engines/bevy_0.17/crates/bevy_math" }
-bevy_transform = { path = "../bevy_engines/bevy_0.17/crates/bevy_transform" }
-bevy_reflect = { path = "../bevy_engines/bevy_0.17/crates/bevy_reflect" }
-bevy_app = { path = "../bevy_engines/bevy_0.17/crates/bevy_app" }
-bevy_platform = { path = "../bevy_engines/bevy_0.17/crates/bevy_platform" }
-bevy_asset = { path = "../bevy_engines/bevy_0.17/crates/bevy_asset" }
-bevy_derive = { path = "../bevy_engines/bevy_0.17/crates/bevy_derive" }
-bevy_ecs = { path = "../bevy_engines/bevy_0.17/crates/bevy_ecs" }
-bevy_render = { path = "../bevy_engines/bevy_0.17/crates/bevy_render" }
-bevy_window = { path = "../bevy_engines/bevy_0.17/crates/bevy_window" }
-bevy_image = { path = "../bevy_engines/bevy_0.17/crates/bevy_image" }
-bevy_input = { path = "../bevy_engines/bevy_0.17/crates/bevy_input" }
-bevy_log = { path = "../bevy_engines/bevy_0.17/crates/bevy_log" }
-bevy_picking = { path = "../bevy_engines/bevy_0.17/crates/bevy_picking" }
-bevy_time = { path = "../bevy_engines/bevy_0.17/crates/bevy_time" }
-bevy_winit = { path = "../bevy_engines/bevy_0.17/crates/bevy_winit" }
-bevy_animation = { path = "../bevy_engines/bevy_0.17/crates/bevy_animation" }
-bevy_scene = { path = "../bevy_engines/bevy_0.17/crates/bevy_scene" }
-bevy_solari = { path = "../bevy_engines/bevy_0.17/crates/bevy_solari" }
-bevy_camera = { path = "../bevy_engines/bevy_0.17/crates/bevy_camera" }
-bevy_color = { path = "../bevy_engines/bevy_0.17/crates/bevy_color" }
-bevy_core_pipeline = { path = "../bevy_engines/bevy_0.17/crates/bevy_core_pipeline" }
-bevy_mesh = { path = "../bevy_engines/bevy_0.17/crates/bevy_mesh" }
-bevy_shader = { path = "../bevy_engines/bevy_0.17/crates/bevy_shader" }
-bevy_ui_render = { path = "../bevy_engines/bevy_0.17/crates/bevy_ui_render" }
-bevy_light = { path = "../bevy_engines/bevy_0.17/crates/bevy_light" }
-bevy_pbr = { path = "../bevy_engines/bevy_0.17/crates/bevy_pbr" }
-bevy_state = { path = "../bevy_engines/bevy_0.17/crates/bevy_state" }
-bevy_utils = { path = "../bevy_engines/bevy_0.17/crates/bevy_utils" }
-bevy_feathers = { path = "../bevy_engines/bevy_0.17/crates/bevy_feathers" }
+bevy = { path = "../bevy_engines/bevy_0.18/" }
+bevy_math = { path = "../bevy_engines/bevy_0.18/crates/bevy_math" }
+bevy_transform = { path = "../bevy_engines/bevy_0.18/crates/bevy_transform" }
+bevy_reflect = { path = "../bevy_engines/bevy_0.18/crates/bevy_reflect" }
+bevy_app = { path = "../bevy_engines/bevy_0.18/crates/bevy_app" }
+bevy_platform = { path = "../bevy_engines/bevy_0.18/crates/bevy_platform" }
+bevy_asset = { path = "../bevy_engines/bevy_0.18/crates/bevy_asset" }
+bevy_derive = { path = "../bevy_engines/bevy_0.18/crates/bevy_derive" }
+bevy_ecs = { path = "../bevy_engines/bevy_0.18/crates/bevy_ecs" }
+bevy_render = { path = "../bevy_engines/bevy_0.18/crates/bevy_render" }
+bevy_window = { path = "../bevy_engines/bevy_0.18/crates/bevy_window" }
+bevy_image = { path = "../bevy_engines/bevy_0.18/crates/bevy_image" }
+bevy_input = { path = "../bevy_engines/bevy_0.18/crates/bevy_input" }
+bevy_log = { path = "../bevy_engines/bevy_0.18/crates/bevy_log" }
+bevy_picking = { path = "../bevy_engines/bevy_0.18/crates/bevy_picking" }
+bevy_time = { path = "../bevy_engines/bevy_0.18/crates/bevy_time" }
+bevy_winit = { path = "../bevy_engines/bevy_0.18/crates/bevy_winit" }
+bevy_animation = { path = "../bevy_engines/bevy_0.18/crates/bevy_animation" }
+bevy_scene = { path = "../bevy_engines/bevy_0.18/crates/bevy_scene" }
+bevy_solari = { path = "../bevy_engines/bevy_0.18/crates/bevy_solari" }
+bevy_camera = { path = "../bevy_engines/bevy_0.18/crates/bevy_camera" }
+bevy_color = { path = "../bevy_engines/bevy_0.18/crates/bevy_color" }
+bevy_core_pipeline = { path = "../bevy_engines/bevy_0.18/crates/bevy_core_pipeline" }
+bevy_mesh = { path = "../bevy_engines/bevy_0.18/crates/bevy_mesh" }
+bevy_shader = { path = "../bevy_engines/bevy_0.18/crates/bevy_shader" }
+bevy_ui_render = { path = "../bevy_engines/bevy_0.18/crates/bevy_ui_render" }
+bevy_light = { path = "../bevy_engines/bevy_0.18/crates/bevy_light" }
+bevy_pbr = { path = "../bevy_engines/bevy_0.18/crates/bevy_pbr" }
+bevy_state = { path = "../bevy_engines/bevy_0.18/crates/bevy_state" }
+bevy_utils = { path = "../bevy_engines/bevy_0.18/crates/bevy_utils" }
+bevy_feathers = { path = "../bevy_engines/bevy_0.18/crates/bevy_feathers" }
 
 # avian3d = { path = "../avian/crates/avian3d/" }
 # bevy-tnua = { path = "../bevy-tnua/" }
