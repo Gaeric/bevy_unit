@@ -24,7 +24,6 @@ impl ModularAppExt for App {
             Update,
             (
                 update_modular::<T>,
-                // cycle_modular_segment::<T>,
                 reset_changed::<T>,
             )
                 .chain(),
@@ -239,50 +238,6 @@ fn cycle_modular_observer<T: ModularCharacter>(
         "modular id is {}, instance id {:?}",
         modular.id(),
         modular.instance_id()
-    );
-}
-
-fn cycle_modular_segment<T: ModularCharacter>(
-    mut modular: Query<&mut T>,
-    key_input: Res<ButtonInput<KeyCode>>,
-    mut scene_spawner: ResMut<SceneSpawner>,
-    asset_server: Res<AssetServer>,
-) {
-    const KEYS: [(KeyCode, KeyCode); 4] = [
-        (KeyCode::KeyQ, KeyCode::KeyW),
-        (KeyCode::KeyE, KeyCode::KeyR),
-        (KeyCode::KeyT, KeyCode::KeyY),
-        (KeyCode::KeyU, KeyCode::KeyI),
-    ];
-
-    let Ok(mut module) = modular.single_mut() else {
-        bevy::log::error!("Couldn't get single module.");
-        return;
-    };
-
-    let component_id = module.component_id();
-    let assets = module.assets();
-    let new_id = if key_input.just_pressed(KEYS[component_id].0) {
-        module.id().wrapping_sub(1).min(assets.len() - 1)
-    } else if key_input.just_pressed(KEYS[component_id].1) {
-        (module.id() + 1) % assets.len()
-    } else {
-        return;
-    };
-
-    info!("modular changed");
-
-    if let Some(instance) = module.instance_id() {
-        scene_spawner.despawn_instance(*instance);
-    }
-    let path = format!("modular_character/origin/{}", assets[new_id]);
-    *module.id_mut() = new_id;
-    *module.instance_id_mut() = Some(scene_spawner.spawn(asset_server.load(path)));
-
-    info!(
-        "modular id is {}, instance id {:?}",
-        module.id(),
-        module.instance_id()
     );
 }
 

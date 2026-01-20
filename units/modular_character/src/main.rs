@@ -81,8 +81,35 @@ impl Plugin for DemoModularPlugin {
             .add_systems(Startup, spawn_models)
             .add_systems(Startup, spawn_modular)
             .add_systems(Startup, setup_animation_graph)
-            .add_systems(Update, cycle_through_animations)
-            .add_systems(Update, (cycle_head, cycle_body, cycle_leg, cycle_feet));
+            .add_systems(Update, cycle_through_animations);
+
+        // app.add_systems(Update, (cycle_head, cycle_body, cycle_leg, cycle_feet));
+
+        app.add_systems(
+            Update,
+            (
+                move |c: Commands,
+                      q: Single<&ModularCharacterHead>,
+                      k: Res<ButtonInput<KeyCode>>| {
+                    cycle_modular::<ModularCharacterHead>(c, q, k, (KeyCode::KeyQ, KeyCode::KeyW))
+                },
+                move |c: Commands,
+                      q: Single<&ModularCharacterBody>,
+                      k: Res<ButtonInput<KeyCode>>| {
+                    cycle_modular::<ModularCharacterBody>(c, q, k, (KeyCode::KeyE, KeyCode::KeyR))
+                },
+                move |c: Commands,
+                      q: Single<&ModularCharacterLegs>,
+                      k: Res<ButtonInput<KeyCode>>| {
+                    cycle_modular::<ModularCharacterLegs>(c, q, k, (KeyCode::KeyT, KeyCode::KeyY))
+                },
+                move |c: Commands,
+                      q: Single<&ModularCharacterFeet>,
+                      k: Res<ButtonInput<KeyCode>>| {
+                    cycle_modular::<ModularCharacterFeet>(c, q, k, (KeyCode::KeyU, KeyCode::KeyI))
+                },
+            ),
+        );
 
         // Observers
         app.add_observer(animation_player_added);
@@ -239,17 +266,15 @@ fn cycle_through_animations(
     }
 }
 
-fn cycle_head(
+fn cycle_modular<T: ModularCharacter>(
     mut commands: Commands,
-    modular_query: Single<(Entity, &ModularCharacterHead)>,
+    modular: Single<&T>,
     key_input: Res<ButtonInput<KeyCode>>,
+    keys: (KeyCode, KeyCode),
 ) {
-    let add_key = KeyCode::KeyQ;
-    let sub_key = KeyCode::KeyW;
+    let (add_key, sub_key) = keys;
 
-    let (entity, modular) = modular_query.into_inner();
     let assets = modular.assets();
-
     let new_id = if key_input.just_pressed(add_key) {
         modular.id().wrapping_sub(1).min(assets.len() - 1)
     } else if key_input.just_pressed(sub_key) {
@@ -259,101 +284,6 @@ fn cycle_head(
     };
 
     let path = format!("modular_character/origin/{}", assets[new_id]);
-
-    info!("entity {entity:?} trigger new_modular_asset");
-
-    commands.trigger(NewModularAsset {
-        // entity,
-        component_id: modular.component_id(),
-        id: new_id,
-        path,
-    });
-}
-
-fn cycle_body(
-    mut commands: Commands,
-    modular_query: Single<(Entity, &ModularCharacterBody)>,
-    key_input: Res<ButtonInput<KeyCode>>,
-) {
-    let add_key = KeyCode::KeyE;
-    let sub_key = KeyCode::KeyR;
-
-    let (entity, modular) = modular_query.into_inner();
-    let assets = modular.assets();
-
-    let new_id = if key_input.just_pressed(add_key) {
-        modular.id().wrapping_sub(1).min(assets.len() - 1)
-    } else if key_input.just_pressed(sub_key) {
-        (modular.id() + 1) % assets.len()
-    } else {
-        return;
-    };
-
-    let path = format!("modular_character/origin/{}", assets[new_id]);
-
-    info!("entity {entity:?} trigger new_modular_asset");
-
-    commands.trigger(NewModularAsset {
-        // entity,
-        component_id: modular.component_id(),
-        id: new_id,
-        path,
-    });
-}
-
-fn cycle_leg(
-    mut commands: Commands,
-    modular_query: Single<(Entity, &ModularCharacterLegs)>,
-    key_input: Res<ButtonInput<KeyCode>>,
-) {
-    let add_key = KeyCode::KeyT;
-    let sub_key = KeyCode::KeyY;
-
-    let (entity, modular) = modular_query.into_inner();
-    let assets = modular.assets();
-
-    let new_id = if key_input.just_pressed(add_key) {
-        modular.id().wrapping_sub(1).min(assets.len() - 1)
-    } else if key_input.just_pressed(sub_key) {
-        (modular.id() + 1) % assets.len()
-    } else {
-        return;
-    };
-
-    let path = format!("modular_character/origin/{}", assets[new_id]);
-
-    info!("entity {entity:?} trigger new_modular_asset");
-
-    commands.trigger(NewModularAsset {
-        // entity,
-        component_id: modular.component_id(),
-        id: new_id,
-        path,
-    });
-}
-
-fn cycle_feet(
-    mut commands: Commands,
-    modular_query: Single<(Entity, &ModularCharacterFeet)>,
-    key_input: Res<ButtonInput<KeyCode>>,
-) {
-    let add_key = KeyCode::KeyU;
-    let sub_key = KeyCode::KeyI;
-
-    let (entity, modular) = modular_query.into_inner();
-    let assets = modular.assets();
-
-    let new_id = if key_input.just_pressed(add_key) {
-        modular.id().wrapping_sub(1).min(assets.len() - 1)
-    } else if key_input.just_pressed(sub_key) {
-        (modular.id() + 1) % assets.len()
-    } else {
-        return;
-    };
-
-    let path = format!("modular_character/origin/{}", assets[new_id]);
-
-    info!("entity {entity:?} trigger new_modular_asset");
 
     commands.trigger(NewModularAsset {
         // entity,
