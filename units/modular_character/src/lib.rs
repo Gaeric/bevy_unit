@@ -208,21 +208,22 @@ fn update_modular<T: ModularCharacter>(
     }
 }
 
-#[derive(EntityEvent)]
+#[derive(Event)]
 pub struct NewModularAsset {
-    pub entity: Entity,
+    pub component_id: usize,
     pub id: usize,
     pub path: String,
 }
 
 fn cycle_modular_observer<T: ModularCharacter>(
     asset: On<NewModularAsset>,
-    modular_query: Single<(Entity, &mut T)>,
+    modular_query: Single<&mut T>,
     mut scene_spawner: ResMut<SceneSpawner>,
     asset_server: Res<AssetServer>,
 ) {
-    let (entity, mut modular) = modular_query.into_inner();
-    if entity != asset.entity {
+    let mut modular = modular_query.into_inner();
+
+    if modular.component_id() != asset.component_id {
         return;
     }
 

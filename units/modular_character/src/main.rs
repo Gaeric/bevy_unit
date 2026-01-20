@@ -263,7 +263,8 @@ fn cycle_head(
     info!("entity {entity:?} trigger new_modular_asset");
 
     commands.trigger(NewModularAsset {
-        entity,
+        // entity,
+        component_id: modular.component_id(),
         id: new_id,
         path,
     });
@@ -293,7 +294,8 @@ fn cycle_body(
     info!("entity {entity:?} trigger new_modular_asset");
 
     commands.trigger(NewModularAsset {
-        entity,
+        // entity,
+        component_id: modular.component_id(),
         id: new_id,
         path,
     });
@@ -323,7 +325,8 @@ fn cycle_leg(
     info!("entity {entity:?} trigger new_modular_asset");
 
     commands.trigger(NewModularAsset {
-        entity,
+        // entity,
+        component_id: modular.component_id(),
         id: new_id,
         path,
     });
@@ -353,7 +356,8 @@ fn cycle_feet(
     info!("entity {entity:?} trigger new_modular_asset");
 
     commands.trigger(NewModularAsset {
-        entity,
+        // entity,
+        component_id: modular.component_id(),
         id: new_id,
         path,
     });
