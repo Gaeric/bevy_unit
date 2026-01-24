@@ -69,7 +69,7 @@ fn update_modular<T: ModularCharacter>(
         info!("deleting old modular segment");
         if !modular.entities().is_empty() {
             trace!("remove entities children.");
-            commands.entity(entity).remove_children(modular.entities());
+            commands.entity(entity).detach_children(modular.entities());
         }
 
         for modular_entity in modular.entities_mut().drain(..) {

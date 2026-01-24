@@ -69,7 +69,7 @@ impl Plugin for DemoModularPlugin {
         }
 
         // AmbientLight Resource
-        app.insert_resource(AmbientLight {
+        app.insert_resource(GlobalAmbientLight {
             color: Color::default(),
             brightness: 1000.0,
             ..default()
