@@ -18,11 +18,13 @@ fn dynamic_atmosphere(mut suns: Query<&mut Transform, With<DirectionalLight>>, t
 }
 
 fn added_atmosphere(
-    camera: Single<Entity, (With<WaltzCamera>, Added<Camera3d>)>,
+    camera: On<Add, WaltzCamera>,
+    // camera: Single<Entity, (With<WaltzCamera>, Added<Camera3d>)>,
     mut commands: Commands,
     mut scattering_mediums: ResMut<Assets<ScatteringMedium>>,
 ) {
-    let entity = camera.into_inner();
+    // let entity = camera.into_inner();
+    let entity = camera.entity;
     info!("entity is {}", entity);
 
     commands.entity(entity).insert((
@@ -67,6 +69,6 @@ fn added_atmosphere(
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, added_atmosphere)
+    app.add_observer(added_atmosphere)
         .add_systems(Update, dynamic_atmosphere);
 }
