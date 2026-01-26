@@ -17,6 +17,7 @@ fn main() {
         .add_plugins(BoneAttachmentsPlugin)
         .add_systems(Startup, setup_mesh_and_animation)
         .add_systems(Startup, setup_camera_and_environment)
+        .add_systems(Update, move_fox)
         .run();
 }
 
@@ -105,7 +106,7 @@ fn setup_camera_and_environment(
 ) {
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(100.0, 100.0, 150.0).looking_at(Vec3::new(0.0, 20.0, 0.0), Vec3::Y),
+        Transform::from_xyz(200.0, 200.0, 300.0).looking_at(Vec3::new(0.0, 20.0, 0.0), Vec3::Y),
     ));
 
     commands.spawn((
@@ -127,4 +128,18 @@ fn setup_camera_and_environment(
         }
         .build(),
     ));
+}
+
+fn move_fox(mut query: Single<&mut Transform, With<AnimationToPlay>>, time: Res<Time>) {
+    let elapsed = time.elapsed_secs_f64() % 10.0;
+
+    if elapsed < 2.5 {
+        query.translation.z -= 1.0;
+    } else if elapsed < 5.0 {
+        query.translation.z += 1.0;
+    } else if elapsed < 7.5 {
+        query.translation.x += 1.0;
+    } else {
+        query.translation.x -= 1.0;
+    }
 }

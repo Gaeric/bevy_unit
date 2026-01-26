@@ -60,11 +60,11 @@ fn propagate_transform_to_attachments(
                 continue;
             };
 
-            tracing::debug!(
-                "transform is {:?}, parent transform is {:?}",
-                transform.translation,
-                parent_transform.translation
-            );
+            // tracing::trace!(
+            //     "transform is {:?}, parent transform is {:?}",
+            //     transform.translation,
+            //     parent_transform.translation
+            // );
 
             *transform = parent_transform
         }
