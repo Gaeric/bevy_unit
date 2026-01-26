@@ -38,7 +38,7 @@ pub fn plugin(app: &mut App) {
     app.add_observer(set_weapon);
 
     app.add_systems(
-        FixedUpdate,
+        Update,
         // apply_character_control.in_set(TnuaUserControlsSystemSet),
         apply_tnua_ctrl.in_set(TnuaUserControlsSystems),
     );
@@ -150,6 +150,8 @@ fn apply_tnua_ctrl(
         tnua_ctrl.motion_config,
         &mut tnua_ctrl.air_actions_counter,
     );
+
+    controller.initiate_action_feeding();
 
     let mut yaw = 0.0;
     let last_move = accumulated_input.last_move.unwrap_or_default();

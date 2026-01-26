@@ -22,12 +22,14 @@ fn character_jump(
     let sound_cooldown = sound_cooldown
         .get_or_insert_with(|| Timer::new(Duration::from_millis(1000), TimerMode::Once));
     sound_cooldown.tick(time.delta());
-    *is_jumping = if let Some(WaltzTnuaCtrlSchemeActionState::Jump(state)) =
-        character.current_action.as_ref()
-    {
-        matches!(state.memory, TnuaBuiltinJumpMemory::FallSection)
+    if let Some(WaltzTnuaCtrlSchemeActionState::Jump(state)) = character.current_action.as_ref() {
+        if matches!(state.memory, TnuaBuiltinJumpMemory::FallSection) {
+            *is_jumping = false;
+            return;
+        }
     } else {
-        false
+        *is_jumping = false;
+        return;
     };
 
     if *is_jumping {

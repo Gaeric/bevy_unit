@@ -33,6 +33,7 @@ mod sound;
 mod weapon;
 
 use crate::character::animating::GltfSceneHandler;
+use crate::character::config::CharacterMotionConfig;
 use crate::character::weapon::equip_weapon;
 
 pub use weapon::{EquipWeapon, WeaponKind};
@@ -185,6 +186,15 @@ fn setup_character_with_entity_cmd(
     // configured so that it'll generate collision data without generating forces for the actual
     // physics simulation.
     cmd.insert(TnuaObstacleRadar::new(1.0, 3.0));
+
+    cmd.insert(CharacterMotionConfig {
+        // speed with direction correction factor
+        speed: 5.0 * 3.0,
+        actions_in_air: 1,
+        dash_distance: 10.0,
+        one_way_platforms_min_proximity: 1.0,
+        climb_speed: 10.0,
+    });
 
     // use TnuaBlipReuseAvoidance to avoid initiating actions
     cmd.insert(TnuaBlipReuseAvoidance::<WaltzTnuaCtrlScheme>::default());
