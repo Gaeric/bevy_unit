@@ -43,10 +43,10 @@ pub fn plugin(app: &mut App) {
         apply_tnua_ctrl.in_set(TnuaUserControlsSystems),
     );
 
-    app.add_systems(
-        Update,
-        clear_accumulated_input.run_if(did_fixed_update_happen),
-    );
+    // app.add_systems(
+    //     Update,
+    //     clear_accumulated_input.run_if(did_fixed_update_happen),
+    // );
 }
 
 #[derive(Component, Debug, Default)]
@@ -114,6 +114,7 @@ fn accumulate_movement(
     // w: forward to -z
     // s: forward to z
     let direction = Vec3::new(trigger.value.x, 0.0, -trigger.value.y);
+    debug!("accumulate movement direction {direction:?}");
     accumulated_inputs.last_move.replace(direction);
 }
 
@@ -142,13 +143,12 @@ fn apply_tnua_ctrl(
     tnua_ctrl_query: Single<TnuaCtrlQuery>,
     camera_query: Option<Single<TnuaCameraQuery>>,
 ) {
-    // info!("apply accumulate movement");
     let mut tnua_ctrl = tnua_ctrl_query.into_inner();
-    let (controller, accumulated_input, motion_config, air_actions_counter) = (
+    let (controller, accumulated_input, air_actions_counter, motion_config) = (
         &mut tnua_ctrl.controller,
         tnua_ctrl.accumulated_input,
-        tnua_ctrl.motion_config,
         &mut tnua_ctrl.air_actions_counter,
+        tnua_ctrl.motion_config,
     );
 
     controller.initiate_action_feeding();
@@ -165,13 +165,14 @@ fn apply_tnua_ctrl(
     }
 
     let yaw_quat = Quat::from_axis_angle(Vec3::Y, yaw);
-
     let mut direction = yaw_quat * last_move;
 
+    debug!(
+        "tnua ctrl yaw quat is {yaw_quat:?}, last_move {last_move:?} and direction {direction:?}"
+    );
+
     // add speed clamping to the character's movement
-    if direction.length_squared() > 0.005 {
-        debug!("direction is {direction:?}");
-    } else {
+    if direction.length_squared() <= 0.005 {
         direction = Vec3::ZERO;
     }
 

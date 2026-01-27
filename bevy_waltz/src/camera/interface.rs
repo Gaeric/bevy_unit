@@ -19,7 +19,7 @@ pub(super) fn orbit_rotation(
 
         camera.direction = pitch_quat * yaw_quat * camera.direction;
 
-        debug!("new direction is {}", camera.direction);
+        debug!("orbit camera new direction is {}", camera.direction);
 
         commands.entity(entity).despawn();
     }
