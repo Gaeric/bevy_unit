@@ -1,16 +1,35 @@
 use bevy::{platform::collections::HashMap, prelude::*, scene::SceneInstanceReady};
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins)
-        .add_systems(Startup, setup_scene)
-        .add_observer(when_scene_ready)
-        .run();
+    let mut app = App::new();
+
+    app.add_plugins(DefaultPlugins);
+    app.add_systems(Startup, setup_scene);
+    // app.add_observer(when_scene_ready);
+
+    #[cfg(feature = "with-inspector")]
+    {
+        use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
+
+        app.add_plugins(EguiPlugin::default())
+            .add_plugins(WorldInspectorPlugin::new());
+    }
+
+    app.run();
 }
 
 fn setup_scene(mut command: Commands, asset_server: Res<AssetServer>) {
+    command.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(10.0, 10.0, 10.0).looking_to(Vec3::new(20.0, 20.0, 20.0), Vec3::Y),
+    ));
+
     command.spawn(SceneRoot(asset_server.load(
         GltfAssetLabel::Scene(0).from_asset("modular_character/female_body.glb"),
+    )));
+
+    command.spawn(SceneRoot(asset_server.load(
+        GltfAssetLabel::Scene(0).from_asset("modular_character/female_top.glb"),
     )));
 }
 
@@ -19,7 +38,11 @@ fn when_scene_ready(
     childrens: Query<&Children>,
     names: Query<(&Name, Entity)>,
 ) {
-    info!("scene {:?} ready", trigger.entity);
+    info!(
+        "scene [{:?}] ({:?}) ready",
+        names.get(trigger.entity),
+        trigger.entity
+    );
 
     let mut entity_path: HashMap<Entity, Vec<Name>> = HashMap::new();
     collect_path(trigger.entity, &[], childrens, names, &mut entity_path);
