@@ -15,6 +15,7 @@ mod control;
 mod level_switch;
 mod perf;
 mod utils;
+mod gp;
 
 use camera::WaltzCamera;
 use character::WaltzPlayer;
