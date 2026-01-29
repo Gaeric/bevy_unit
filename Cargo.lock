@@ -2675,6 +2675,7 @@ dependencies = [
  "bevy_waltz",
  "bone_attachments",
  "crossbeam-channel",
+ "rand",
  "tracing-appender",
 ]
 

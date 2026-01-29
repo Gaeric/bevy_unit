@@ -28,6 +28,7 @@ bone_attachments = { path = "units/bone_attachments" }
 bevy_waltz = { path = "bevy_waltz" }
 crossbeam-channel = "0.5.15"
 tracing-appender = "0.2.3"
+rand = "0.9.2"
 
 [patch.crates-io]
 bevy = { path = "../bevy_engines/bevy_0.18/" }
