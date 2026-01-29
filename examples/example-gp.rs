@@ -19,6 +19,40 @@ fn main() {
     app.run();
 }
 
+#[derive(Component)]
+pub enum Ability {
+    Test(u32),
+    Demo(u32),
+}
+
+#[derive(Clone)]
+pub struct AbilityStat {
+    kind: String,
+    value: Option<u32>,
+}
+
+impl AbilityStat {
+    fn to_ability(&self) -> Ability {
+        Ability::Demo(self.value.unwrap())
+    }
+}
+
+#[derive(Clone)]
+struct Gear {
+    name: String,
+    stats: Vec<AbilityStat>,
+}
+
+impl Gear {
+    fn equip(&self) -> impl Bundle {
+        (
+            // self.stats.iter().map(|stat| stat.to_ability()).collect::<Vec<_>>(),
+            self.stats[0].to_ability(),
+            Name::from(self.name.clone()),
+        )
+    }
+}
+
 /// An entity that can take damage.
 #[derive(Component, Deref, DerefMut)]
 struct HitPoints(u16);
