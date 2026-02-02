@@ -54,7 +54,10 @@ enum AppSetting {
 }
 
 fn main() {
-    App::new().add_systems(Startup, setup).run();
+    App::new()
+        .add_plugins(DefaultPlugins)
+        .add_systems(Startup, (setup, setup_card_ui))
+        .run();
 }
 
 fn setup(mut commands: Commands) {
@@ -215,12 +218,12 @@ pub fn spawn_option_button<T>(
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 padding: UiRect::axes(Val::Px(2.0), Val::Px(6.0)),
+                border_radius: BorderRadius::ZERO
+                    .with_left(if is_first { Val::Px(6.0) } else { Val::Px(0.0) })
+                    .with_right(if is_last { Val::Px(6.0) } else { Val::Px(0.0) }),
                 ..default()
             },
             BorderColor::all(Color::WHITE),
-            BorderRadius::ZERO
-                .with_left(if is_first { Val::Px(6.0) } else { Val::Px(0.0) })
-                .with_right(if is_last { Val::Px(6.0) } else { Val::Px(0.0) }),
             BackgroundColor(bg_color),
         ))
         .insert(RadioButton)
@@ -229,5 +232,128 @@ pub fn spawn_option_button<T>(
             spawn_ui_text(parent, option_name, fg_color)
                 .insert(RadioButtonText)
                 .insert(WidgetClickSender(option_value));
+        });
+}
+
+#[derive(Component)]
+struct Card;
+
+fn setup_card_ui(mut commands: Commands) {
+    // Spawn 2D Camera required for UI rendering
+
+    // 1. Root Card Container
+    // We use a Column layout to stack the header, image, and description vertically.
+    commands
+        .spawn((
+            Card,
+            Node {
+                width: Val::Px(260.0),
+                height: Val::Px(380.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: UiRect::all(Val::Px(12.0)),
+                border: UiRect::all(Val::Px(3.0)),
+                ..default()
+            },
+            // Ironclad's signature deep red background
+            BackgroundColor(Color::srgb(0.35, 0.08, 0.08)),
+            // Golden/Bronze border
+            BorderColor::all(Color::srgb(0.7, 0.6, 0.3)),
+        ))
+        .with_children(|parent| {
+            // 2. Header Row: Contains Energy Cost and Card Name
+            parent
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|header| {
+                    // Energy Orb (The blue circle in the top left)
+                    header
+                        .spawn((
+                            Node {
+                                width: Val::Px(42.0),
+                                height: Val::Px(42.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                // Note: Bevy 0.18 uses BorderRadius for rounding corners
+                                border_radius: BorderRadius::all(Val::Percent(50.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.1, 0.3, 0.7)), // Energy Blue
+                        ))
+                        .with_children(|orb| {
+                            orb.spawn((
+                                Text::new("1"),
+                                TextFont {
+                                    font_size: 24.0,
+                                    ..default()
+                                },
+                            ));
+                        });
+
+                    // Card Title
+                    header.spawn((
+                        Text::new("STRIKE"),
+                        TextFont {
+                            font_size: 20.0,
+                            ..default()
+                        },
+                    ));
+                });
+
+            // 3. Illustration Area
+            // In a real game, you would spawn an ImageNode here
+            parent.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(160.0),
+                    margin: UiRect::vertical(Val::Px(15.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                BorderColor::all(Color::srgb(0.5, 0.4, 0.2)),
+            ));
+
+            // 4. Card Type Banner (Attack)
+            parent
+                .spawn((
+                    Node {
+                        padding: UiRect::axes(Val::Px(15.0), Val::Px(2.0)),
+                        margin: UiRect::bottom(Val::Px(10.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.25, 0.05, 0.05)),
+                ))
+                .with_children(|banner| {
+                    banner.spawn((
+                        Text::new("Attack"),
+                        TextFont {
+                            font_size: 14.0,
+                            ..default()
+                        },
+                    ));
+                });
+
+            // 5. Description Area
+            parent
+                .spawn(Node {
+                    flex_grow: 1.0,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                })
+                .with_children(|desc| {
+                    desc.spawn((
+                        Text::new("Deal 6 damage."),
+                        TextLayout::new_with_justify(Justify::Center),
+                        TextFont {
+                            font_size: 18.0,
+                            ..default()
+                        },
+                    ));
+                });
         });
 }
