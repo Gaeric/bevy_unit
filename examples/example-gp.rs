@@ -31,9 +31,33 @@ pub struct AbilityStat {
     value: Option<u32>,
 }
 
+#[derive(Clone, Component)]
+pub struct AbilityArmor {
+    name: String,
+    value: u16,
+}
+
+fn armor_effect(mut attack: On<Attack>, armor: Query<&AbilityArmor>) {
+    let armor_ability = armor.get(attack.entity).unwrap();
+    let damage = attack.damage.saturating_sub(armor_ability.value);
+
+    if damage > 0 {
+        info!("{} damage passed through {}", damage, armor_ability.name);
+        attack.damage = damage;
+    } else {
+        info!("{} damage blocked by {}", attack.damage, armor_ability.name);
+        attack.propagate(false);
+        info!("propagation halted early");
+    }
+}
+
 impl AbilityStat {
     fn to_ability(&self) -> Ability {
         Ability::Demo(self.value.unwrap())
+    }
+
+    fn remove(&self, mut commands: Commands, entity: Entity) {
+        commands.entity(entity).remove::<Ability>();
     }
 }
 
@@ -44,12 +68,12 @@ struct Gear {
 }
 
 impl Gear {
-    fn equip(&self) -> impl Bundle {
-        (
-            // self.stats.iter().map(|stat| stat.to_ability()).collect::<Vec<_>>(),
-            self.stats[0].to_ability(),
-            Name::from(self.name.clone()),
-        )
+    fn equip(&self, mut cmd: EntityCommands) {
+        for stat in &self.stats {
+            cmd.insert(stat.to_ability());
+        }
+
+        cmd.insert(Name::from(self.name.clone()));
     }
 }
 
@@ -70,7 +94,15 @@ struct Attack {
 
 fn setup(mut commands: Commands) {
     commands
-        .spawn((Name::new("Demo"), HitPoints(50)))
+        .spawn((
+            Name::new("Demo"),
+            HitPoints(50),
+            AbilityArmor {
+                name: "Ability Armor".into(),
+                value: 3,
+            },
+        ))
+        .observe(armor_effect)
         .observe(take_damage)
         .with_children(|parent| {
             parent
