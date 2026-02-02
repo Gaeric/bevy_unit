@@ -122,24 +122,56 @@ pub struct CardColor(String);
 
 /// Extension trait for [`Commands`] to spawn `Card*`
 pub trait CardSpawnExt {
-    fn spawn_card(&'_ mut self, prop: &CardProp) -> EntityCommands<'_>;
+    // fn spawn_card(&'_ mut self, prop: &CardProp) -> EntityCommands<'_>;
+    fn spawn_card(&'_ mut self, prop: &CardProp, config: &CardUIConfig) -> EntityCommands<'_>;
+}
+
+const GOLEN_RATIO: f32 = 1.618;
+
+/// Configuration derived from window size to ensure consistent card proportions.
+pub struct CardUIConfig {
+    pub width: f32,
+    pub height: f32,
+    pub scale: f32,
+    pub padding: f32,
+    pub font_title: f32,
+    pub font_body: f32,
+    pub orb_size: f32,
+    pub spacing: f32,
+}
+
+impl CardUIConfig {
+    pub fn new(target_height: f32) -> Self {
+        // Use 380.0 as the base reference height from the original design
+        let scale = target_height / 380.0;
+
+        Self {
+            width: target_height / GOLEN_RATIO,
+            height: target_height,
+            scale,
+            padding: 12.0 * scale,
+            font_title: 20.0 * scale,
+            font_body: 16.0 * scale,
+            orb_size: 42.0 * scale,
+            spacing: 15.0 * scale,
+        }
+    }
 }
 
 impl CardSpawnExt for Commands<'_, '_> {
-    fn spawn_card(&'_ mut self, prop: &CardProp) -> EntityCommands<'_> {
+    fn spawn_card(&'_ mut self, prop: &CardProp, config: &CardUIConfig) -> EntityCommands<'_> {
         // 1. Root Card Container
-        // Acts as the parent frame with background and border.
+        // Uses fixed Px values derived from the dynamic config to maintain Aspect Ratio
         let mut card = self.spawn((
             Node {
-                width: Val::Px(260.0),
-                height: Val::Px(380.0),
+                width: Val::Px(config.width),
+                height: Val::Px(config.height),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                padding: UiRect::all(Val::Px(12.0)),
-                border: UiRect::all(Val::Px(3.0)),
+                padding: UiRect::all(Val::Px(config.padding)),
+                border: UiRect::all(Val::Px(3.0 * config.scale)),
                 ..default()
             },
-            // Background color could be mapped from prop.rare in the future
             BackgroundColor(Color::srgb(0.35, 0.08, 0.08)),
             BorderColor::all(Color::srgb(0.7, 0.6, 0.3)),
         ));
@@ -154,12 +186,12 @@ impl CardSpawnExt for Commands<'_, '_> {
                     ..default()
                 })
                 .with_children(|header| {
-                    // Energy Orb: Contains the Cost Text and CardCost Component
+                    // Energy Orb: Scaled size based on config
                     header
                         .spawn((
                             Node {
-                                width: Val::Px(42.0),
-                                height: Val::Px(42.0),
+                                width: Val::Px(config.orb_size),
+                                height: Val::Px(config.orb_size),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 border_radius: BorderRadius::all(Val::Percent(50.0)),
@@ -171,10 +203,9 @@ impl CardSpawnExt for Commands<'_, '_> {
                             orb.spawn((
                                 Text::new(prop.base_cost.to_string()),
                                 TextFont {
-                                    font_size: 24.0,
+                                    font_size: config.font_title * 1.2, // Cost is slightly larger than title
                                     ..default()
                                 },
-                                // Tagging the text node with CardCost for dynamic updates
                                 CardCost {
                                     base: prop.base_cost,
                                     curr: prop.base_cost,
@@ -182,31 +213,32 @@ impl CardSpawnExt for Commands<'_, '_> {
                             ));
                         });
 
-                    // Card Title: Tagging with CardTitle Component
+                    // Card Title: Scaled font size
                     header.spawn((
                         Text::new(prop.title.clone()),
                         TextFont {
-                            font_size: 20.0,
+                            font_size: config.font_title,
                             ..default()
                         },
                         CardTitle(prop.title.clone()),
                     ));
                 });
 
-            // 3. Illustration Area (Static placeholder for now)
+            // 3. Illustration Area
+            // Height is scaled proportionally
             parent.spawn((
                 Node {
                     width: Val::Percent(100.0),
-                    height: Val::Px(160.0),
-                    margin: UiRect::vertical(Val::Px(15.0)),
-                    border: UiRect::all(Val::Px(2.0)),
+                    height: Val::Px(160.0 * config.scale),
+                    margin: UiRect::vertical(Val::Px(config.spacing)),
+                    border: UiRect::all(Val::Px(2.0 * config.scale)),
                     ..default()
                 },
                 BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
                 BorderColor::all(Color::srgb(0.5, 0.4, 0.2)),
             ));
 
-            // 4. Description Area: Tagging with CardDesc Component
+            // 4. Description Area
             parent
                 .spawn(Node {
                     flex_grow: 1.0,
@@ -215,10 +247,9 @@ impl CardSpawnExt for Commands<'_, '_> {
                 })
                 .with_children(|desc_node| {
                     desc_node.spawn((
-                        // Joining Vec<String> with newlines for the UI
                         Text::new(prop.base_desc.join("\n")),
                         TextFont {
-                            font_size: 18.0,
+                            font_size: config.font_body,
                             ..default()
                         },
                         TextLayout::new_with_justify(Justify::Center),
@@ -226,19 +257,21 @@ impl CardSpawnExt for Commands<'_, '_> {
                     ));
                 });
         });
+
         card
     }
 }
 
-fn setup_card_ui(mut commands: Commands) {
-    // Spawn 2D Camera required for UI rendering
+fn setup_card_ui(mut commands: Commands, window: Single<&Window>) {
+    let card_height = window.height() * 0.45;
+    let config = CardUIConfig::new(card_height);
 
-    let strike_config = CardProp {
+    let strike_prop = CardProp {
         title: "Strike".into(),
         base_cost: 1,
         base_desc: vec!["Deal 6".into(), "damage.".into()],
         rare: 1,
     };
 
-    commands.spawn_card(&strike_config);
+    commands.spawn_card(&strike_prop, &config);
 }
