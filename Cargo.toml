@@ -30,6 +30,9 @@ crossbeam-channel = "0.5.15"
 tracing-appender = "0.2.3"
 rand = "0.9.2"
 
+# develop ui toolkit
+bevy-inspector-egui = "0.36.0"
+
 [patch.crates-io]
 bevy = { path = "../bevy_engines/bevy_0.18/" }
 bevy_math = { path = "../bevy_engines/bevy_0.18/crates/bevy_math" }

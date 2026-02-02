@@ -2591,7 +2591,6 @@ version = "0.1.0"
 dependencies = [
  "avian3d",
  "bevy 0.18.0",
- "bevy-inspector-egui",
  "bevy-tnua",
  "bevy-tnua-avian3d",
  "bevy_enhanced_input",
@@ -2672,6 +2671,7 @@ name = "bevy_workflow"
 version = "0.1.0"
 dependencies = [
  "bevy 0.18.0",
+ "bevy-inspector-egui",
  "bevy_waltz",
  "bone_attachments",
  "crossbeam-channel",

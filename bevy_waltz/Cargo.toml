@@ -26,9 +26,6 @@ serde = { version = "1", features = ["derive"] }
 # bone attachments
 bone_attachments = { path = "../units/bone_attachments" }
 
-# develop ui toolkit
-bevy-inspector-egui = "0.36.0"
-
 # frame limit
 [dependencies.bevy_framepace]
 git = "https://github.com/aevyrie/bevy_framepace/"
