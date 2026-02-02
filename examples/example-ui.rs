@@ -1,4 +1,4 @@
-use bevy::{ecs::system::EntityCommands, prelude::*};
+use bevy::{ecs::system::EntityCommands, prelude::*, window::WindowResized};
 use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
 
 #[derive(Component)]
@@ -10,6 +10,7 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .add_plugins(WorldInspectorPlugin::new())
         .add_systems(Startup, (setup, setup_card_ui))
+        .add_systems(Update, window_resizing)
         .run();
 }
 
@@ -49,6 +50,9 @@ pub struct CardProp {
     rare: u8,
     // path: Path,
 }
+
+#[derive(Component)]
+pub struct CardContainer;
 
 #[derive(Component, Clone, Debug)]
 pub struct CardTitle(String);
@@ -119,6 +123,7 @@ impl CardSpawnExt for Commands<'_, '_> {
             },
             BackgroundColor(Color::srgb(0.35, 0.08, 0.08)),
             BorderColor::all(Color::srgb(0.7, 0.6, 0.3)),
+            CardContainer,
         ));
 
         card.with_children(|parent| {
@@ -218,4 +223,21 @@ fn setup_card_ui(mut commands: Commands, window: Single<&Window>) {
     };
 
     commands.spawn_card(&strike_prop, &config);
+}
+
+pub fn window_resizing(
+    mut resize_reader: MessageReader<WindowResized>,
+    mut card_root: Query<&mut Node, With<CardContainer>>,
+) {
+    for e in resize_reader.read() {
+        let target_card_height = e.height * 0.30;
+        let new_config = CardUIConfig::new(target_card_height);
+
+        for mut node in &mut card_root {
+            node.width = Val::Px(new_config.width);
+            node.height = Val::Px(new_config.height);
+            node.padding = UiRect::all(Val::Px(new_config.padding));
+            node.border = UiRect::all(Val::Px(3.0 * new_config.scale));
+        }
+    }
 }
