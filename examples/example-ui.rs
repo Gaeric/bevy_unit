@@ -11,6 +11,8 @@ fn main() {
         .add_plugins(WorldInspectorPlugin::new())
         .add_systems(Startup, (setup, setup_card_ui))
         .add_systems(Update, window_resizing)
+        .add_observer(on_drag_enter)
+        .add_observer(on_drag_over)
         .run();
 }
 
@@ -50,6 +52,12 @@ pub enum CardUIText {
 pub struct CardColor(String);
 
 const GOLEN_RATIO: f32 = 1.618;
+
+#[derive(Component)]
+pub struct DraggableCard;
+
+#[derive(Component)]
+pub struct GhostCard;
 
 /// Configuration derived from window size to ensure consistent card proportions.
 pub struct CardUIConfig {
@@ -104,6 +112,7 @@ impl CardSpawnExt for Commands<'_, '_> {
             BackgroundColor(Color::srgb(0.35, 0.08, 0.08)),
             BorderColor::all(Color::srgb(0.7, 0.6, 0.3)),
             CardContainer,
+            DraggableCard,
         ));
 
         card.with_children(|parent| {
@@ -203,6 +212,47 @@ fn setup_card_ui(mut commands: Commands, window: Single<&Window>) {
     };
 
     commands.spawn_card(&strike_prop, &config);
+}
+
+fn on_drag_enter(
+    mut event: On<Pointer<DragEnter>>,
+    cards: Query<Entity, With<DraggableCard>>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    if let Ok(_entity) = cards.get(event.dragged) {
+        let Some(position) = event.hit.position else {
+            return;
+        };
+
+        info!("position is {:?}", position);
+
+        commands.spawn((
+            GhostCard,
+            Mesh2d(meshes.add(Circle::new(25.0))),
+            MeshMaterial2d(materials.add(Color::srgba(1.0, 1.0, 0.6, 0.5))),
+            Transform::from_translation(position + 2. * Vec3::Z),
+            Pickable::IGNORE,
+        ));
+
+        event.propagate(false);
+    }
+}
+
+fn on_drag_over(
+    mut event: On<Pointer<DragOver>>,
+    cards: Query<Entity, With<DraggableCard>>,
+    mut ghost_transform: Single<&mut Transform, With<GhostCard>>,
+) {
+    if let Ok(_) = cards.get(event.dragged) {
+        let Some(position) = event.hit.position else {
+            return;
+        };
+
+        ghost_transform.translation = position;
+        event.propagate(false);
+    }
 }
 
 pub fn window_resizing(
