@@ -18,21 +18,6 @@ fn setup(mut commands: Commands) {
     commands.spawn(Camera2d::default());
 }
 
-pub fn spawn_ui_text<'a>(
-    parent: &'a mut ChildSpawnerCommands,
-    label: &str,
-    color: Color,
-) -> EntityCommands<'a> {
-    parent.spawn((
-        Text::new(label),
-        TextColor(color),
-        TextFont {
-            font_size: 18.0,
-            ..default()
-        },
-    ))
-}
-
 /*
 some issue should to be done
 1. dynamic change the desc/effect
@@ -54,17 +39,12 @@ pub struct CardProp {
 #[derive(Component)]
 pub struct CardContainer;
 
-#[derive(Component, Clone, Debug)]
-pub struct CardTitle(String);
-
-#[derive(Component, Clone, Debug)]
-pub struct CardCost {
-    base: u8,
-    curr: u8,
+#[derive(Component)]
+pub enum CardUIText {
+    CardUITitle(String),
+    CardUICost { base: u8, curr: u8 },
+    CardUIDesc(String),
 }
-
-#[derive(Component, Clone, Debug)]
-pub struct CardDesc(String);
 
 #[derive(Component, Clone, Debug)]
 pub struct CardColor(String);
@@ -77,9 +57,9 @@ pub struct CardUIConfig {
     pub height: f32,
     pub scale: f32,
     pub padding: f32,
+    pub font_cost: f32,
     pub font_title: f32,
-    pub font_body: f32,
-    pub orb_size: f32,
+    pub font_desc: f32,
     pub spacing: f32,
 }
 
@@ -93,9 +73,9 @@ impl CardUIConfig {
             height: target_height,
             scale,
             padding: 12.0 * scale,
+            font_cost: 24.0 * scale,
             font_title: 20.0 * scale,
-            font_body: 16.0 * scale,
-            orb_size: 42.0 * scale,
+            font_desc: 16.0 * scale,
             spacing: 15.0 * scale,
         }
     }
@@ -154,10 +134,10 @@ impl CardSpawnExt for Commands<'_, '_> {
                             orb.spawn((
                                 Text::new(prop.base_cost.to_string()),
                                 TextFont {
-                                    font_size: config.font_title * 1.2,
+                                    font_size: config.font_cost,
                                     ..default()
                                 },
-                                CardCost {
+                                CardUIText::CardUICost {
                                     base: prop.base_cost,
                                     curr: prop.base_cost,
                                 },
@@ -170,7 +150,7 @@ impl CardSpawnExt for Commands<'_, '_> {
                             font_size: config.font_title,
                             ..default()
                         },
-                        CardTitle(prop.title.clone()),
+                        CardUIText::CardUITitle(prop.title.clone()),
                     ));
                 });
 
@@ -198,11 +178,11 @@ impl CardSpawnExt for Commands<'_, '_> {
                     desc_node.spawn((
                         Text::new(prop.base_desc.join("\n")),
                         TextFont {
-                            font_size: config.font_body,
+                            font_size: config.font_desc,
                             ..default()
                         },
                         TextLayout::new_with_justify(Justify::Center),
-                        CardDesc(prop.base_desc.join("\n")),
+                        CardUIText::CardUIDesc(prop.base_desc.join("\n")),
                     ));
                 });
         });
@@ -228,6 +208,7 @@ fn setup_card_ui(mut commands: Commands, window: Single<&Window>) {
 pub fn window_resizing(
     mut resize_reader: MessageReader<WindowResized>,
     mut card_root: Query<&mut Node, With<CardContainer>>,
+    mut card_texts: Query<(&mut TextFont, &CardUIText)>,
 ) {
     for e in resize_reader.read() {
         let target_card_height = e.height * 0.30;
@@ -238,6 +219,14 @@ pub fn window_resizing(
             node.height = Val::Px(new_config.height);
             node.padding = UiRect::all(Val::Px(new_config.padding));
             node.border = UiRect::all(Val::Px(3.0 * new_config.scale));
+        }
+
+        for (mut font, kind) in &mut card_texts {
+            font.font_size = match *kind {
+                CardUIText::CardUITitle(_) => new_config.font_title,
+                CardUIText::CardUICost { .. } => new_config.font_cost,
+                CardUIText::CardUIDesc(_) => new_config.font_desc,
+            }
         }
     }
 }
