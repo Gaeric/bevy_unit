@@ -9,7 +9,10 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
         .add_plugins(WorldInspectorPlugin::new())
-        .add_systems(Startup, (setup, setup_card_ui))
+        .add_systems(
+            Startup,
+            (setup, setup_game_interface, setup_card_ui).chain(),
+        )
         .add_systems(Update, window_resizing)
         .add_observer(on_drag_enter)
         .add_observer(on_drag_over)
@@ -50,6 +53,22 @@ pub enum CardUIText {
 
 #[derive(Component, Clone, Debug)]
 pub struct CardColor(String);
+
+#[derive(Component)]
+struct HistoryCardsArea;
+#[derive(Component)]
+struct MiddleArea;
+
+#[derive(Component)]
+struct BottomArea;
+#[derive(Component)]
+pub struct BottomLeftArea;
+
+#[derive(Component)]
+pub struct BottomMiddleArea;
+
+#[derive(Component)]
+pub struct BottomRightArea;
 
 const GOLEN_RATIO: f32 = 1.618;
 
@@ -107,6 +126,7 @@ impl CardSpawnExt for Commands<'_, '_> {
                 align_items: AlignItems::Center,
                 padding: UiRect::all(Val::Px(config.padding)),
                 border: UiRect::all(Val::Px(3.0 * config.scale)),
+                border_radius: BorderRadius::all(Val::Percent(5.0)),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.35, 0.08, 0.08)),
@@ -121,8 +141,10 @@ impl CardSpawnExt for Commands<'_, '_> {
                 .spawn(Node {
                     width: Val::Percent(100.0),
                     height: Val::Percent(20.0),
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
+                    // margin: UiRect::vertical(Val::Percent(5.0)),
+                    position_type: PositionType::Relative,
+                    justify_content: JustifyContent::Center,
+                    // align_items: AlignItems::Center,
                     ..default()
                 })
                 .with_children(|header| {
@@ -130,6 +152,9 @@ impl CardSpawnExt for Commands<'_, '_> {
                     header
                         .spawn((
                             Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(-config.padding),
+                                top: Val::Px(-config.padding),
                                 width: Val::Percent(20.0),
                                 aspect_ratio: Some(1.0),
                                 justify_content: JustifyContent::Center,
@@ -167,9 +192,11 @@ impl CardSpawnExt for Commands<'_, '_> {
             parent.spawn((
                 Node {
                     width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    margin: UiRect::vertical(Val::Percent(5.0)),
+                    aspect_ratio: Some(1.0),
+                    // flex_grow: 1.0,
+                    // margin: UiRect::vertical(Val::Percent(5.0)),
                     border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Percent(50.0)),
                     ..default()
                 },
                 BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
@@ -200,7 +227,11 @@ impl CardSpawnExt for Commands<'_, '_> {
     }
 }
 
-fn setup_card_ui(mut commands: Commands, window: Single<&Window>) {
+fn setup_card_ui(
+    mut commands: Commands,
+    window: Single<&Window>,
+    middle_area_entity: Single<Entity, With<BottomMiddleArea>>,
+) {
     let card_height = window.height() * 0.30;
     let config = CardUIConfig::new(card_height);
 
@@ -211,7 +242,121 @@ fn setup_card_ui(mut commands: Commands, window: Single<&Window>) {
         rare: 1,
     };
 
-    commands.spawn_card(&strike_prop, &config);
+    // Spawn the card as a child of the MiddleArea
+    // commands.entity(middle_area_entity).with_children(|parent| {
+    //     parent.spawn_card(&strike_prop, &config);
+    // });
+
+    let entity: Entity = middle_area_entity.into_inner();
+
+    for _ in 0..10 {
+        let card_entity = commands.spawn_card(&strike_prop, &config).id();
+        commands.entity(card_entity).set_parent_in_place(entity);
+    }
+
+    // commands.spawn_card(&strike_prop, &config);
+}
+
+fn setup_game_interface(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },))
+        .with_children(|parent| {
+            // (Top Section)
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(10.0),
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::Start,
+                        align_items: AlignItems::Start,
+                        // padding: UiRect::all(Val::Px(10.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
+                ))
+                .with_children(|top_section| {
+                    // (HistoryCardsArea Section)
+                    top_section.spawn((
+                        Node {
+                            width: Val::Percent(40.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.3, 0.1, 0.1)),
+                        HistoryCardsArea,
+                    ));
+                });
+
+            parent.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.1, 0.1, 0.2)),
+                MiddleArea,
+            ));
+            //  (Bottom Section)
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(40.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        position_type: PositionType::Relative,
+                        flex_direction: FlexDirection::Row,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.1, 0.2, 0.1)),
+                    BottomArea,
+                ))
+                .with_children(|bottom| {
+                    // Left Sub-Area (e.g., Draw Pile)
+                    bottom.spawn((
+                        Node {
+                            width: Val::Percent(20.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                        BottomLeftArea,
+                    ));
+
+                    // Middle Sub-Area (Main Hand)
+                    bottom.spawn((
+                        Node {
+                            width: Val::Percent(60.0), // Takes most of the space
+                            height: Val::Percent(100.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        // Transparent or slightly different green
+                        BackgroundColor(Color::srgb(0.12, 0.2, 0.12)),
+                        BottomMiddleArea,
+                    ));
+
+                    // Right Sub-Area (e.g., Discard Pile)
+                    bottom.spawn((
+                        Node {
+                            width: Val::Percent(20.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                        BottomRightArea,
+                    ));
+                });
+        });
 }
 
 fn on_drag_enter(
