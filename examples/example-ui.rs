@@ -425,3 +425,62 @@ pub fn window_resizing(
         }
     }
 }
+
+fn point_over(
+    on_over: On<Pointer<Over>>,
+    mut query: Query<(&mut BackgroundColor, &mut BorderColor)>,
+) {
+    if let Ok((mut background_color, mut border_color)) = query.get_mut(on_over.event_target()) {
+        let tile_color = background_color.0;
+        let tile_border_color = border_color.top;
+        background_color.0 = tile_color.lighter(0.1);
+        border_color.set_all(tile_border_color.lighter(0.1));
+    }
+}
+
+fn point_out(on_out: On<Pointer<Out>>, mut query: Query<(&mut BackgroundColor, &mut BorderColor)>) {
+    if let Ok((mut background_color, mut border_color)) = query.get_mut(on_out.event_target()) {
+        let tile_color = background_color.0;
+        let tile_border_color = border_color.top;
+        background_color.0 = tile_color;
+        border_color.set_all(tile_border_color);
+    }
+}
+
+fn point_drag_start(
+    on_drag_start: On<Pointer<DragStart>>,
+    mut query: Query<(&mut Outline, &mut GlobalZIndex)>,
+) {
+    if let Ok((mut outline, mut global_zindex)) = query.get_mut(on_drag_start.event_target()) {
+        outline.color = Color::WHITE;
+        global_zindex.0 = 1;
+    }
+}
+
+fn point_drag(on_drag: On<Pointer<Drag>>, mut query: Query<&mut UiTransform>) {
+    if let Ok(mut transform) = query.get_mut(on_drag.event_target()) {
+        transform.translation = Val2::px(on_drag.distance.x, on_drag.distance.y);
+    }
+}
+
+fn point_drag_end(
+    on_drag_end: On<Pointer<DragEnd>>,
+    mut query: Query<(&mut UiTransform, &mut Outline, &mut GlobalZIndex)>,
+) {
+    if let Ok((mut transform, mut outline, mut global_zindex)) =
+        query.get_mut(on_drag_end.event_target())
+    {
+        transform.translation = Val2::ZERO;
+        outline.color = Color::NONE;
+        global_zindex.0 = 0;
+    }
+}
+
+fn point_drag_drop(on_drag_drop: On<Pointer<DragDrop>>, mut query: Query<&mut Node>) {
+    if let Ok([mut a, mut b]) =
+        query.get_many_mut([on_drag_drop.event_target(), on_drag_drop.dropped])
+    {
+        core::mem::swap(&mut a.grid_row, &mut b.grid_row);
+        core::mem::swap(&mut a.grid_column, &mut b.grid_column);
+    }
+}
