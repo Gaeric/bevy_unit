@@ -14,8 +14,8 @@ fn main() {
             (setup, setup_game_interface, setup_card_ui).chain(),
         )
         .add_systems(Update, window_resizing)
-        .add_observer(on_drag_enter)
-        .add_observer(on_drag_over)
+        // .add_observer(on_drag_enter)
+        // .add_observer(on_drag_over)
         .run();
 }
 
@@ -135,6 +135,13 @@ impl CardSpawnExt for Commands<'_, '_> {
             DraggableCard,
         ));
 
+        card.observe(point_over)
+            .observe(point_out)
+            .observe(point_drag_start)
+            .observe(point_drag)
+            .observe(point_drag_end)
+            .observe(point_drag_drop);
+
         card.with_children(|parent| {
             // 2. Header Row
             parent
@@ -249,7 +256,7 @@ fn setup_card_ui(
 
     let entity: Entity = middle_area_entity.into_inner();
 
-    for _ in 0..10 {
+    for _ in 0..20 {
         let card_entity = commands.spawn_card(&strike_prop, &config).id();
         commands.entity(card_entity).set_parent_in_place(entity);
     }
@@ -442,8 +449,8 @@ fn point_out(on_out: On<Pointer<Out>>, mut query: Query<(&mut BackgroundColor, &
     if let Ok((mut background_color, mut border_color)) = query.get_mut(on_out.event_target()) {
         let tile_color = background_color.0;
         let tile_border_color = border_color.top;
-        background_color.0 = tile_color;
-        border_color.set_all(tile_border_color);
+        background_color.0 = tile_color.darker(0.1);
+        border_color.set_all(tile_border_color.darker(0.1));
     }
 }
 
