@@ -3,6 +3,11 @@ use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
 
 const GOLEN_RATIO: f32 = 1.618;
 
+const CARD_TOTAL_BG: Color = Color::srgb(0.35, 0.08, 0.08);
+const CARD_TOTAL_BORDER: Color = Color::srgb(0.7, 0.6, 0.3);
+const CARD_ORB_BG: Color = Color::srgb(0.1, 0.3, 0.7);
+const CARD_IMG_BG: Color = Color::srgb(0.15, 0.15, 0.15);
+
 #[derive(Component)]
 pub struct UiCamera;
 
@@ -16,8 +21,6 @@ fn main() {
             (setup, setup_game_interface, setup_card_ui).chain(),
         )
         .add_systems(Update, window_resizing)
-        // .add_observer(on_drag_enter)
-        // .add_observer(on_drag_over)
         .run();
 }
 
@@ -51,6 +54,13 @@ pub enum CardUIText {
     CardUITitle(String),
     CardUICost { base: u8, curr: u8 },
     CardUIDesc(String),
+}
+
+#[derive(Component)]
+pub enum CardColorArea {
+    CardTotalBg,
+    CardOrbBg,
+    CardImgBg,
 }
 
 #[derive(Component)]
@@ -123,8 +133,9 @@ impl CardSpawnExt for Commands<'_, '_> {
                 border_radius: BorderRadius::all(Val::Percent(5.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.35, 0.08, 0.08)),
-            BorderColor::all(Color::srgb(0.7, 0.6, 0.3)),
+            CardColorArea::CardTotalBg,
+            BackgroundColor(CARD_TOTAL_BG),
+            BorderColor::all(CARD_TOTAL_BORDER),
             CardContainer,
         ));
 
@@ -162,7 +173,8 @@ impl CardSpawnExt for Commands<'_, '_> {
                                 border_radius: BorderRadius::all(Val::Percent(50.0)),
                                 ..default()
                             },
-                            BackgroundColor(Color::srgb(0.1, 0.3, 0.7)),
+                            CardColorArea::CardOrbBg,
+                            BackgroundColor(CARD_ORB_BG),
                         ))
                         .with_children(|orb| {
                             orb.spawn((
@@ -199,7 +211,8 @@ impl CardSpawnExt for Commands<'_, '_> {
                     border_radius: BorderRadius::all(Val::Percent(50.0)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                CardColorArea::CardImgBg,
+                BackgroundColor(CARD_IMG_BG),
             ));
 
             // 4. Description Area
@@ -249,7 +262,7 @@ fn setup_card_ui(
 
     let entity: Entity = middle_area_entity.into_inner();
 
-    for _ in 0..20 {
+    for _ in 0..10 {
         let card_entity = commands.spawn_card(&strike_prop, &config).id();
         commands.entity(card_entity).set_parent_in_place(entity);
     }
@@ -257,7 +270,7 @@ fn setup_card_ui(
     // commands.spawn_card(&strike_prop, &config);
 }
 
-fn setup_game_interface(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn setup_game_interface(mut commands: Commands, _asset_server: Res<AssetServer>) {
     commands
         .spawn((Node {
             width: Val::Percent(100.0),
@@ -387,22 +400,38 @@ pub fn window_resizing(
 
 fn point_over(
     on_over: On<Pointer<Over>>,
-    mut query: Query<(&mut BackgroundColor, &mut BorderColor)>,
+    mut card_areas: Query<(&mut BackgroundColor, &CardColorArea)>,
+    mut border_areas: Query<&mut BorderColor>,
 ) {
-    if let Ok((mut background_color, mut border_color)) = query.get_mut(on_over.event_target()) {
-        let tile_color = background_color.0;
-        let tile_border_color = border_color.top;
-        background_color.0 = tile_color.lighter(0.1);
-        border_color.set_all(tile_border_color.lighter(0.1));
+    if let Ok(mut border_color) = border_areas.get_mut(on_over.event_target()) {
+        border_color.set_all(CARD_TOTAL_BORDER.lighter(0.1));
+    }
+
+    if let Ok((mut bg_color, area)) = card_areas.get_mut(on_over.event_target()) {
+        bg_color.0 = match area {
+            CardColorArea::CardTotalBg => CARD_TOTAL_BG,
+            CardColorArea::CardOrbBg => CARD_TOTAL_BG,
+            CardColorArea::CardImgBg => CARD_TOTAL_BG,
+        }
+        .lighter(0.1)
     }
 }
 
-fn point_out(on_out: On<Pointer<Out>>, mut query: Query<(&mut BackgroundColor, &mut BorderColor)>) {
-    if let Ok((mut background_color, mut border_color)) = query.get_mut(on_out.event_target()) {
-        let tile_color = background_color.0;
-        let tile_border_color = border_color.top;
-        background_color.0 = tile_color.darker(0.1);
-        border_color.set_all(tile_border_color.darker(0.1));
+fn point_out(
+    on_over: On<Pointer<Out>>,
+    mut card_areas: Query<(&mut BackgroundColor, &CardColorArea)>,
+    mut border_areas: Query<&mut BorderColor>,
+) {
+    if let Ok(mut border_color) = border_areas.get_mut(on_over.event_target()) {
+        border_color.set_all(CARD_TOTAL_BORDER);
+    }
+
+    if let Ok((mut bg_color, area)) = card_areas.get_mut(on_over.event_target()) {
+        bg_color.0 = match area {
+            CardColorArea::CardTotalBg => CARD_TOTAL_BG,
+            CardColorArea::CardOrbBg => CARD_TOTAL_BG,
+            CardColorArea::CardImgBg => CARD_TOTAL_BG,
+        }
     }
 }
 
