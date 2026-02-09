@@ -1,6 +1,8 @@
 use bevy::{ecs::system::EntityCommands, prelude::*, window::WindowResized};
 use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
 
+const GOLEN_RATIO: f32 = 1.618;
+
 #[derive(Component)]
 pub struct UiCamera;
 
@@ -51,9 +53,6 @@ pub enum CardUIText {
     CardUIDesc(String),
 }
 
-#[derive(Component, Clone, Debug)]
-pub struct CardColor(String);
-
 #[derive(Component)]
 struct HistoryCardsArea;
 #[derive(Component)]
@@ -69,11 +68,6 @@ pub struct BottomMiddleArea;
 
 #[derive(Component)]
 pub struct BottomRightArea;
-
-const GOLEN_RATIO: f32 = 1.618;
-
-#[derive(Component)]
-pub struct DraggableCard;
 
 #[derive(Component)]
 pub struct GhostCard;
@@ -132,7 +126,6 @@ impl CardSpawnExt for Commands<'_, '_> {
             BackgroundColor(Color::srgb(0.35, 0.08, 0.08)),
             BorderColor::all(Color::srgb(0.7, 0.6, 0.3)),
             CardContainer,
-            DraggableCard,
         ));
 
         card.observe(point_over)
@@ -364,47 +357,6 @@ fn setup_game_interface(mut commands: Commands, asset_server: Res<AssetServer>) 
                     ));
                 });
         });
-}
-
-fn on_drag_enter(
-    mut event: On<Pointer<DragEnter>>,
-    cards: Query<Entity, With<DraggableCard>>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-) {
-    if let Ok(_entity) = cards.get(event.dragged) {
-        let Some(position) = event.hit.position else {
-            return;
-        };
-
-        info!("position is {:?}", position);
-
-        commands.spawn((
-            GhostCard,
-            Mesh2d(meshes.add(Circle::new(25.0))),
-            MeshMaterial2d(materials.add(Color::srgba(1.0, 1.0, 0.6, 0.5))),
-            Transform::from_translation(position + 2. * Vec3::Z),
-            Pickable::IGNORE,
-        ));
-
-        event.propagate(false);
-    }
-}
-
-fn on_drag_over(
-    mut event: On<Pointer<DragOver>>,
-    cards: Query<Entity, With<DraggableCard>>,
-    mut ghost_transform: Single<&mut Transform, With<GhostCard>>,
-) {
-    if let Ok(_) = cards.get(event.dragged) {
-        let Some(position) = event.hit.position else {
-            return;
-        };
-
-        ghost_transform.translation = position;
-        event.propagate(false);
-    }
 }
 
 pub fn window_resizing(
