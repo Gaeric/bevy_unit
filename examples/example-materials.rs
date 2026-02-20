@@ -32,9 +32,15 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(FeathersPlugins)
+        .insert_resource(GlobalAmbientLight {
+            brightness: 10000.0,
+            color: Color::WHITE,
+            ..default()
+        })
         .insert_resource(UiTheme(create_dark_theme()))
         .insert_resource(HslWidgetStates {
-            hsl_color: AMBER_800.into(),
+            // hsl_color: AMBER_800.into(),
+            hsl_color: Srgba::new(0.57254905, 0.2509804, 0.05490196, 0.5).into(),
         })
         .add_systems(Startup, (setup_cube, setup_ui))
         .add_systems(Update, update_colors)
@@ -55,7 +61,7 @@ fn setup_cube(
     let cube = meshes.add(Cuboid::new(0.5, 0.5, 0.5));
     commands.spawn((
         Mesh3d(cube.clone()),
-        MeshMaterial3d(materials.add(Color::from(Hsla::hsl(300.0, 1.0, 0.5)))),
+        MeshMaterial3d(materials.add(Color::from(Hsla::new(300.0, 1.0, 0.5, 0.5)))),
         Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
         ActiveEntity,
     ));
@@ -140,6 +146,20 @@ fn setup_ui(mut commands: Commands) {
                     )
                 ),
                 (
+                    color_slider(
+                        ColorSliderProps {
+                            value: 0.5,
+                            channel: ColorChannel::Alpha
+                        },
+                        ()
+                    ),
+                    observe(
+                        |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
+                            color.hsl_color.alpha = change.value
+                        }
+                    )
+                ),
+                (
                     slider(
                         SliderProps {
                             max: 100.0,
@@ -164,7 +184,8 @@ fn update_materials(
         if let Some(material) = materials.get_mut(material_handle)
             && let Color::Hsla(ref mut hsla) = material.base_color
         {
-            *hsla = color.hsl_color
+            *hsla = color.hsl_color;
+            // info!("hsla alpha is {}", hsla.alpha);
         }
     }
 }
@@ -197,6 +218,12 @@ fn update_colors(
                     commands
                         .entity(slider_ent)
                         .insert(SliderValue(color.hsl_color.lightness));
+                }
+                ColorChannel::Alpha => {
+                    base.0 = color.hsl_color.into();
+                    commands
+                        .entity(slider_ent)
+                        .insert(SliderValue(color.hsl_color.alpha));
                 }
 
                 _ => {}

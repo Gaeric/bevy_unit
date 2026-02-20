@@ -12,7 +12,7 @@ fn main() {
     println!("this is a example");
     App::new()
         .add_plugins(DefaultPlugins)
-        .insert_resource(AmbientLight {
+        .insert_resource(GlobalAmbientLight {
             brightness: 1000.0,
             color: Color::WHITE,
             ..default()
