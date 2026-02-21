@@ -184,6 +184,10 @@
     命令形式形如：BEVY_ASSET_ROOT="." dx serve --hot-patch --example feathers --features="experimental_bevy_feathers,hotpatching"
 
     注意需要使用BEVY_ASSET_ROOT，以便于正常加载资源文件
+
+    如果需要动态加载asset资产，需要同时启用file_watcher和asset_processor，参考：
+
+    cargo run --example extended_material --features="file_watcher asset_processor"
 *** ecs note
     ecs中update函数在对应schedule时一定执行，并不依赖于Query中的查询结果，验证代码如下：
     #+begin_src rust-ts
