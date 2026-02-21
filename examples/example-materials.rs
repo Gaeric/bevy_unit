@@ -1,5 +1,4 @@
 use bevy::{
-    color::palettes::tailwind::AMBER_800,
     feathers::{
         FeathersPlugins,
         controls::{
@@ -39,7 +38,6 @@ fn main() {
         })
         .insert_resource(UiTheme(create_dark_theme()))
         .insert_resource(HslWidgetStates {
-            // hsl_color: AMBER_800.into(),
             hsl_color: Srgba::new(0.57254905, 0.2509804, 0.05490196, 0.5).into(),
         })
         .add_systems(Startup, (setup_cube, setup_ui))
