@@ -7,7 +7,7 @@ use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::scene::SceneInstanceReady;
 use bevy::shader::ShaderRef;
 
-const SHADER_ASSET_PATH: &str = "shaders/manual_material.wgsl";
+const SHADER_ASSET_PATH: &str = "materials/shaders/manual_material.wgsl";
 
 /// The example bindless material extension.
 /// see bevy example extended_material_bindless.rs
@@ -52,9 +52,14 @@ const SHADER_ASSET_PATH: &str = "shaders/manual_material.wgsl";
 /// index table doesn't conflict.
 #[derive(Asset, Clone, Reflect, AsBindGroup)]
 #[data(50, DemoBindlessExtensionUniform, binding_array(101))]
-#[bindless(index_table(range(50..51), binding(100)))]
+// #[bindless(index_table(range(50..53), binding(100)))]
 struct DemoBindlessExtension {
+    /// The color we're going to multiply the base color with.
     modulate_color: Color,
+    /// The image we're going to multiply the base color with.
+    #[texture(51)]
+    #[sampler(52)]
+    modulate_texture: Option<Handle<Image>>,
 }
 
 /// The GPU-side data structure specifying plain old data for the material
@@ -164,6 +169,7 @@ fn change_material(
     mut commands: Commands,
     children: Query<&Children>,
     mesh_materials: Query<(&MeshMaterial3d<StandardMaterial>, &GltfMaterialName)>,
+    asset_server: Res<AssetServer>,
     mut asset_materials: ResMut<Assets<StandardMaterial>>,
     mut extended_materials: ResMut<
         Assets<ExtendedMaterial<StandardMaterial, DemoBindlessExtension>>,
@@ -193,6 +199,7 @@ fn change_material(
                         base: material.clone(),
                         extension: DemoBindlessExtension {
                             modulate_color: YELLOW.into(),
+                            modulate_texture: Some(asset_server.load("materials/uv_checker_bw.png"))
                         },
                     })));
             }

@@ -22,6 +22,12 @@ struct DemoBindlessExtendedMaterialIndices {
   // The index of the `DemoBindlessExtendedMaterial` data in
   // `example_extended_material`.
   material: u32,
+  // The index of the texture we're going to modulate the base color with in
+  // the `bindless_textures_2d` array.
+  modulate_texture: u32,
+  // The index of the sampler we're going to sample the modulated texture with
+  // in the `bindless_samplers_filtering` array.
+  modulate_texture_sampler: u32,
 }
 
 // Plain data associated with this demo material.
@@ -42,6 +48,8 @@ struct DemoBindlessExtendedMaterial {
 
 // In non-bindless mode, we simply use a uniform for the plain old data.
 @group(#{MATERIAL_BIND_GROUP}) @binding(50) var<uniform> demo_extended_material: DemoBindlessExtendedMaterial;
+@group(#{MATERIAL_BIND_GROUP}) @binding(51) var modulate_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(52) var modulate_sampler: sampler;
 
 #endif
 
@@ -68,9 +76,13 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 #ifdef BINDLESS
     // Notice how we fetch the texture, sampler, and plain extended material
     // data from the appropriate arrays.
-    pbr_input.material.base_color *= demo_extended_material[demo_extended_material_indices[slot].material].modulate_color;
+    pbr_input.material.base_color *= textureSample(
+        bindless_textures_2d[demo_extended_material_indices[slot].modulate_texture],
+        bindless_samplers_filtering[demo_extended_material_indices[slot].modulate_texture_sampler],
+        uv) * demo_extended_material[demo_extended_material_indices[slot].material].modulate_color;
 #else
-    pbr_input.material.base_color *= demo_extended_material.modulate_color;
+    pbr_input.material.base_color *= textureSample(modulate_texture, modulate_sampler, uv) *
+        demo_extended_material.modulate_color;
 #endif
 
     var out: FragmentOutput;
@@ -81,4 +93,4 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // include fullscreen postprocessing effects like bloom.
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
     return out;
-} 
+}
