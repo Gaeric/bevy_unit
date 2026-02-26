@@ -70,7 +70,11 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 #else
     let uv_transform = material.uv_transform;
 #endif
+
     let uv = (uv_transform * vec3(in.uv, 1.0)).xy;
+
+    // the uv scale group
+    // let corrected_uv = (in.uv - 0.5) * group_input.scale + 0.5;
 
     // Multiply the base color by the `modular_texture` and `modulate_color`.
 #ifdef BINDLESS
