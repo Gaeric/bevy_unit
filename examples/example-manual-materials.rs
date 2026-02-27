@@ -1,5 +1,6 @@
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState};
 use bevy::color::palettes::css::YELLOW;
+use bevy::feathers::palette::WHITE;
 use bevy::gltf::GltfMaterialName;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
@@ -52,7 +53,7 @@ const SHADER_ASSET_PATH: &str = "materials/shaders/manual_material.wgsl";
 /// index table doesn't conflict.
 #[derive(Asset, Clone, Reflect, AsBindGroup)]
 #[data(50, EyeMaterialUniform, binding_array(101))]
-#[bindless(index_table(range(50..53), binding(100)))]
+#[bindless(index_table(range(50..57), binding(100)))]
 struct EyeMaterialExt {
     /// The color we're going to multiply the base color with.
     iris_color: Color,
@@ -76,7 +77,7 @@ struct EyeMaterialExt {
 struct EyeMaterialUniform {
     /// The GPU representation of the color we're going to multiply the base
     /// color with.
-    modulate_color: Vec4,
+    iris_color: Vec4,
 }
 
 impl MaterialExtension for EyeMaterialExt {
@@ -88,7 +89,7 @@ impl MaterialExtension for EyeMaterialExt {
 impl<'a> From<&'a EyeMaterialExt> for EyeMaterialUniform {
     fn from(material_extension: &'a EyeMaterialExt) -> Self {
         EyeMaterialUniform {
-            modulate_color: LinearRgba::from(material_extension.iris_color).to_vec4(),
+            iris_color: LinearRgba::from(material_extension.iris_color).to_vec4(),
         }
     }
 }
@@ -204,13 +205,11 @@ fn change_material(
                     .insert(MeshMaterial3d(extended_materials.add(ExtendedMaterial {
                         base: material.clone(),
                         extension: EyeMaterialExt {
-                            iris_color: YELLOW.into(),
+                            iris_color: WHITE.into(),
                             sclera_texture: Some(
                                 asset_server.load("materials/c_t_eye_white_01-DXT1.dds"),
                             ),
-                            iris_texture: Some(
-                                asset_server.load("materials/c_t_eye_00-DXT1.dds"),
-                            ),
+                            iris_texture: Some(asset_server.load("materials/c_t_eye_00-DXT1.dds")),
                             highlight_texture: Some(
                                 asset_server.load("materials/c_m_eye_01_Texture4.png"),
                             ),
