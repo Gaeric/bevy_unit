@@ -221,3 +221,9 @@
           info!("check for archetype filter")
       }
     #+end_src
+*** 使用cargo expand
+    cargo expand可以展开代码中的宏，可以通过检查展开后的宏，来确认一些关键参数，或用于理解宏过程。
+
+    安装：sudo pacman -S cargo-expand
+
+    使用：cargo expand --example example-manual-materials
