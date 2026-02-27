@@ -1,5 +1,4 @@
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState};
-use bevy::color::palettes::css::YELLOW;
 use bevy::feathers::palette::WHITE;
 use bevy::gltf::GltfMaterialName;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
@@ -53,7 +52,7 @@ const SHADER_ASSET_PATH: &str = "materials/shaders/manual_material.wgsl";
 /// index table doesn't conflict.
 #[derive(Asset, Clone, Reflect, AsBindGroup)]
 #[data(50, EyeMaterialUniform, binding_array(101))]
-#[bindless(index_table(range(50..57), binding(100)))]
+// #[bindless(index_table(range(50..59), binding(100)))]
 struct EyeMaterialExt {
     /// The color we're going to multiply the base color with.
     iris_color: Color,
@@ -69,6 +68,10 @@ struct EyeMaterialExt {
     #[texture(55)]
     #[sampler(56)]
     highlight_texture: Option<Handle<Image>>,
+
+    #[texture(57)]
+    #[sampler(58)]
+    pupil_texture: Option<Handle<Image>>,
 }
 
 /// The GPU-side data structure specifying plain old data for the material
@@ -213,6 +216,7 @@ fn change_material(
                             highlight_texture: Some(
                                 asset_server.load("materials/c_m_eye_01_Texture4.png"),
                             ),
+                            pupil_texture: Some(asset_server.load("materials/c_m_eye_01_Texture3.png")),
                         },
                     })));
             }

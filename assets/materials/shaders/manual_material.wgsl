@@ -35,6 +35,9 @@ struct EyeMaterialExtIndices {
 
   highlight_texture: u32,
   highlight_sampler: u32,
+
+  pupil_texture: u32,
+  pupil_sampler: u32,
 }
 
 // Plain data associated with this demo material.
@@ -61,6 +64,8 @@ struct EyeMaterialExt {
 @group(#{MATERIAL_BIND_GROUP}) @binding(54) var iris_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(55) var highlight_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(56) var highlight_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(57) var pupil_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(58) var pupil_sampler: sampler;
 
 #endif
 
@@ -91,14 +96,33 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 #ifdef BINDLESS
     // Notice how we fetch the texture, sampler, and plain extended material
     // data from the appropriate arrays.
-    pbr_input.material.base_color *= textureSample(
-        bindless_textures_2d[eye_material_ext_indices[slot].sclera_texture],
-        bindless_samplers_filtering[eye_material_ext_indices[slot].sclera_sampler],
-        uv) * eye_material_ext[eye_material_ext_indices[slot].material].iris_color;
+
+    let iris_base_color =  eye_material_ext[eye_material_ext_indices[slot].material].iris_color;
+
+    let sclera_color = textureSample(bindless_textures_2d[eye_material_ext_indices[slot].sclera_texture],
+                                     bindless_samplers_filtering[eye_material_ext_indices[slot].sclera_sampler],
+                                     uv);
+
+    let iris_color = textureSample(bindless_textures_2d[eye_material_ext_indices[slot].iris_texture],
+                                     bindless_samplers_filtering[eye_material_ext_indices[slot].iris_sampler],
+                                     uv);
+
+    let highlight_color = textureSample(bindless_textures_2d[eye_material_ext_indices[slot].highlight_texture],
+                                     bindless_samplers_filtering[eye_material_ext_indices[slot].highlight_sampler],
+                                     uv);
+
+    let pupil_color = textureSample(bindless_textures_2d[eye_material_ext_indices[slot].pupil_texture],
+                                     bindless_samplers_filtering[eye_material_ext_indices[slot].pupil_sampler],
+                                     uv);
 #else
-    pbr_input.material.base_color *= textureSample(sclera_texture, sclera_sampler, uv) *
-        eye_material_ext.iris_color;
+    let iris_base_color = eye_material_ext.iris_color;
+    let sclera_color = textureSample(sclera_texture, sclera_sampler, uv);
+    let iris_color = textureSample(iris_texture, iris_sampler, uv);
+    let highlight_color = textureSample(highlight_texture, highlight_sampler, uv);
+    let pupil_color = textureSample(pupil_texture, pupil_sampler, uv);
 #endif
+
+    pbr_input.material.base_color *= iris_base_color * sclera_color;
 
     var out: FragmentOutput;
     // Apply lighting.
