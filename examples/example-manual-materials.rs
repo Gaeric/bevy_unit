@@ -51,36 +51,44 @@ const SHADER_ASSET_PATH: &str = "materials/shaders/manual_material.wgsl";
 /// Thus we need to specify a different binding so that our extended bindless
 /// index table doesn't conflict.
 #[derive(Asset, Clone, Reflect, AsBindGroup)]
-#[data(50, DemoBindlessExtensionUniform, binding_array(101))]
-// #[bindless(index_table(range(50..53), binding(100)))]
-struct DemoBindlessExtension {
+#[data(50, EyeMaterialUniform, binding_array(101))]
+#[bindless(index_table(range(50..53), binding(100)))]
+struct EyeMaterialExt {
     /// The color we're going to multiply the base color with.
-    modulate_color: Color,
-    /// The image we're going to multiply the base color with.
+    iris_color: Color,
+
     #[texture(51)]
     #[sampler(52)]
-    modulate_texture: Option<Handle<Image>>,
+    sclera_texture: Option<Handle<Image>>,
+
+    #[texture(53)]
+    #[sampler(54)]
+    iris_texture: Option<Handle<Image>>,
+
+    #[texture(55)]
+    #[sampler(56)]
+    highlight_texture: Option<Handle<Image>>,
 }
 
 /// The GPU-side data structure specifying plain old data for the material
 /// extension.
 #[derive(Clone, Default, ShaderType)]
-struct DemoBindlessExtensionUniform {
+struct EyeMaterialUniform {
     /// The GPU representation of the color we're going to multiply the base
     /// color with.
     modulate_color: Vec4,
 }
 
-impl MaterialExtension for DemoBindlessExtension {
+impl MaterialExtension for EyeMaterialExt {
     fn fragment_shader() -> ShaderRef {
         SHADER_ASSET_PATH.into()
     }
 }
 
-impl<'a> From<&'a DemoBindlessExtension> for DemoBindlessExtensionUniform {
-    fn from(material_extension: &'a DemoBindlessExtension) -> Self {
-        DemoBindlessExtensionUniform {
-            modulate_color: LinearRgba::from(material_extension.modulate_color).to_vec4(),
+impl<'a> From<&'a EyeMaterialExt> for EyeMaterialUniform {
+    fn from(material_extension: &'a EyeMaterialExt) -> Self {
+        EyeMaterialUniform {
+            modulate_color: LinearRgba::from(material_extension.iris_color).to_vec4(),
         }
     }
 }
@@ -91,7 +99,7 @@ fn main() {
         .add_plugins(FreeCameraPlugin)
         .add_plugins(CameraSettingsPlugin)
         .add_plugins(MaterialPlugin::<
-            ExtendedMaterial<StandardMaterial, DemoBindlessExtension>,
+            ExtendedMaterial<StandardMaterial, EyeMaterialExt>,
         >::default())
         .insert_resource(GlobalAmbientLight {
             brightness: 1000.,
@@ -171,9 +179,7 @@ fn change_material(
     mesh_materials: Query<(&MeshMaterial3d<StandardMaterial>, &GltfMaterialName)>,
     asset_server: Res<AssetServer>,
     mut asset_materials: ResMut<Assets<StandardMaterial>>,
-    mut extended_materials: ResMut<
-        Assets<ExtendedMaterial<StandardMaterial, DemoBindlessExtension>>,
-    >,
+    mut extended_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, EyeMaterialExt>>>,
 ) {
     for descendant in children.iter_descendants(scene_ready.entity) {
         let Ok((id, material_name)) = mesh_materials.get(descendant) else {
@@ -197,9 +203,17 @@ fn change_material(
                     .remove::<MeshMaterial3d<StandardMaterial>>()
                     .insert(MeshMaterial3d(extended_materials.add(ExtendedMaterial {
                         base: material.clone(),
-                        extension: DemoBindlessExtension {
-                            modulate_color: YELLOW.into(),
-                            modulate_texture: Some(asset_server.load("materials/uv_checker_bw.png"))
+                        extension: EyeMaterialExt {
+                            iris_color: YELLOW.into(),
+                            sclera_texture: Some(
+                                asset_server.load("materials/c_t_eye_white_01-DXT1.dds"),
+                            ),
+                            iris_texture: Some(
+                                asset_server.load("materials/c_t_eye_00-DXT1.dds"),
+                            ),
+                            highlight_texture: Some(
+                                asset_server.load("materials/c_m_eye_01_Texture4.png"),
+                            ),
                         },
                     })));
             }

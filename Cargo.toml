@@ -24,6 +24,7 @@ bevy = { version = "0.18.0", features = [
         "file_watcher",
         "experimental_bevy_feathers",
         "free_camera",
+        "dds",
 ] }
 # bevy_shine = { path = "bevy_shine" }
 # modular_character = { path = "units/modular_character" }
