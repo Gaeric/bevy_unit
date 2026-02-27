@@ -216,7 +216,9 @@ fn change_material(
                             highlight_texture: Some(
                                 asset_server.load("materials/c_m_eye_01_Texture4.png"),
                             ),
-                            pupil_texture: Some(asset_server.load("materials/c_m_eye_01_Texture3.png")),
+                            pupil_texture: Some(
+                                asset_server.load("materials/c_m_eye_01_Texture3.png"),
+                            ),
                         },
                     })));
             }

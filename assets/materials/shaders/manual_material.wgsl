@@ -111,16 +111,24 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                                      bindless_samplers_filtering[eye_material_ext_indices[slot].highlight_sampler],
                                      uv);
 
+    // todo: use scale from uniform
+    let pupil_uv = (uv - 0.5) * 3.7 + 0.5;
     let pupil_color = textureSample(bindless_textures_2d[eye_material_ext_indices[slot].pupil_texture],
                                      bindless_samplers_filtering[eye_material_ext_indices[slot].pupil_sampler],
-                                     uv);
+                                     pupil_uv);
 #else
+    // todo: use scale from uniform
+    let pupil_uv = (uv - 0.5) * 3.7 + 0.5;
+
     let iris_base_color = eye_material_ext.iris_color;
     let sclera_color = textureSample(sclera_texture, sclera_sampler, uv);
     let iris_color = textureSample(iris_texture, iris_sampler, uv);
     let highlight_color = textureSample(highlight_texture, highlight_sampler, uv);
-    let pupil_color = textureSample(pupil_texture, pupil_sampler, uv);
+    let pupil_color = textureSample(pupil_texture, pupil_sampler, pupil_uv);
 #endif
+
+    let iris_factor = (1.0 - pupil_color) * iris_color.r;
+    // let iris_factor = vec4<f32>(1.0);
 
     pbr_input.material.base_color *= iris_base_color * sclera_color;
 
