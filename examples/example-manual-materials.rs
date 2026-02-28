@@ -1,6 +1,10 @@
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState};
 use bevy::feathers::palette::WHITE;
 use bevy::gltf::GltfMaterialName;
+use bevy::image::{
+    ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerBorderColor,
+    ImageSamplerDescriptor,
+};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
@@ -205,22 +209,43 @@ fn change_material(
                 commands
                     .entity(descendant)
                     .remove::<MeshMaterial3d<StandardMaterial>>()
-                    .insert(MeshMaterial3d(extended_materials.add(ExtendedMaterial {
-                        base: material.clone(),
-                        extension: EyeMaterialExt {
-                            iris_color: WHITE.into(),
-                            sclera_texture: Some(
-                                asset_server.load("materials/c_t_eye_white_01-DXT1.dds"),
-                            ),
-                            iris_texture: Some(asset_server.load("materials/c_t_eye_00-DXT1.dds")),
-                            highlight_texture: Some(
-                                asset_server.load("materials/c_m_eye_01_Texture4.png"),
-                            ),
-                            pupil_texture: Some(
-                                asset_server.load("materials/c_m_eye_01_Texture3.png"),
-                            ),
-                        },
-                    })));
+                    .insert(MeshMaterial3d(
+                        extended_materials.add(ExtendedMaterial {
+                            base: material.clone(),
+                            extension: EyeMaterialExt {
+                                iris_color: Color::Srgba(Srgba {
+                                    red: 0.0,
+                                    green: 0.0,
+                                    blue: 0.8,
+                                    alpha: 1.0,
+                                })
+                                .into(),
+                                sclera_texture: Some(
+                                    asset_server.load("materials/c_t_eye_white_01-DXT1.dds"),
+                                ),
+                                iris_texture: Some(
+                                    asset_server.load("materials/c_t_eye_00-DXT1.dds"),
+                                ),
+                                highlight_texture: Some(
+                                    asset_server.load("materials/c_m_eye_01_Texture4.png"),
+                                ),
+                                pupil_texture: Some(asset_server.load_with_settings(
+                                    "materials/c_m_eye_01_Texture3.png",
+                                    |settings: &mut ImageLoaderSettings| {
+                                        settings.sampler =
+                                            ImageSampler::Descriptor(ImageSamplerDescriptor {
+                                                address_mode_u: ImageAddressMode::ClampToBorder,
+                                                address_mode_v: ImageAddressMode::ClampToBorder,
+                                                border_color: Some(
+                                                    ImageSamplerBorderColor::TransparentBlack,
+                                                ),
+                                                ..default()
+                                            });
+                                    },
+                                )),
+                            },
+                        }),
+                    ));
             }
             _name => {
                 info!("name: {_name} handle");

@@ -132,6 +132,51 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     pbr_input.material.base_color *= iris_base_color * sclera_color;
 
+    let rec_709_coeffs = vec3<f32>(0.2126, 0.7152, 0.0722);
+
+    let substract_value_a = 1.0;
+    // todo: pupil_color
+    let substract_value_b = dot(sclera_color.rgb, rec_709_coeffs);
+    let substract_result = substract_value_a - substract_value_b; 
+
+    // multiply node
+    let multiply_value_a = substract_result;
+    // let multiply_value_a = 1.0;
+    let multiply_value_b = iris_color.r;
+    let multiply_result = multiply_value_a * multiply_value_b;
+
+    // mix node
+    let mix1_factor = multiply_result;
+    let mix1_color_a = vec4<f32>(0.0);
+    let mix1_color_b = iris_base_color;
+    let mix1_result = mix(mix1_color_a, mix1_color_b, saturate(mix1_factor));
+
+
+    // mix node
+    let mix_factor = iris_color.b;
+    let mix_color_a = vec4<f32>(0.0);
+    let mix_color_b = mix1_result;
+    let mix_result = mix(mix_color_a, mix_color_b, saturate(mix_factor));
+
+    // add node
+    // todo: uniform params
+    let add_factor = 1.0;
+    let color_a = mix_result;
+    let color_b = highlight_color;
+    let add_result = color_a + saturate(add_factor) * color_b;
+
+    // root
+    let base_color = add_result;
+    let ior_level = vec3<f32>(0.0);
+    let emissive = vec4<f32>(0.0);
+
+    // WA now, can't understand color space
+    pbr_input.material.base_color = pupil_color * pupil_color.a;
+    pbr_input.material.reflectance = ior_level;
+    pbr_input.material.emissive = emissive;
+
+
+
     var out: FragmentOutput;
     // Apply lighting.
     out.color = apply_pbr_lighting(pbr_input);
