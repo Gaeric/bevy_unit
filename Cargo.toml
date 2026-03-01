@@ -86,3 +86,7 @@ opt-level = 1
 # Enable high optimizations for dependencies (incl. Bevy), but not for our code:
 [profile.dev.package."*"]
 opt-level = 3
+
+[[example]]
+name = "hs2_head"
+path = "examples/hs2_head/hs2_head.rs"
