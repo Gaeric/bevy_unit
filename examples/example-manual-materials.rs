@@ -1,4 +1,5 @@
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState};
+use bevy::core_pipeline::Skybox;
 use bevy::feathers::palette::WHITE;
 use bevy::gltf::GltfMaterialName;
 use bevy::image::{
@@ -159,6 +160,17 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 1.0, 2.5).looking_at(Vec3::new(0.0, 0.25, 0.0), Dir3::Y),
+        Skybox {
+            brightness: 5000.0,
+            image: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
+            ..default()
+        },
+        EnvironmentMapLight {
+            diffuse_map: asset_server.load("environment_maps/pisa_diffuse_rgb9e5_zstd.ktx2"),
+            specular_map: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
+            intensity: 2500.0,
+            ..default()
+        },
         // This component stores all camera settings and state, which is used by the FreeCameraPlugin to
         // control it. These properties can be changed at runtime, but beware the controller system is
         // constantly using and modifying those values unless the enabled field is false.
