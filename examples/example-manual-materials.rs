@@ -1,6 +1,5 @@
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState};
 use bevy::core_pipeline::Skybox;
-use bevy::feathers::palette::WHITE;
 use bevy::gltf::GltfMaterialName;
 use bevy::image::{
     ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerBorderColor,
@@ -238,7 +237,13 @@ fn change_material(
                                     asset_server.load("materials/c_t_eye_white_01-DXT1.dds"),
                                 ),
                                 iris_texture: Some(
-                                    asset_server.load("materials/c_t_eye_00-DXT1.dds"),
+                                    // asset_server.load("materials/c_t_eye_00-DXT1.dds"),
+                                    asset_server.load_with_settings(
+                                        "materials/c_t_eye_00-DXT1.dds",
+                                        |settings: &mut ImageLoaderSettings| {
+                                            settings.is_srgb = true;
+                                        }
+                                    ),
                                 ),
                                 highlight_texture: Some(
                                     asset_server.load("materials/c_m_eye_01_Texture4.png"),

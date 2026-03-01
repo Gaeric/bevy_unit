@@ -127,11 +127,6 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let pupil_color = textureSample(pupil_texture, pupil_sampler, pupil_uv);
 #endif
 
-    let iris_factor = (1.0 - pupil_color) * iris_color.r;
-    // let iris_factor = vec4<f32>(1.0);
-
-    pbr_input.material.base_color *= iris_base_color * sclera_color;
-
     let rec_709_coeffs = vec3<f32>(0.2126, 0.7152, 0.0722);
 
     let substract_value_a = 1.0;
@@ -147,6 +142,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     // mix node
     let mix1_factor = multiply_result;
+    // black color
     let mix1_color_a = vec4<f32>(0.0);
     let mix1_color_b = iris_base_color;
     let mix1_result = mix(mix1_color_a, mix1_color_b, saturate(mix1_factor));
