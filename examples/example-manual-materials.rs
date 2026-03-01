@@ -216,14 +216,16 @@ fn change_material(
             "c_m_eye_02" => {
                 info!("c_m_eye 02 match");
                 let mut new_material = material.clone();
-                new_material.alpha_mode = AlphaMode::Blend;
+                // new_material.alpha_mode = AlphaMode::Blend;
+                new_material.clearcoat = 1.0;
+                new_material.clearcoat_perceptual_roughness = 0.03;
 
                 commands
                     .entity(descendant)
                     .remove::<MeshMaterial3d<StandardMaterial>>()
                     .insert(MeshMaterial3d(
                         extended_materials.add(ExtendedMaterial {
-                            base: material.clone(),
+                            base: new_material.clone(),
                             extension: EyeMaterialExt {
                                 iris_color: Color::Srgba(Srgba {
                                     red: 0.0,
