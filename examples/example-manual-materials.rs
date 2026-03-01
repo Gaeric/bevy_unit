@@ -11,7 +11,7 @@ use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::scene::SceneInstanceReady;
 use bevy::shader::ShaderRef;
 
-const SHADER_ASSET_PATH: &str = "materials/shaders/manual_material.wgsl";
+const SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_eye_material.wgsl";
 
 /// The example bindless material extension.
 /// see bevy example extended_material_bindless.rs
