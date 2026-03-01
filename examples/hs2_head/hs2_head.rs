@@ -8,8 +8,7 @@ use bevy::scene::SceneInstanceReady;
 use crate::eye::EyeMaterialExt;
 
 mod eye;
-
-const EYELASHES_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_eyelashes_material.wgsl";
+mod eyelash;
 
 fn main() {
     App::new()
@@ -122,8 +121,8 @@ fn change_material(
         };
 
         match material_name.0.as_str() {
-            "c_m_eye_02" => {
-                info!("c_m_eye 02 match");
+            "c_m_eye" => {
+                info!("c_m_eye_02 match");
                 let mut new_material = material.clone();
                 // new_material.alpha_mode = AlphaMode::Blend;
                 new_material.clearcoat = 1.0;
