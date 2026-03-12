@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use libdeck::core::{
     agent::{Agent, AgentId},
     card::CardArea,
+    category::Mode,
     event::{CardUseContent, Event, EventTracker},
     interface::Interface,
     room::Room,
@@ -115,4 +116,7 @@ fn gui_handle_play(room: &mut Room, presenter: AgentId) -> Option<Event> {
     }
 
     None
+}
+
+fn gui_start() {
 }

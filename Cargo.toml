@@ -80,7 +80,8 @@ dev = ["bevy/dynamic_linking", "bevy/bevy_dev_tools", "bevy/bevy_ui_debug"]
 
 
 [dev-dependencies]
-libdeck = { path = "../libdeck" }
+libdeck = { path = "../libdeck/" }
+libdeck-demo = { path = "../libdeck/units/libdeck-demo/" }
 
 # Enable a small amount of optimization in debug mode
 [profile.dev]
