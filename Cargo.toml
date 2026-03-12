@@ -79,6 +79,9 @@ default = ["dev"]
 dev = ["bevy/dynamic_linking", "bevy/bevy_dev_tools", "bevy/bevy_ui_debug"]
 
 
+[dev-dependencies]
+libdeck = { path = "../libdeck" }
+
 # Enable a small amount of optimization in debug mode
 [profile.dev]
 opt-level = 1
@@ -90,3 +93,7 @@ opt-level = 3
 [[example]]
 name = "hs2_head"
 path = "examples/hs2_head/hs2_head.rs"
+
+[[example]]
+name = "bevy_deck"
+path = "examples/bevy_deck/bevy_deck.rs"
