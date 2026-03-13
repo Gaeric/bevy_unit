@@ -2,23 +2,24 @@ use bevy::prelude::*;
 use libdeck::core::{
     agent::{Agent, AgentId},
     card::CardArea,
-    category::Mode,
     event::{CardUseContent, Event, EventTracker},
     interface::Interface,
     room::Room,
     timing::{Phase, Stage, Timing},
 };
 
-use std::io;
+use std::{collections::VecDeque, io};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Resource)]
 pub struct GuiInterface {
-    tracker: EventTracker,
+    pub events: VecDeque<Event>,
+    pub tracker: EventTracker,
 }
 
 impl Default for GuiInterface {
     fn default() -> Self {
         Self {
+            events: VecDeque::new(),
             tracker: EventTracker::new(),
         }
     }
@@ -116,7 +117,4 @@ fn gui_handle_play(room: &mut Room, presenter: AgentId) -> Option<Event> {
     }
 
     None
-}
-
-fn gui_start() {
 }
