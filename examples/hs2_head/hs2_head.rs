@@ -1,7 +1,8 @@
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState};
 use bevy::core_pipeline::Skybox;
+use bevy::ecs::system::SystemParam;
 use bevy::gltf::GltfMaterialName;
-use bevy::pbr::ExtendedMaterial;
+use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
 use bevy::scene::SceneInstanceReady;
 
@@ -104,63 +105,88 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     ));
 }
 
+pub trait MaterialConverter<E: Asset + MaterialExtension> {
+    fn convert(
+        base: &StandardMaterial,
+        asset_server: &Res<AssetServer>,
+    ) -> ExtendedMaterial<StandardMaterial, E>;
+}
+
+impl MaterialConverter<EyeMaterialExt> for EyeMaterialExt {
+    fn convert(
+        base: &StandardMaterial,
+        asset_server: &Res<AssetServer>,
+    ) -> ExtendedMaterial<StandardMaterial, EyeMaterialExt> {
+        let mut material = base.clone();
+        // new_material.alpha_mode = AlphaMode::Blend;
+        material.clearcoat = 1.0;
+        material.clearcoat_perceptual_roughness = 0.03;
+
+        ExtendedMaterial {
+            base: material.clone(),
+            extension: EyeMaterialExt::default(&asset_server),
+        }
+    }
+}
+
+impl MaterialConverter<EyelashMaterialExt> for EyelashMaterialExt {
+    fn convert(
+        base: &StandardMaterial,
+        asset_server: &Res<AssetServer>,
+    ) -> ExtendedMaterial<StandardMaterial, EyelashMaterialExt> {
+        let mut material = base.clone();
+        material.alpha_mode = AlphaMode::Blend;
+        ExtendedMaterial {
+            base: material.clone(),
+            extension: EyelashMaterialExt::default(&asset_server),
+        }
+    }
+}
+
+#[derive(SystemParam)]
+pub struct MaterialAssets<'w> {
+    asset_server: Res<'w, AssetServer>,
+    standard: ResMut<'w, Assets<StandardMaterial>>,
+    eye: ResMut<'w, Assets<ExtendedMaterial<StandardMaterial, EyeMaterialExt>>>,
+    eyelash: ResMut<'w, Assets<ExtendedMaterial<StandardMaterial, EyelashMaterialExt>>>,
+}
+
 fn change_material(
     scene_ready: On<SceneInstanceReady>,
     mut commands: Commands,
     children: Query<&Children>,
     mesh_materials: Query<(&MeshMaterial3d<StandardMaterial>, &GltfMaterialName)>,
-    asset_server: Res<AssetServer>,
-    mut asset_materials: ResMut<Assets<StandardMaterial>>,
-    mut eye_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, EyeMaterialExt>>>,
-    mut eyelash_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, EyelashMaterialExt>>>,
+    mut mats: MaterialAssets,
 ) {
     for descendant in children.iter_descendants(scene_ready.entity) {
         let Ok((id, material_name)) = mesh_materials.get(descendant) else {
             continue;
         };
-
         info!("entity {:?} material name {}", id, material_name.0);
-
-        let Some(material) = asset_materials.get_mut(id.id()) else {
+        let Some(base) = mats.standard.get_mut(id.id()) else {
             continue;
         };
+
+        let mut entity = commands.entity(descendant);
 
         match material_name.0.as_str() {
             "c_m_eye" => {
                 info!("c_m_eye match");
-                let mut new_material = material.clone();
-                // new_material.alpha_mode = AlphaMode::Blend;
-                new_material.clearcoat = 1.0;
-                new_material.clearcoat_perceptual_roughness = 0.03;
-
-                commands
-                    .entity(descendant)
-                    .remove::<MeshMaterial3d<StandardMaterial>>()
-                    .insert(MeshMaterial3d(eye_materials.add(ExtendedMaterial {
-                        base: new_material.clone(),
-                        extension: EyeMaterialExt::default(&asset_server),
-                    })));
+                let new_handle = EyeMaterialExt::convert(base, &mats.asset_server);
+                entity.insert(MeshMaterial3d(mats.eye.add(new_handle)));
             }
             "c_m_eyelashes" => {
                 info!("c_m_eyelashes match");
-                let mut new_material = material.clone();
-                new_material.alpha_mode = AlphaMode::Blend;
-                commands
-                    .entity(descendant)
-                    .remove::<MeshMaterial3d<StandardMaterial>>()
-                    .insert(MeshMaterial3d(eyelash_materials.add(ExtendedMaterial {
-                        base: new_material.clone(),
-                        extension: EyelashMaterialExt::default(&asset_server),
-                    })));
+
+                let new_handle = EyelashMaterialExt::convert(base, &mats.asset_server);
+                entity.insert(MeshMaterial3d(mats.eyelash.add(new_handle)));
             }
             _name => {
                 info!("name: {_name} handle");
-                let mut new_material = material.clone();
-                new_material.alpha_mode = AlphaMode::Blend;
-                new_material.base_color = Color::Srgba(Srgba::new(0.5, 0.5, 0.5, 0.0));
-                commands
-                    .entity(descendant)
-                    .insert(MeshMaterial3d(asset_materials.add(new_material)));
+                let mut new_base = base.clone();
+                new_base.alpha_mode = AlphaMode::Blend;
+                new_base.base_color = Color::Srgba(Srgba::new(0.5, 0.5, 0.5, 0.0));
+                entity.insert(MeshMaterial3d(mats.standard.add(new_base)));
             }
         }
     }
