@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use bevy::prelude::*;
 use libdeck::core::agent::AgentId;
 use libdeck::core::interface::Interface;
@@ -25,8 +23,8 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .init_resource::<Deck>()
         .init_resource::<GuiInterface>()
-        .add_systems(Update, print_room_info)
-        .add_systems(PostUpdate, read_events)
+        .add_systems(Update, gui_interface)
+        // .add_systems(PostUpdate, read_events)
         .run();
 }
 
@@ -58,16 +56,28 @@ impl FromWorld for Deck {
     }
 }
 
-fn print_room_info(mut deck: ResMut<Deck>, input: Res<ButtonInput<KeyCode>>) {
-    if input.just_pressed(KeyCode::KeyP) {
+fn gui_interface(
+    mut deck: ResMut<Deck>,
+    input: Res<ButtonInput<KeyCode>>,
+    mut interface: ResMut<GuiInterface>,
+    mut status: Local<u32>,
+) {
+    if input.just_pressed(KeyCode::KeyS) {
         deck.room.ready();
-        info!("{:?}", deck.room)
+        deck.room.game_start();
+        info!("{:?}", deck.room);
+        *status |= 0b1;
     }
-}
 
-fn read_events(deck: Res<Deck>, mut interface: ResMut<GuiInterface>) {
-    let events = interface.tracker.track(&deck.room.analytics);
-    interface.events.extend(events.iter().cloned());
+    if *status & 0b1 == 0 {
+        return;
+    }
 
-    info!("interface event len {}", interface.events.len())
+    if input.just_pressed(KeyCode::KeyN) {
+        if let Some(event) = interface.tracker.track_next(&mut deck.room) {
+            info!("event is {:?}", event)
+        } else {
+            info!("unreadable event")
+        };
+    }
 }
