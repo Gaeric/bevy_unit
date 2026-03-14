@@ -176,9 +176,19 @@ where
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct MaterialRegistry {
     map: HashMap<String, Arc<dyn MaterialApplier>>,
+    pub default_applier: Arc<dyn MaterialApplier>,
+}
+
+impl Default for MaterialRegistry {
+    fn default() -> Self {
+        Self {
+            map: HashMap::default(),
+            default_applier: Arc::new(DefaultTransparentApplier),
+        }
+    }
 }
 
 impl MaterialRegistry {
@@ -190,6 +200,24 @@ impl MaterialRegistry {
             name.to_string(),
             Arc::new(ExtendedApplier::<E>(PhantomData)),
         );
+    }
+}
+
+struct DefaultTransparentApplier;
+
+impl MaterialApplier for DefaultTransparentApplier {
+    fn apply(&self, entity: Entity, base: &StandardMaterial, world: &mut World) {
+        let mut mat = base.clone();
+
+        mat.alpha_mode = AlphaMode::Blend;
+        mat.base_color = Color::Srgba(Srgba::new(0.5, 0.5, 0.5, 0.0));
+
+        let mut assets = world.resource_mut::<Assets<StandardMaterial>>();
+        let handle = assets.add(mat);
+
+        if let Ok(mut entity) = world.get_entity_mut(entity) {
+            entity.insert(MeshMaterial3d(handle));
+        }
     }
 }
 
@@ -215,24 +243,17 @@ fn update_material(
         };
 
         let name = mat_name.0.clone();
-        let mut mat = base_mat.clone();
+        let mat = base_mat.clone();
 
         commands.queue(move |world: &mut World| {
-            let applier = world.resource::<MaterialRegistry>().map.get(&name).cloned();
+            let registry = world.resource::<MaterialRegistry>();
 
-            if let Some(applier) = applier {
-                applier.apply(descendant, &mat, world);
-            } else {
-                mat.alpha_mode = AlphaMode::Blend;
-                mat.base_color = Color::Srgba(Srgba::new(0.5, 0.5, 0.5, 0.0));
-
-                let mut standard_assets = world.resource_mut::<Assets<StandardMaterial>>();
-                let new_handle = standard_assets.add(mat);
-
-                if let Ok(mut entity) = world.get_entity_mut(descendant) {
-                    entity.insert(MeshMaterial3d(new_handle));
-                }
-            }
+            let applier = registry
+                .map
+                .get(&name)
+                .cloned()
+                .unwrap_or_else(|| registry.default_applier.clone());
+            applier.apply(descendant, &mat, world);
         })
     }
 }
