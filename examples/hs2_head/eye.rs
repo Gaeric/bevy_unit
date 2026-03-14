@@ -76,7 +76,7 @@ pub struct EyeMaterialExt {
 }
 
 impl EyeMaterialExt {
-    pub fn default(asset_server: &Res<AssetServer>) -> Self {
+    pub fn default(asset_server: &AssetServer) -> Self {
         let iris_color = Color::Srgba(Srgba {
             red: 0.0,
             green: 0.0,
@@ -104,7 +104,7 @@ impl EyeMaterialExt {
         iris_texture_path: AssetPath,
         highlight_texture_path: AssetPath,
         pupil_texture_path: AssetPath,
-        asset_server: &Res<AssetServer>,
+        asset_server: &AssetServer,
     ) -> Self {
         EyeMaterialExt {
             iris_color,

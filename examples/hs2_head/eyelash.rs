@@ -16,12 +16,12 @@ pub struct EyelashMaterialExt {
 }
 
 impl EyelashMaterialExt {
-    pub fn default(asset_server: &Res<AssetServer>) -> Self {
+    pub fn default(asset_server: &AssetServer) -> Self {
         let eyeslash_texture_path: AssetPath = "materials/c_t_eyelash_04-DXT1.dds".into();
         EyelashMaterialExt::new(eyeslash_texture_path, asset_server)
     }
 
-    pub fn new(eyeslash_texture_path: AssetPath, asset_server: &Res<AssetServer>) -> Self {
+    pub fn new(eyeslash_texture_path: AssetPath, asset_server: &AssetServer) -> Self {
         EyelashMaterialExt {
             eyelash_texture: Some(asset_server.load_with_settings(
                 eyeslash_texture_path,

@@ -1,8 +1,12 @@
+use std::marker::PhantomData;
+use std::sync::Arc;
+
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState};
 use bevy::core_pipeline::Skybox;
 use bevy::ecs::system::SystemParam;
 use bevy::gltf::GltfMaterialName;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::scene::SceneInstanceReady;
 
@@ -28,7 +32,9 @@ fn main() {
             ..default()
         })
         .add_systems(Startup, setup)
-        .add_observer(change_material)
+        .init_resource::<MaterialRegistry>()
+        .add_systems(Startup, setup_mat)
+        .add_observer(update_material)
         .run();
 }
 
@@ -73,17 +79,17 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 1.0, 2.5).looking_at(Vec3::new(0.0, 0.25, 0.0), Dir3::Y),
-        Skybox {
-            brightness: 5000.0,
-            image: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
-            ..default()
-        },
-        EnvironmentMapLight {
-            diffuse_map: asset_server.load("environment_maps/pisa_diffuse_rgb9e5_zstd.ktx2"),
-            specular_map: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
-            intensity: 2500.0,
-            ..default()
-        },
+        // Skybox {
+        //     brightness: 5000.0,
+        //     image: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
+        //     ..default()
+        // },
+        // EnvironmentMapLight {
+        //     diffuse_map: asset_server.load("environment_maps/pisa_diffuse_rgb9e5_zstd.ktx2"),
+        //     specular_map: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
+        //     intensity: 2500.0,
+        //     ..default()
+        // },
         // This component stores all camera settings and state, which is used by the FreeCameraPlugin to
         // control it. These properties can be changed at runtime, but beware the controller system is
         // constantly using and modifying those values unless the enabled field is false.
@@ -108,23 +114,24 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 pub trait MaterialConverter<E: Asset + MaterialExtension> {
     fn convert(
         base: &StandardMaterial,
-        asset_server: &Res<AssetServer>,
+        asset_server: &AssetServer,
     ) -> ExtendedMaterial<StandardMaterial, E>;
 }
 
 impl MaterialConverter<EyeMaterialExt> for EyeMaterialExt {
     fn convert(
         base: &StandardMaterial,
-        asset_server: &Res<AssetServer>,
+        asset_server: &AssetServer,
     ) -> ExtendedMaterial<StandardMaterial, EyeMaterialExt> {
         let mut material = base.clone();
         // new_material.alpha_mode = AlphaMode::Blend;
         material.clearcoat = 1.0;
         material.clearcoat_perceptual_roughness = 0.03;
 
+        info!("convert to eye mat");
         ExtendedMaterial {
-            base: material.clone(),
-            extension: EyeMaterialExt::default(&asset_server),
+            base: material,
+            extension: EyeMaterialExt::default(asset_server),
         }
     }
 }
@@ -132,62 +139,100 @@ impl MaterialConverter<EyeMaterialExt> for EyeMaterialExt {
 impl MaterialConverter<EyelashMaterialExt> for EyelashMaterialExt {
     fn convert(
         base: &StandardMaterial,
-        asset_server: &Res<AssetServer>,
+        asset_server: &AssetServer,
     ) -> ExtendedMaterial<StandardMaterial, EyelashMaterialExt> {
         let mut material = base.clone();
         material.alpha_mode = AlphaMode::Blend;
+
+        info!("convert to eyelash mat");
         ExtendedMaterial {
-            base: material.clone(),
-            extension: EyelashMaterialExt::default(&asset_server),
+            base: material,
+            extension: EyelashMaterialExt::default(asset_server),
         }
     }
 }
 
-#[derive(SystemParam)]
-pub struct MaterialAssets<'w> {
-    asset_server: Res<'w, AssetServer>,
-    standard: ResMut<'w, Assets<StandardMaterial>>,
-    eye: ResMut<'w, Assets<ExtendedMaterial<StandardMaterial, EyeMaterialExt>>>,
-    eyelash: ResMut<'w, Assets<ExtendedMaterial<StandardMaterial, EyelashMaterialExt>>>,
+pub trait MaterialApplier: Send + Sync {
+    fn apply(&self, entity: Entity, base: &StandardMaterial, world: &mut World);
 }
 
-fn change_material(
+struct ExtendedApplier<E>(PhantomData<E>);
+
+impl<E> MaterialApplier for ExtendedApplier<E>
+where
+    E: Asset + MaterialExtension + MaterialConverter<E>,
+{
+    fn apply(&self, entity: Entity, base: &StandardMaterial, world: &mut World) {
+        let asset_server = world.resource::<AssetServer>();
+        let ext_mat = E::convert(base, asset_server);
+
+        let mut assets = world.resource_mut::<Assets<ExtendedMaterial<StandardMaterial, E>>>();
+        let handle = assets.add(ext_mat);
+
+        if let Ok(mut e) = world.get_entity_mut(entity) {
+            info!("insert new mat handle");
+            e.insert(MeshMaterial3d(handle));
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct MaterialRegistry {
+    map: HashMap<String, Arc<dyn MaterialApplier>>,
+}
+
+impl MaterialRegistry {
+    pub fn register<E>(&mut self, name: &str)
+    where
+        E: Asset + MaterialExtension + MaterialConverter<E>,
+    {
+        self.map.insert(
+            name.to_string(),
+            Arc::new(ExtendedApplier::<E>(PhantomData)),
+        );
+    }
+}
+
+fn setup_mat(mut registry: ResMut<MaterialRegistry>) {
+    registry.register::<EyeMaterialExt>("c_m_eye");
+    registry.register::<EyelashMaterialExt>("c_m_eyelashes");
+}
+
+fn update_material(
     scene_ready: On<SceneInstanceReady>,
-    mut commands: Commands,
     children: Query<&Children>,
     mesh_materials: Query<(&MeshMaterial3d<StandardMaterial>, &GltfMaterialName)>,
-    mut mats: MaterialAssets,
+    mut asset_materials: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
 ) {
     for descendant in children.iter_descendants(scene_ready.entity) {
-        let Ok((id, material_name)) = mesh_materials.get(descendant) else {
+        let Ok((handle, mat_name)) = mesh_materials.get(descendant) else {
             continue;
         };
-        info!("entity {:?} material name {}", id, material_name.0);
-        let Some(base) = mats.standard.get_mut(id.id()) else {
+        info!("entity {:?} material name {}", handle, mat_name.0);
+        let Some(base_mat) = asset_materials.get_mut(handle.id()) else {
             continue;
         };
 
-        let mut entity = commands.entity(descendant);
+        let name = mat_name.0.clone();
+        let mut mat = base_mat.clone();
 
-        match material_name.0.as_str() {
-            "c_m_eye" => {
-                info!("c_m_eye match");
-                let new_handle = EyeMaterialExt::convert(base, &mats.asset_server);
-                entity.insert(MeshMaterial3d(mats.eye.add(new_handle)));
-            }
-            "c_m_eyelashes" => {
-                info!("c_m_eyelashes match");
+        commands.queue(move |world: &mut World| {
+            let applier = world.resource::<MaterialRegistry>().map.get(&name).cloned();
 
-                let new_handle = EyelashMaterialExt::convert(base, &mats.asset_server);
-                entity.insert(MeshMaterial3d(mats.eyelash.add(new_handle)));
+            if let Some(applier) = applier {
+                applier.apply(descendant, &mat, world);
+            } else {
+                mat.alpha_mode = AlphaMode::Blend;
+                mat.base_color = Color::Srgba(Srgba::new(0.5, 0.5, 0.5, 0.0));
+
+                let mut standard_assets = world.resource_mut::<Assets<StandardMaterial>>();
+                let new_handle = standard_assets.add(mat);
+
+                if let Ok(mut entity) = world.get_entity_mut(descendant) {
+                    entity.insert(MeshMaterial3d(new_handle));
+                }
             }
-            _name => {
-                info!("name: {_name} handle");
-                let mut new_base = base.clone();
-                new_base.alpha_mode = AlphaMode::Blend;
-                new_base.base_color = Color::Srgba(Srgba::new(0.5, 0.5, 0.5, 0.0));
-                entity.insert(MeshMaterial3d(mats.standard.add(new_base)));
-            }
-        }
+        })
     }
 }
