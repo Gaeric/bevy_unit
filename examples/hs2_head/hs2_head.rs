@@ -1,5 +1,6 @@
 use crate::mat_convert::MatConvertPlugin;
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState};
+use bevy::core_pipeline::Skybox;
 use bevy::prelude::*;
 
 mod eye;
@@ -60,7 +61,7 @@ fn update_camera_settings(
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 1.0, 2.5).looking_at(Vec3::new(0.0, 0.25, 0.0), Dir3::Y),
+        Transform::from_xyz(0.0, 18.0, 10.0).looking_at(Vec3::new(0.0, 18.0, 0.0), Dir3::Y),
         // Skybox {
         //     brightness: 5000.0,
         //     image: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
@@ -84,8 +85,8 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         },
     ));
 
-    let hs2_head =
-        asset_server.load(GltfAssetLabel::Scene(0).from_asset("materials/hs2_head_greybox.glb"));
+    let hs2_head = asset_server
+        .load(GltfAssetLabel::Scene(0).from_asset("materials/hs2_body_greybox_mini.glb"));
 
     commands.spawn((
         SceneRoot(hs2_head),

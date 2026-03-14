@@ -171,8 +171,8 @@ impl Plugin for MatConvertPlugin {
             .add_observer(update_material);
         register_ext_materials!(
             app,
-            (EyeMaterialExt, "c_m_eye"),
-            (EyelashMaterialExt, "c_m_eyelashes"),
+            (EyeMaterialExt, "Eyes_"),
+            (EyelashMaterialExt, "Eyelashes_"),
         );
     }
 }
