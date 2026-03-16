@@ -120,13 +120,24 @@ fn update_material(
 
 pub struct MatConvertPlugin;
 
+// macro_rules! register_ext_materials {
+//     ($app:expr, $( ($ty:ty, $name:expr) ),* $(,)?) => {{
+//         $(
+//             $app.add_plugins(MaterialPlugin::<ExtendedMaterial<StandardMaterial, $ty>>::default());
+//         )*
+//         $app.add_systems(Startup, |mut registry: ResMut<MaterialRegistry>| {
+//             $( registry.register::<$ty>($name); )*
+//         });
+//     }};
+// }
+
 macro_rules! register_ext_materials {
-    ($app:expr, $( ($ty:ty, $name:expr) ),+ $(,)?) => {{
+    ($app:expr, $( ($ty:ty, $name:expr) ),* $(,)?) => {{ 
         $(
             $app.add_plugins(MaterialPlugin::<ExtendedMaterial<StandardMaterial, $ty>>::default());
-        )+
+        )*
         $app.add_systems(Startup, |mut registry: ResMut<MaterialRegistry>| {
-            $( registry.register::<$ty>($name); )+
+            $( registry.register::<$ty>($name); )*
         });
     }};
 }
@@ -134,12 +145,26 @@ macro_rules! register_ext_materials {
 impl Plugin for MatConvertPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MaterialRegistry>()
+            .add_plugins(MaterialPlugin::<
+                ExtendedMaterial<StandardMaterial, EyeMaterialExt>,
+            >::default())
+            // .add_plugins(MaterialPlugin::<
+            //     ExtendedMaterial<StandardMaterial, EyelashMaterialExt>,
+            // >::default())
+            // .add_plugins(MaterialPlugin::<
+            //     ExtendedMaterial<StandardMaterial, EyeshadowMaterialExt>,
+            // >::default())
+            .add_systems(Startup, setup_mat)
             .add_observer(update_material);
-        register_ext_materials!(
-            app,
-            (EyeMaterialExt, "Eyes_"),
-            (EyelashMaterialExt, "Eyelashes_"),
-            (EyeshadowMaterialExt, "Eyeshadow_"),
-        );
+        // register_ext_materials!(
+        //     app,
+        //     (EyeMaterialExt, "Eyes_")
+        // );
     }
+}
+
+fn setup_mat(mut registry: ResMut<MaterialRegistry>) {
+    registry.register::<EyeMaterialExt>("Eyes_");
+    // registry.register::<EyelashMaterialExt>("Eyelashes_");
+    // registry.register::<EyeshadowMaterialExt>("Eyeshadow_");
 }
