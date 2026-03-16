@@ -3,6 +3,7 @@ use bevy::core_pipeline::Skybox;
 use bevy::prelude::*;
 
 mod camera;
+mod headless;
 
 mod eye;
 mod eyelash;
