@@ -38,7 +38,7 @@ impl FromWorld for Deck {
         let mut agent = Agent::new(1, "user".into(), 1);
         let fakeai = Agent::new(2, "fakeai".into(), 2);
 
-        agent.load_abilitys(vec![yingzi_ability]);
+        agent.load_abilities(vec![yingzi_ability]);
 
         let mut agent_ids: Vec<(AgentId, Box<dyn Interface>)> = Vec::new();
         agent_ids.push((agent.id(), Box::new(GuiInterface::default())));
