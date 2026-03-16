@@ -8,47 +8,13 @@ use bevy::{
     scene::SceneInstanceReady,
 };
 
-use crate::{eye::EyeMaterialExt, eyelash::EyelashMaterialExt};
+use crate::{eye::EyeMaterialExt, eyelash::EyelashMaterialExt, eyeshadow::EyeshadowMaterialExt};
 
 pub trait MaterialConverter<E: Asset + MaterialExtension> {
     fn convert(
         base: &StandardMaterial,
         asset_server: &AssetServer,
     ) -> ExtendedMaterial<StandardMaterial, E>;
-}
-
-impl MaterialConverter<EyeMaterialExt> for EyeMaterialExt {
-    fn convert(
-        base: &StandardMaterial,
-        asset_server: &AssetServer,
-    ) -> ExtendedMaterial<StandardMaterial, EyeMaterialExt> {
-        let mut material = base.clone();
-        // new_material.alpha_mode = AlphaMode::Blend;
-        material.clearcoat = 1.0;
-        material.clearcoat_perceptual_roughness = 0.03;
-
-        info!("convert to eye mat");
-        ExtendedMaterial {
-            base: material,
-            extension: EyeMaterialExt::default(asset_server),
-        }
-    }
-}
-
-impl MaterialConverter<EyelashMaterialExt> for EyelashMaterialExt {
-    fn convert(
-        base: &StandardMaterial,
-        asset_server: &AssetServer,
-    ) -> ExtendedMaterial<StandardMaterial, EyelashMaterialExt> {
-        let mut material = base.clone();
-        material.alpha_mode = AlphaMode::Blend;
-
-        info!("convert to eyelash mat");
-        ExtendedMaterial {
-            base: material,
-            extension: EyelashMaterialExt::default(asset_server),
-        }
-    }
 }
 
 pub trait MaterialApplier: Send + Sync {
@@ -173,6 +139,7 @@ impl Plugin for MatConvertPlugin {
             app,
             (EyeMaterialExt, "Eyes_"),
             (EyelashMaterialExt, "Eyelashes_"),
+            (EyeshadowMaterialExt, "Eyeshadow_"),
         );
     }
 }

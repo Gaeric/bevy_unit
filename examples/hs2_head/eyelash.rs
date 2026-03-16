@@ -1,9 +1,11 @@
 use bevy::asset::AssetPath;
 use bevy::image::ImageLoaderSettings;
-use bevy::pbr::MaterialExtension;
+use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
+
+use crate::mat_convert::MaterialConverter;
 
 const EYELASHES_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_eyelashes_material.wgsl";
 
@@ -36,5 +38,21 @@ impl EyelashMaterialExt {
 impl MaterialExtension for EyelashMaterialExt {
     fn fragment_shader() -> ShaderRef {
         EYELASHES_SHADER_ASSET_PATH.into()
+    }
+}
+
+impl MaterialConverter<EyelashMaterialExt> for EyelashMaterialExt {
+    fn convert(
+        base: &StandardMaterial,
+        asset_server: &AssetServer,
+    ) -> ExtendedMaterial<StandardMaterial, EyelashMaterialExt> {
+        let mut material = base.clone();
+        material.alpha_mode = AlphaMode::Blend;
+
+        info!("convert to eyelash mat");
+        ExtendedMaterial {
+            base: material,
+            extension: EyelashMaterialExt::default(asset_server),
+        }
     }
 }

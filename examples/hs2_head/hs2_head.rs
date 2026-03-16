@@ -7,6 +7,7 @@ mod headless;
 
 mod eye;
 mod eyelash;
+mod eyeshadow;
 mod mat_convert;
 
 fn main() {

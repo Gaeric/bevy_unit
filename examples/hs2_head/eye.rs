@@ -3,10 +3,12 @@ use bevy::image::{
     ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerBorderColor,
     ImageSamplerDescriptor,
 };
-use bevy::pbr::MaterialExtension;
+use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
+
+use crate::mat_convert::MaterialConverter;
 
 const EYE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_eye_material.wgsl";
 
@@ -150,6 +152,24 @@ impl<'a> From<&'a EyeMaterialExt> for EyeMaterialUniform {
     fn from(material_extension: &'a EyeMaterialExt) -> Self {
         EyeMaterialUniform {
             iris_color: LinearRgba::from(material_extension.iris_color).to_vec4(),
+        }
+    }
+}
+
+impl MaterialConverter<EyeMaterialExt> for EyeMaterialExt {
+    fn convert(
+        base: &StandardMaterial,
+        asset_server: &AssetServer,
+    ) -> ExtendedMaterial<StandardMaterial, EyeMaterialExt> {
+        let mut material = base.clone();
+        // new_material.alpha_mode = AlphaMode::Blend;
+        material.clearcoat = 1.0;
+        material.clearcoat_perceptual_roughness = 0.03;
+
+        info!("convert to eye mat");
+        ExtendedMaterial {
+            base: material,
+            extension: EyeMaterialExt::default(asset_server),
         }
     }
 }
