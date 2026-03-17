@@ -1,5 +1,4 @@
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState};
-use bevy::core_pipeline::Skybox;
 use bevy::prelude::*;
 
 // Plugin that handles camera settings controls and information text
@@ -7,15 +6,14 @@ pub struct OrbitCameraPlugin;
 impl Plugin for OrbitCameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FreeCameraPlugin)
-            .add_systems(Startup, setup_camera)
-            .add_systems(Update, update_camera_settings);
+            .add_plugins(DefaultPlugins)
+            .add_systems(Update, update_camera_settings)
+            .add_observer(added_camera_params);
     }
 }
 
-fn setup_camera(mut commands: Commands) {
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(0.0, 18.0, 10.0).looking_at(Vec3::new(0.0, 18.0, 0.0), Dir3::Y),
+fn added_camera_params(camera: On<Add, Camera3d>, mut commands: Commands) {
+    commands.entity(camera.entity).insert((
         // This component stores all camera settings and state, which is used by the FreeCameraPlugin to
         // control it. These properties can be changed at runtime, but beware the controller system is
         // constantly using and modifying those values unless the enabled field is false.

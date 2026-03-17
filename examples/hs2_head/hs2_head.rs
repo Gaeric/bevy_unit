@@ -1,3 +1,4 @@
+use crate::headless::HeadlessPlugin;
 use crate::{camera::OrbitCameraPlugin, mat_convert::MatConvertPlugin};
 use bevy::core_pipeline::Skybox;
 use bevy::prelude::*;
@@ -12,14 +13,15 @@ mod mat_convert;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
-        .add_plugins(OrbitCameraPlugin)
+        // .add_plugins(OrbitCameraPlugin)
+        .add_plugins(HeadlessPlugin)
         .add_plugins(MatConvertPlugin)
         .insert_resource(GlobalAmbientLight {
             brightness: 1000.,
             ..default()
         })
         .add_systems(Startup, setup)
+        .add_systems(Startup, setup_camera)
         .add_observer(added_lights)
         .run();
 }
@@ -31,6 +33,13 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         SceneRoot(hs2_head),
         Transform::from_scale(Vec3::new(10.0, 10.0, 10.0)),
+    ));
+}
+
+fn setup_camera(mut commands: Commands) {
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(0.0, 18.0, 10.0).looking_at(Vec3::new(0.0, 18.0, 0.0), Dir3::Y),
     ));
 }
 
