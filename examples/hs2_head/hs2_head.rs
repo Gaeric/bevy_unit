@@ -1,3 +1,4 @@
+use crate::eye_verify::EyeVerifyPlugin;
 use crate::headless::HeadlessPlugin;
 use crate::{camera::OrbitCameraPlugin, mat_convert::MatConvertPlugin};
 use bevy::core_pipeline::Skybox;
@@ -8,6 +9,7 @@ mod camera;
 mod headless;
 
 mod eye;
+mod eye_verify;
 mod eyelash;
 mod eyeshadow;
 mod mat_convert;
@@ -34,14 +36,16 @@ fn main() {
         app.add_observer(added_lights);
     }
 
-    app.add_plugins(MatConvertPlugin)
-        .insert_resource(GlobalAmbientLight {
-            brightness: 1000.,
-            ..default()
-        })
-        .add_systems(Startup, setup)
-        .add_systems(Startup, setup_camera)
-        .run();
+    app.add_plugins(MatConvertPlugin);
+    // app.add_plugins(EyeVerifyPlugin);
+
+    app.insert_resource(GlobalAmbientLight {
+        brightness: 1000.,
+        ..default()
+    })
+    .add_systems(Startup, setup)
+    .add_systems(Startup, setup_camera)
+    .run();
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {

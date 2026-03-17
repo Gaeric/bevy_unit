@@ -55,26 +55,26 @@ const EYE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_eye_material.wgs
 /// index table doesn't conflict.
 #[derive(Asset, Clone, Reflect, AsBindGroup)]
 #[data(50, EyeMaterialUniform, binding_array(101))]
-#[bindless(index_table(range(50..59), binding(100)))]
+// #[bindless(index_table(range(50..59), binding(100)))]
 pub struct EyeMaterialExt {
     /// The color we're going to multiply the base color with.
-    iris_color: Color,
+    pub iris_color: Color,
 
     #[texture(51)]
     #[sampler(52)]
-    sclera_texture: Option<Handle<Image>>,
+    pub sclera_texture: Option<Handle<Image>>,
 
     #[texture(53)]
     #[sampler(54)]
-    iris_texture: Option<Handle<Image>>,
+    pub iris_texture: Option<Handle<Image>>,
 
     #[texture(55)]
     #[sampler(56)]
-    highlight_texture: Option<Handle<Image>>,
+    pub highlight_texture: Option<Handle<Image>>,
 
     #[texture(57)]
     #[sampler(58)]
-    pupil_texture: Option<Handle<Image>>,
+    pub pupil_texture: Option<Handle<Image>>,
 }
 
 impl EyeMaterialExt {
