@@ -16,7 +16,7 @@ members = [
 exclude = ["units/winit_drag_drop"]
 
 [dependencies]
-bevy = { version = "0.18.0", features = [
+bevy = { version = "0.18.1", features = [
         "wayland",
         "dynamic_linking",
         "hotpatching",
