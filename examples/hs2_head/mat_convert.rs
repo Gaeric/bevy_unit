@@ -136,6 +136,11 @@ impl Plugin for MatConvertPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MaterialRegistry>()
             .add_observer(update_material);
-        register_ext_materials!(app, (EyeMaterialExt, "Eyes_"));
+        register_ext_materials!(
+            app,
+            (EyeMaterialExt, "Eyes_"),
+            (EyelashMaterialExt, "Eyelashes_"),
+            (EyeshadowMaterialExt, "Eyeshadow_")
+        );
     }
 }
