@@ -36,6 +36,7 @@ where
 
         if let Ok(mut e) = world.get_entity_mut(entity) {
             info!("insert new mat handle");
+            e.remove::<MeshMaterial3d<StandardMaterial>>();
             e.insert(MeshMaterial3d(handle));
         }
     }
@@ -120,19 +121,8 @@ fn update_material(
 
 pub struct MatConvertPlugin;
 
-// macro_rules! register_ext_materials {
-//     ($app:expr, $( ($ty:ty, $name:expr) ),* $(,)?) => {{
-//         $(
-//             $app.add_plugins(MaterialPlugin::<ExtendedMaterial<StandardMaterial, $ty>>::default());
-//         )*
-//         $app.add_systems(Startup, |mut registry: ResMut<MaterialRegistry>| {
-//             $( registry.register::<$ty>($name); )*
-//         });
-//     }};
-// }
-
 macro_rules! register_ext_materials {
-    ($app:expr, $( ($ty:ty, $name:expr) ),* $(,)?) => {{ 
+    ($app:expr, $( ($ty:ty, $name:expr) ),* $(,)?) => {{
         $(
             $app.add_plugins(MaterialPlugin::<ExtendedMaterial<StandardMaterial, $ty>>::default());
         )*
