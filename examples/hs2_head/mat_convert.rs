@@ -1,7 +1,15 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use bevy::{
-    gltf::GltfMaterialName, image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerBorderColor, ImageSamplerDescriptor}, pbr::{ExtendedMaterial, MaterialExtension}, platform::collections::HashMap, prelude::*, scene::SceneInstanceReady
+    gltf::GltfMaterialName,
+    image::{
+        ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerBorderColor,
+        ImageSamplerDescriptor,
+    },
+    pbr::{ExtendedMaterial, MaterialExtension},
+    platform::collections::HashMap,
+    prelude::*,
+    scene::SceneInstanceReady,
 };
 
 use crate::{eye::EyeMaterialExt, eyelash::EyelashMaterialExt, eyeshadow::EyeshadowMaterialExt};
@@ -32,6 +40,7 @@ where
 
         if let Ok(mut e) = world.get_entity_mut(entity) {
             info!("insert new mat handle");
+            e.remove::<MeshMaterial3d<StandardMaterial>>();
             e.insert(MeshMaterial3d(handle));
         }
     }
@@ -215,28 +224,28 @@ pub struct MatConvertPlugin;
 impl Plugin for MatConvertPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MaterialRegistry>()
-            .add_plugins(MaterialPlugin::<
-                ExtendedMaterial<StandardMaterial, EyeMaterialExt>,
-            >::default())
+            // .add_plugins(MaterialPlugin::<
+            //     ExtendedMaterial<StandardMaterial, EyeMaterialExt>,
+            // >::default())
             // .add_plugins(MaterialPlugin::<
             //     ExtendedMaterial<StandardMaterial, EyelashMaterialExt>,
             // >::default())
             // .add_plugins(MaterialPlugin::<
             //     ExtendedMaterial<StandardMaterial, EyeshadowMaterialExt>,
             // >::default())
-            .add_systems(Startup, setup_mat)
+            // .add_systems(Startup, setup_mat)
             // .add_observer(change_material)
-            .add_observer(update_material)
-;
-        // register_ext_materials!(
-        //     app,
-        //     (EyeMaterialExt, "Eyes_")
-        // );
+            .add_observer(update_material);
+        register_ext_materials!(
+            app,
+            (EyeMaterialExt, "Eyes_"),
+            (EyelashMaterialExt, "Eyelashes_")
+        );
     }
 }
 
 fn setup_mat(mut registry: ResMut<MaterialRegistry>) {
-    registry.register::<EyeMaterialExt>("Eyes_");
+    // registry.register::<EyeMaterialExt>("Eyes_");
     // registry.register::<EyelashMaterialExt>("Eyelashes_");
     // registry.register::<EyeshadowMaterialExt>("Eyeshadow_");
 }
