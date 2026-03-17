@@ -9,13 +9,20 @@
 // from different cameras, you should keep Receiver in ImageCopier and Sender in ImageToSave
 // or send some id with data.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
 };
 
 use bevy::{
+    app::ScheduleRunnerPlugin,
     camera::RenderTarget,
+    image::TextureFormatPixelInfo,
     prelude::*,
     render::{
         Extract, Render, RenderApp, RenderSystems,
@@ -28,6 +35,8 @@ use bevy::{
         },
         renderer::{RenderContext, RenderDevice, RenderQueue},
     },
+    window::ExitCondition,
+    winit::WinitPlugin,
 };
 use crossbeam_channel::{Receiver, Sender};
 
@@ -57,6 +66,18 @@ struct SceneController {
     width: u32,
     height: u32,
     single_image: bool,
+}
+
+impl SceneController {
+    pub fn new(width: u32, height: u32, single_image: bool) -> SceneController {
+        SceneController {
+            state: SceneState::BuildScene,
+            name: String::from(""),
+            width,
+            height,
+            single_image,
+        }
+    }
 }
 
 /// Used by `ImageCopyDriver` for copying from render target to buffer
@@ -102,7 +123,7 @@ impl ImageCopier {
 struct ImageToSave(Handle<Image>);
 
 fn setup_render_target(
-    mut commands: Commands,
+    commands: &mut Commands,
     images: &mut ResMut<Assets<Image>>,
     render_device: &Res<RenderDevice>,
     scene_controller: &mut ResMut<SceneController>,
@@ -136,6 +157,25 @@ fn setup_render_target(
     scene_controller.state = SceneState::Render(pre_roll_frames);
     scene_controller.name = scene_name;
     RenderTarget::Image(render_target_image_handle.into())
+}
+
+fn added_render_target(
+    camera: On<Add, Camera3d>,
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    render_device: Res<RenderDevice>,
+    mut scene_controller: ResMut<SceneController>,
+) {
+    let render_target = setup_render_target(
+        &mut commands,
+        &mut images,
+        &render_device,
+        &mut scene_controller,
+        40,
+        "main_scene".into(),
+    );
+
+    commands.entity(camera.entity).insert(render_target);
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash, RenderLabel)]
@@ -304,5 +344,114 @@ impl Plugin for ImageCopyPlugin {
                 Render,
                 receive_image_from_buffer.after(RenderSystems::Render),
             );
+    }
+}
+
+fn update(
+    images_to_save: Query<&ImageToSave>,
+    mut scene_controller: ResMut<SceneController>,
+    mut images: ResMut<Assets<Image>>,
+    receiver: Res<MainWorldreceiver>,
+    mut app_exit_writer: MessageWriter<AppExit>,
+    mut file_number: Local<u32>,
+) {
+    if let SceneState::Render(n) = scene_controller.state {
+        if n < 1 {
+            // We don't want to block the main world on this,
+            // so we use try_recv which attempts to receive without blocking
+            let mut image_data = Vec::new();
+            while let Ok(data) = receiver.try_recv() {
+                // image generation could be faster than saving to fs,
+                // that's why use only last of them
+                image_data = data;
+            }
+
+            if !image_data.is_empty() {
+                for image in images_to_save.iter() {
+                    // Fill correct data form channel to image
+                    let img_bytes = images.get_mut(image.id()).unwrap();
+
+                    // We need to ensure that this works regardless of the image dimensions
+                    // If the image became wider when copying from the texture to the buffer,
+                    // then the data is reduced to its original size when copying from the buffer to the image.
+                    let row_bytes = img_bytes.width() as usize
+                        * img_bytes.texture_descriptor.format.pixel_size().unwrap();
+                    let aligned_row_bytes = RenderDevice::align_copy_bytes_per_row(row_bytes);
+                    if row_bytes == aligned_row_bytes {
+                        img_bytes.data.as_mut().unwrap().clone_from(&image_data);
+                    } else {
+                        // shrink data to original image size
+                        img_bytes.data = Some(
+                            image_data
+                                .chunks(aligned_row_bytes)
+                                .take(img_bytes.height() as usize)
+                                .flat_map(|row| &row[..row_bytes.min(row.len())])
+                                .cloned()
+                                .collect(),
+                        );
+                    }
+
+                    // Crate RGBA Image Buffer
+                    let img = match img_bytes.clone().try_into_dynamic() {
+                        Ok(img) => img.to_rgba8(),
+                        Err(e) => panic!("Failed to crate image buffer {e:?}"),
+                    };
+
+                    // Prepare directory for images
+                    let images_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("output");
+                    info!("saving image to: {images_dir:?}");
+                    std::fs::create_dir_all(&images_dir).unwrap();
+
+                    // Choose filename starting from 000.png
+                    let image_path = images_dir.join(format!("{:05}.png", file_number.deref()));
+                    *file_number.deref_mut() += 1;
+
+                    if let Err(e) = img.save(image_path) {
+                        panic!("Failed to save image: {e}");
+                    };
+                }
+
+                if scene_controller.single_image {
+                    app_exit_writer.write(AppExit::Success);
+                }
+            }
+        } else {
+            // clears channel for skipped frames
+            while receiver.try_recv().is_ok() {}
+            scene_controller.state = SceneState::Render(n - 1);
+        }
+    }
+}
+
+pub struct CaptureFramePlugin;
+impl Plugin for CaptureFramePlugin {
+    fn build(&self, app: &mut App) {
+        info!("Adding CaptureFramePlugin");
+        app.add_systems(PostUpdate, update);
+    }
+}
+
+pub struct HeadlessPlugin;
+
+impl Plugin for HeadlessPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(ClearColor(Color::srgb_u8(0, 0, 0)))
+            .insert_resource(SceneController::new(1920, 1080, true))
+            .add_plugins(
+                DefaultPlugins
+                    .set(ImagePlugin::default_nearest())
+                    .set(WindowPlugin {
+                        primary_window: None,
+                        exit_condition: ExitCondition::DontExit,
+                        ..default()
+                    })
+                    .disable::<WinitPlugin>(),
+            )
+            .add_plugins(ImageCopyPlugin)
+            .add_plugins(CaptureFramePlugin)
+            .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
+                1.0 / 60.0,
+            )))
+            .add_observer(added_render_target);
     }
 }
