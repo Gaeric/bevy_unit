@@ -50,14 +50,14 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.spawn((
         SceneRoot(hs2_head),
-        Transform::from_scale(Vec3::new(10.0, 10.0, 10.0)),
+        // Transform::from_scale(Vec3::new(10.0, 10.0, 10.0)),
     ));
 }
 
 fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 18.0, 10.0).looking_at(Vec3::new(0.0, 18.0, 0.0), Dir3::Y),
+        Transform::from_xyz(0.0, 1.8, 2.0).looking_at(Vec3::new(0.0, 1.5, 0.0), Dir3::Y),
     ));
 }
 
