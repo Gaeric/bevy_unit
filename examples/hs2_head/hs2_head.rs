@@ -2,6 +2,7 @@ use crate::headless::HeadlessPlugin;
 use crate::{camera::OrbitCameraPlugin, mat_convert::MatConvertPlugin};
 use bevy::core_pipeline::Skybox;
 use bevy::prelude::*;
+use clap::Parser;
 
 mod camera;
 mod headless;
@@ -11,18 +12,35 @@ mod eyelash;
 mod eyeshadow;
 mod mat_convert;
 
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(short = 'o', long)]
+    orbit: bool,
+    #[arg(short = 'l', long)]
+    light: bool,
+}
+
 fn main() {
-    App::new()
-        // .add_plugins(OrbitCameraPlugin)
-        .add_plugins(HeadlessPlugin)
-        .add_plugins(MatConvertPlugin)
+    let mut app = App::new();
+
+    let args = Args::parse();
+    if args.orbit {
+        app.add_plugins(OrbitCameraPlugin);
+    } else {
+        app.add_plugins(HeadlessPlugin);
+    }
+
+    if args.light {
+        app.add_observer(added_lights);
+    }
+
+    app.add_plugins(MatConvertPlugin)
         .insert_resource(GlobalAmbientLight {
             brightness: 1000.,
             ..default()
         })
         .add_systems(Startup, setup)
         .add_systems(Startup, setup_camera)
-        .add_observer(added_lights)
         .run();
 }
 
