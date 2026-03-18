@@ -11,6 +11,9 @@ def serialize_value(val):
     Converts Blender-specific types (Vectors, Eulers, etc.) into
     JSON-compatible lists.
     """
+    if isinstance(val, float):
+        return round(val, 4)
+
     if isinstance(val, str):
         return val
 
