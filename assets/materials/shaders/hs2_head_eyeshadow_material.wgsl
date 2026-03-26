@@ -59,7 +59,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let eyeshadow_color = textureSample(eyeshadow_texture, eyeshadow_sampler, uv);
 #endif
 
-    pbr_input.material.base_color = vec4<f32>(0.0, 0.0, 0.136, eyeshadow_color.a);
+    pbr_input.material.base_color = vec4<f32>(0.016, 0.016, 0.016, eyeshadow_color.a);
 
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr_input);
