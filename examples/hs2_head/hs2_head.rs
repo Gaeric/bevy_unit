@@ -10,6 +10,7 @@ mod headless;
 mod eye;
 mod eyelash;
 mod eyeshadow;
+mod head;
 mod mat_convert;
 
 #[derive(Parser, Debug)]
