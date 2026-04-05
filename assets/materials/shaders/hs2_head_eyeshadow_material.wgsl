@@ -1,4 +1,4 @@
-// The shader that goes with `example-manual-material`.
+// The shader reference `example-manual-material`.
 // This code demonstrates how to write shaders that are compatible with both
 // bindless and non-bindless mode. See the `#ifdef BINDLESS` blocks.
 

@@ -9,6 +9,7 @@ use crate::mat_convert::MaterialConverter;
 
 const HEAD_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_head_material.wgsl";
 
+// @see StandardMaterialUniform
 /// The GPU-side data structure specifying plain old data for the material
 /// extension.
 #[derive(Clone, Default, ShaderType)]
@@ -30,6 +31,7 @@ impl<'a> From<&'a HeadMaterialExt> for HeadMaterialUniform {
     }
 }
 
+// @see StandardMaterial
 #[derive(Asset, Clone, Reflect, AsBindGroup)]
 #[data(80, HeadMaterialUniform, binding_array(106))]
 #[bindless(index_table(range(80..93), binding(105)))]
