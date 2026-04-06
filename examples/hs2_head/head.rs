@@ -5,7 +5,6 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 
-use crate::eye::EyeMaterialExt;
 use crate::mat_convert::MaterialConverter;
 
 const HEAD_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_head_material.wgsl";
@@ -37,7 +36,7 @@ impl<'a> From<&'a HeadMaterialExt> for HeadMaterialUniform {
 #[data(80, HeadMaterialUniform, binding_array(106))]
 #[bindless(index_table(range(80..93), binding(105)))]
 pub struct HeadMaterialExt {
-    ex_data: Vec4,
+    ex_data: Color,
 
     #[texture(81)]
     #[sampler(82)]
@@ -66,14 +65,20 @@ pub struct HeadMaterialExt {
 
 impl HeadMaterialExt {
     pub fn default(asset_server: &AssetServer) -> Self {
-        let ex_data = Vec4::ZERO;
+        let ex_data = Color::Srgba(Srgba {
+            red: 0.0,
+            green: 0.0,
+            blue: 0.8,
+            alpha: 1.0,
+        });
 
         let main_texture_path: AssetPath = "materials/head/cf_m_skin_head_01_MainTex.png".into();
         let detail_texture_path: AssetPath =
             "materials/head/cf_m_skin_head_01_DetailMainTex.png".into();
         let detail_gloss_texture_path: AssetPath =
             "materials/head/cf_m_skin_head_01_DetailGlossMap.png".into();
-        let eyebrow_texture_path: AssetPath = "materials/head/cf_m_skin_head_01_Texture3.png".into();
+        let eyebrow_texture_path: AssetPath =
+            "materials/head/cf_m_skin_head_01_Texture3.png".into();
         let bump_texture_path: AssetPath =
             "materials/head/cf_m_skin_head_01_BumpMap_converted.png".into();
         let bump_ex_texture_path: AssetPath =
@@ -92,7 +97,7 @@ impl HeadMaterialExt {
     }
 
     pub fn new(
-        ex_data: Vec4,
+        ex_data: Color,
         main_texture_path: AssetPath,
         detail_texture_path: AssetPath,
         detail_gloss_texture_path: AssetPath,

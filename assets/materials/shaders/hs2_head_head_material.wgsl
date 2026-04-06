@@ -18,6 +18,8 @@
 
 struct HeadMaterialExtIndices {
   material: u32,
+  main_texture: u32,
+  main_sampler: u32,
 }
 
 struct HeadMaterialExt {
@@ -29,7 +31,7 @@ struct HeadMaterialExt {
 // the `DemoBindlessExtension` fields.
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var<storage> head_material_ext_indices: array<HeadMaterialExtIndices>;
 
-// An array that holds the `EyeMaterialExt` plain old data,
+// An array that holds the `HeadMaterialExt` plain old data,
 // indexed by `EyeMaterialExtIndices.material`.
 @group(#{MATERIAL_BIND_GROUP}) @binding(106) var<storage> head_material_ext: array<HeadMaterialExt>;
 
@@ -57,8 +59,6 @@ struct HeadMaterialExt {
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
 #ifdef BINDLESS
   let slot = mesh[in.instance_index].material_and_lightmap_bind_group_slot & 0xffffu;
-#else
-  let slot = in.material_bind_group_slot;
 #endif
   
 #ifdef BINDLESS
@@ -69,6 +69,17 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
   var pbr_input = pbr_input_from_standard_material(in, is_front);
   let uv = (uv_transform * vec3(in.uv, 1.0)).xy;
+
+
+#ifdef BINDLESS
+  let main_color = textureSample(bindless_textures_2d[head_material_ext_indices[slot].main_texture],
+                                 bindless_samplers_filtering[head_material_ext_indices[slot].main_sampler],
+                                 uv);
+#else
+  let main_color = textureSample(main_texture, main_sampler, uv);
+#endif
+
+  pbr_input.material.base_color = main_color;
 
   var out: FragmentOutput;
   out.color = apply_pbr_lighting(pbr_input);
