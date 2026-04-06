@@ -8,6 +8,9 @@
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
 }
+
+#import bevy_render::{color_operations::{hsv_to_rgb, rgb_to_hsv}}
+
 #import bevy_render::bindless::{bindless_samplers_filtering, bindless_textures_2d}
 
 #ifdef BINDLESS
@@ -79,7 +82,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
   let main_color = textureSample(main_texture, main_sampler, uv);
 #endif
 
-  pbr_input.material.base_color = main_color;
+  // very simple tone mapping
+  var hsv_color = rgb_to_hsv(main_color.xyz);
+  hsv_color.z = sqrt(sqrt(hsv_color.z));
+  let base_color = vec4(hsv_to_rgb(hsv_color), main_color.a);
+
+  pbr_input.material.base_color = base_color;
 
   var out: FragmentOutput;
   out.color = apply_pbr_lighting(pbr_input);
