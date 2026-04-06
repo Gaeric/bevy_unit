@@ -111,12 +111,7 @@ impl EyeMaterialExt {
         EyeMaterialExt {
             iris_color,
             sclera_texture: Some(asset_server.load(sclera_texture_path)),
-            iris_texture: Some(asset_server.load_with_settings(
-                iris_texture_path,
-                |settings: &mut ImageLoaderSettings| {
-                    settings.is_srgb = true;
-                },
-            )),
+            iris_texture: Some(asset_server.load(iris_texture_path)),
             highlight_texture: Some(asset_server.load(highlight_texture_path)),
             pupil_texture: Some(asset_server.load_with_settings(
                 pupil_texture_path,

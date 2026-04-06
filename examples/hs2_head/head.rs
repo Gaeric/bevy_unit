@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 
+use crate::eye::EyeMaterialExt;
 use crate::mat_convert::MaterialConverter;
 
 const HEAD_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_head_material.wgsl";
@@ -61,4 +62,74 @@ pub struct HeadMaterialExt {
     #[texture(91)]
     #[sampler(92)]
     bump_ex_texture: Option<Handle<Image>>,
+}
+
+impl HeadMaterialExt {
+    pub fn default(asset_server: &AssetServer) -> Self {
+        let ex_data = Vec4::ZERO;
+
+        let main_texture_path: AssetPath = "materials/head/cf_m_skin_head_01_MainTex.png".into();
+        let detail_texture_path: AssetPath =
+            "materials/head/cf_m_skin_head_01_DetailMainTex.png".into();
+        let detail_gloss_texture_path: AssetPath =
+            "materials/head/cf_m_skin_head_01_DetailGlossMap.png".into();
+        let eyebrow_texture_path: AssetPath = "materials/head/cf_m_skin_head_01_Texture3.png".into();
+        let bump_texture_path: AssetPath =
+            "materials/head/cf_m_skin_head_01_BumpMap_converted.png".into();
+        let bump_ex_texture_path: AssetPath =
+            "materials/head/cf_m_skin_head_01_BumpMap2_converted.png".into();
+
+        HeadMaterialExt::new(
+            ex_data,
+            main_texture_path,
+            detail_texture_path,
+            detail_gloss_texture_path,
+            eyebrow_texture_path,
+            bump_texture_path,
+            bump_ex_texture_path,
+            asset_server,
+        )
+    }
+
+    pub fn new(
+        ex_data: Vec4,
+        main_texture_path: AssetPath,
+        detail_texture_path: AssetPath,
+        detail_gloss_texture_path: AssetPath,
+        eyebrow_texture_path: AssetPath,
+        bump_texture_path: AssetPath,
+        bump_ex_texture_path: AssetPath,
+        asset_server: &AssetServer,
+    ) -> Self {
+        HeadMaterialExt {
+            ex_data,
+            main_texture: Some(asset_server.load(main_texture_path)),
+            detail_texture: Some(asset_server.load(detail_texture_path)),
+            detail_gloss_texture: Some(asset_server.load_with_settings(
+                detail_gloss_texture_path,
+                |settings: &mut ImageLoaderSettings| settings.is_srgb = false,
+            )),
+            eyebrow_texture: Some(asset_server.load(eyebrow_texture_path)),
+            bump_texture: Some(asset_server.load(bump_texture_path)),
+            bump_ex_texture: Some(asset_server.load(bump_ex_texture_path)),
+        }
+    }
+}
+
+impl MaterialExtension for HeadMaterialExt {
+    fn fragment_shader() -> ShaderRef {
+        HEAD_SHADER_ASSET_PATH.into()
+    }
+}
+
+impl MaterialConverter<HeadMaterialExt> for HeadMaterialExt {
+    fn convert(
+        base: &StandardMaterial,
+        asset_server: &AssetServer,
+    ) -> ExtendedMaterial<StandardMaterial, HeadMaterialExt> {
+        ExtendedMaterial {
+            base: base.clone(),
+            extension: HeadMaterialExt::default(asset_server),
+        }
+    }
 }

@@ -8,7 +8,10 @@ use bevy::{
     scene::SceneInstanceReady,
 };
 
-use crate::{eye::EyeMaterialExt, eyelash::EyelashMaterialExt, eyeshadow::EyeshadowMaterialExt};
+use crate::{
+    eye::EyeMaterialExt, eyelash::EyelashMaterialExt, eyeshadow::EyeshadowMaterialExt,
+    head::HeadMaterialExt,
+};
 
 pub trait MaterialConverter<E: Asset + MaterialExtension> {
     fn convert(
@@ -140,7 +143,8 @@ impl Plugin for MatConvertPlugin {
             app,
             (EyeMaterialExt, "Eyes_"),
             (EyelashMaterialExt, "Eyelashes_"),
-            (EyeshadowMaterialExt, "Eyeshadow_")
+            (EyeshadowMaterialExt, "Eyeshadow_"),
+            (HeadMaterialExt, "Head_"),
         );
     }
 }
