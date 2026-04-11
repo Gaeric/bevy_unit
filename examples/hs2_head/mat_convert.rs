@@ -78,8 +78,8 @@ impl MaterialApplier for DefaultTransparentApplier {
     fn apply(&self, entity: Entity, base: &StandardMaterial, world: &mut World) {
         let mut mat = base.clone();
 
-        mat.alpha_mode = AlphaMode::Blend;
-        mat.base_color = Color::Srgba(Srgba::new(0.5, 0.5, 0.5, 0.0));
+        // mat.alpha_mode = AlphaMode::Blend;
+        // mat.base_color = Color::Srgba(Srgba::new(0.5, 0.5, 0.5, 1.0));
 
         let mut assets = world.resource_mut::<Assets<StandardMaterial>>();
         let handle = assets.add(mat);
