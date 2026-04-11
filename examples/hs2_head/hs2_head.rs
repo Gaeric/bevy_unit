@@ -2,16 +2,17 @@ use crate::headless::HeadlessPlugin;
 use crate::{camera::OrbitCameraPlugin, mat_convert::MatConvertPlugin};
 use bevy::core_pipeline::Skybox;
 use bevy::prelude::*;
+use bevy::render::view::Hdr;
 use clap::Parser;
 
 mod camera;
 mod headless;
 
+mod body;
 mod eye;
 mod eyelash;
 mod eyeshadow;
 mod head;
-mod body;
 mod mat_convert;
 
 #[derive(Parser, Debug)]
@@ -58,6 +59,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
 fn setup_camera(mut commands: Commands) {
     commands.spawn((
+        Hdr,
         Camera3d::default(),
         Transform::from_xyz(0.0, 18.0, 20.0).looking_at(Vec3::new(0.0, 15.0, 0.0), Dir3::Y),
     ));
