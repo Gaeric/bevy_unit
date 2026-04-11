@@ -11,6 +11,7 @@ mod eye;
 mod eyelash;
 mod eyeshadow;
 mod head;
+mod body;
 mod mat_convert;
 
 #[derive(Parser, Debug)]

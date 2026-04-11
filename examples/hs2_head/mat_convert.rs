@@ -9,8 +9,8 @@ use bevy::{
 };
 
 use crate::{
-    eye::EyeMaterialExt, eyelash::EyelashMaterialExt, eyeshadow::EyeshadowMaterialExt,
-    head::HeadMaterialExt,
+    body::BodyMaterialExt, eye::EyeMaterialExt, eyelash::EyelashMaterialExt,
+    eyeshadow::EyeshadowMaterialExt, head::HeadMaterialExt,
 };
 
 pub trait MaterialConverter<E: Asset + MaterialExtension> {
@@ -145,6 +145,7 @@ impl Plugin for MatConvertPlugin {
             (EyelashMaterialExt, "Eyelashes_"),
             (EyeshadowMaterialExt, "Eyeshadow_"),
             (HeadMaterialExt, "Head_"),
+            (BodyMaterialExt, "Torso_")
         );
     }
 }
