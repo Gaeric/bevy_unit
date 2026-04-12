@@ -1,4 +1,5 @@
 use crate::headless::HeadlessPlugin;
+use crate::raytracing::DemoRTPlugin;
 use crate::{camera::OrbitCameraPlugin, mat_convert::MatConvertPlugin};
 use bevy::core_pipeline::Skybox;
 use bevy::prelude::*;
@@ -14,6 +15,7 @@ mod eyelash;
 mod eyeshadow;
 mod head;
 mod mat_convert;
+mod raytracing;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -21,6 +23,8 @@ struct Args {
     orbit: bool,
     #[arg(short = 'l', long)]
     light: bool,
+    #[arg(short = 'r', long)]
+    raytracing: bool,
 }
 
 fn main() {
@@ -37,19 +41,24 @@ fn main() {
         app.add_observer(added_lights);
     }
 
-    app.add_plugins(MatConvertPlugin)
-        .insert_resource(GlobalAmbientLight {
-            brightness: 1000.,
-            ..default()
-        })
-        .add_systems(Startup, setup)
-        .add_systems(Startup, setup_camera)
-        .run();
+    if args.raytracing {
+        app.add_plugins(DemoRTPlugin);
+    } else {
+        app.add_plugins(MatConvertPlugin);
+    }
+
+    app.insert_resource(GlobalAmbientLight {
+        brightness: 1000.,
+        ..default()
+    })
+    .add_systems(Startup, setup)
+    .add_systems(Startup, setup_camera)
+    .run();
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let hs2_head = asset_server
-        .load(GltfAssetLabel::Scene(0).from_asset("materials/hs2_body_greybox_mini.glb"));
+        .load(GltfAssetLabel::Scene(0).from_asset("materials/hs2_body_greybox_mini_2.glb"));
 
     commands.spawn((
         SceneRoot(hs2_head),

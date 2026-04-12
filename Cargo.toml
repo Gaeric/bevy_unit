@@ -25,6 +25,7 @@ bevy = { version = "0.18.1", features = [
         "experimental_bevy_feathers",
         "free_camera",
         "dds",
+        "bevy_solari",
 ] }
 # bevy_shine = { path = "bevy_shine" }
 # modular_character = { path = "units/modular_character" }
@@ -76,7 +77,12 @@ bevy_feathers = { path = "../bevy_engines/bevy_0.18/crates/bevy_feathers" }
 
 [features]
 default = ["dev"]
-dev = ["bevy/dynamic_linking", "bevy/bevy_dev_tools", "bevy/bevy_ui_debug"]
+dev = [
+        "bevy/dynamic_linking",
+        "bevy/bevy_dev_tools",
+        "bevy/bevy_ui_debug",
+        "bevy/bevy_solari",
+]
 
 
 [dev-dependencies]
