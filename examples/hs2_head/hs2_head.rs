@@ -1,9 +1,12 @@
 use crate::headless::HeadlessPlugin;
 use crate::raytracing::DemoRTPlugin;
 use crate::{camera::OrbitCameraPlugin, mat_convert::MatConvertPlugin};
+use bevy::camera::CameraMainTextureUsages;
 use bevy::core_pipeline::Skybox;
 use bevy::prelude::*;
+use bevy::render::render_resource::TextureUsages;
 use bevy::render::view::Hdr;
+use bevy::solari::prelude::SolariLighting;
 use clap::Parser;
 
 mod camera;
@@ -43,8 +46,10 @@ fn main() {
 
     if args.raytracing {
         app.add_plugins(DemoRTPlugin);
+        app.add_systems(Startup, setup_rt_camera);
     } else {
         app.add_plugins(MatConvertPlugin);
+        app.add_systems(Startup, setup_camera);
     }
 
     app.insert_resource(GlobalAmbientLight {
@@ -52,7 +57,6 @@ fn main() {
         ..default()
     })
     .add_systems(Startup, setup)
-    .add_systems(Startup, setup_camera)
     .run();
 }
 
@@ -66,6 +70,24 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     ));
 }
 
+fn setup_rt_camera(mut commands: Commands) {
+    let mut camera = commands.spawn((
+        Camera3d::default(),
+        Camera {
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            ..default()
+        },
+        Transform::from_translation(Vec3::new(0.219417, 2.5764852, 6.9718704)).with_rotation(
+            Quat::from_xyzw(-0.1466768, 0.013738206, 0.002037309, 0.989087),
+        ),
+        // Msaa::Off and CameraMainTextureUsages with STORAGE_BINDING are required for Solari
+        CameraMainTextureUsages::default().with(TextureUsages::STORAGE_BINDING),
+        Msaa::Off,
+    ));
+
+    camera.insert(SolariLighting::default());
+}
+
 fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Hdr,
@@ -75,6 +97,20 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn added_lights(camera: On<Add, Camera3d>, mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.spawn((
+        DirectionalLight {
+            illuminance: light_consts::lux::FULL_DAYLIGHT,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_xyzw(
+            -0.13334629,
+            -0.86597735,
+            -0.3586996,
+            0.3219264,
+        )),
+    ));
+
     commands.entity(camera.entity).insert((
         Skybox {
             brightness: 5000.0,

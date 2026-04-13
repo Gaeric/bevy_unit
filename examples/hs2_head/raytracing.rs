@@ -55,9 +55,6 @@ fn add_raytracing_meshes_on_scene_load(
                 warn!("mesh uv1 is removed");
                 mesh.remove_attribute(Mesh::ATTRIBUTE_UV_1);
             }
-            let new_material = StandardMaterial::default();
-            let handle = asset_server.add(new_material);
-            commands.entity(descendant).insert(MeshMaterial3d(handle));
         }
     }
 }
