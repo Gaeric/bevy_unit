@@ -2,6 +2,7 @@ use bevy::{
     camera::CameraMainTextureUsages,
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     gltf::GltfMaterialName,
+    mesh::{Indices, MeshVertexAttributeId},
     prelude::*,
     render::render_resource::TextureUsages,
     scene::SceneInstanceReady,
@@ -39,11 +40,9 @@ fn setup_pica_pica(
     // ));
 
     commands
-        .spawn((
-            SceneRoot(asset_server.load(
-                GltfAssetLabel::Scene(0).from_asset("materials/hs2_body_greybox_mini_2.glb"),
-            )),
-        ))
+        .spawn((SceneRoot(asset_server.load(
+            GltfAssetLabel::Scene(0).from_asset("materials/hs2_body_greybox_mini_2.glb"),
+        )),))
         .observe(add_raytracing_meshes_on_scene_load);
 
     // commands
@@ -109,7 +108,7 @@ fn add_raytracing_meshes_on_scene_load(
         if let Ok((Mesh3d(mesh_handle), MeshMaterial3d(material_handle), material_name)) =
             mesh_query.get(descendant)
         {
-            info!("mesh_handle is {:?}", mesh_handle);
+            // info!("mesh_handle is {:?}", mesh_handle);
             // Add raytracing mesh component
             commands
                 .entity(descendant)
@@ -118,6 +117,7 @@ fn add_raytracing_meshes_on_scene_load(
 
             // Ensure meshes are Solari compatible
             let mesh = meshes.get_mut(mesh_handle).unwrap();
+
             if !mesh.contains_attribute(Mesh::ATTRIBUTE_UV_0) {
                 let vertex_count = mesh.count_vertices();
                 mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 0.0]; vertex_count]);
@@ -126,12 +126,37 @@ fn add_raytracing_meshes_on_scene_load(
                     vec![[0.0, 0.0, 0.0, 0.0]; vertex_count],
                 );
             }
-            if !mesh.contains_attribute(Mesh::ATTRIBUTE_TANGENT) {
-                mesh.generate_tangents().unwrap();
-            }
+            // if !mesh.contains_attribute(Mesh::ATTRIBUTE_TANGENT) {
+            info!("generate tangets for mesh {:?}", mesh_handle);
+            mesh.generate_tangents().unwrap();
+            // }
             if mesh.contains_attribute(Mesh::ATTRIBUTE_UV_1) {
                 mesh.remove_attribute(Mesh::ATTRIBUTE_UV_1);
             }
+
+            if mesh.contains_attribute(Mesh::ATTRIBUTE_COLOR) {
+                mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR);
+            }
+
+            if let Some(indices) = mesh.indices() {
+                let new_indices: Vec<u32> = indices.iter().map(|i| i as u32).collect();
+                mesh.insert_indices(Indices::U32(new_indices));
+            }
+
+            if let Some(indices) = mesh.indices() {
+                let new_indices: Vec<u32> = indices.iter().map(|i| i as u32).collect();
+                mesh.insert_indices(Indices::U32(new_indices));
+            }
+
+
+            let vertex_attributes = mesh.attributes().map(|(attribute, _)| attribute.id);
+            let indexed_32 = matches!(mesh.indices(), Some(Indices::U32(..)));
+            info!("mesh indexed 32? {}", indexed_32);
+            for attribute in vertex_attributes {
+                info!("mesh attributes {:?}", attribute);
+            }
+
         }
+        
     }
 }
