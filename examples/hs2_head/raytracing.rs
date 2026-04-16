@@ -3,7 +3,7 @@ use bevy::{
     camera::CameraMainTextureUsages,
     ecs::{hierarchy::Children, system::Query},
     gltf::GltfMaterialName,
-    mesh::Mesh3d,
+    mesh::{Indices, Mesh3d},
     pbr::{MeshMaterial3d, StandardMaterial},
     prelude::*,
     render::render_resource::TextureUsages,
@@ -22,7 +22,7 @@ fn add_raytracing_meshes_on_scene_load(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     let sphere = meshes.add(Sphere::default());
     let material = materials.add(StandardMaterial::default());
@@ -56,6 +56,27 @@ fn add_raytracing_meshes_on_scene_load(
             if mesh.contains_attribute(Mesh::ATTRIBUTE_UV_1) {
                 warn!("mesh uv1 is removed");
                 mesh.remove_attribute(Mesh::ATTRIBUTE_UV_1);
+            }
+
+            if mesh.contains_attribute(Mesh::ATTRIBUTE_COLOR) {
+                mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR);
+            }
+
+            if let Some(indices) = mesh.indices() {
+                let new_indices: Vec<u32> = indices.iter().map(|i| i as u32).collect();
+                mesh.insert_indices(Indices::U32(new_indices));
+            }
+
+            if let Some(indices) = mesh.indices() {
+                let new_indices: Vec<u32> = indices.iter().map(|i| i as u32).collect();
+                mesh.insert_indices(Indices::U32(new_indices));
+            }
+
+            let vertex_attributes = mesh.attributes().map(|(attribute, _)| attribute.id);
+            let indexed_32 = matches!(mesh.indices(), Some(Indices::U32(..)));
+            info!("mesh indexed 32? {}", indexed_32);
+            for attribute in vertex_attributes {
+                info!("mesh attributes {:?}", attribute);
             }
         }
     }
