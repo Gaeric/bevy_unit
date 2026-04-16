@@ -1,12 +1,9 @@
 use crate::headless::HeadlessPlugin;
 use crate::raytracing::DemoRTPlugin;
 use crate::{camera::OrbitCameraPlugin, mat_convert::MatConvertPlugin};
-use bevy::camera::CameraMainTextureUsages;
 use bevy::core_pipeline::Skybox;
 use bevy::prelude::*;
-use bevy::render::render_resource::TextureUsages;
 use bevy::render::view::Hdr;
-use bevy::solari::prelude::SolariLighting;
 use clap::Parser;
 
 mod camera;
@@ -46,18 +43,18 @@ fn main() {
 
     if args.raytracing {
         app.add_plugins(DemoRTPlugin);
-        app.add_systems(Startup, setup_rt_camera);
     } else {
         app.add_plugins(MatConvertPlugin);
-        app.add_systems(Startup, setup_camera);
     }
 
     app.insert_resource(GlobalAmbientLight {
         brightness: 1000.,
         ..default()
-    })
-    .add_systems(Startup, setup)
-    .run();
+    });
+
+    app.add_systems(Startup, setup_camera);
+    app.add_systems(Startup, setup);
+    app.run();
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -68,24 +65,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         SceneRoot(hs2_head),
         Transform::from_scale(Vec3::new(10.0, 10.0, 10.0)),
     ));
-}
-
-fn setup_rt_camera(mut commands: Commands) {
-    let mut camera = commands.spawn((
-        Camera3d::default(),
-        Camera {
-            clear_color: ClearColorConfig::Custom(Color::BLACK),
-            ..default()
-        },
-        Transform::from_translation(Vec3::new(0.219417, 2.5764852, 6.9718704)).with_rotation(
-            Quat::from_xyzw(-0.1466768, 0.013738206, 0.002037309, 0.989087),
-        ),
-        // Msaa::Off and CameraMainTextureUsages with STORAGE_BINDING are required for Solari
-        CameraMainTextureUsages::default().with(TextureUsages::STORAGE_BINDING),
-        Msaa::Off,
-    ));
-
-    camera.insert(SolariLighting::default());
 }
 
 fn setup_camera(mut commands: Commands) {

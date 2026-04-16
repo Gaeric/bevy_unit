@@ -1,12 +1,14 @@
 use bevy::{
     app::{App, Plugin},
+    camera::CameraMainTextureUsages,
     ecs::{hierarchy::Children, system::Query},
     gltf::GltfMaterialName,
     mesh::Mesh3d,
     pbr::{MeshMaterial3d, StandardMaterial},
     prelude::*,
+    render::render_resource::TextureUsages,
     scene::SceneInstanceReady,
-    solari::{SolariPlugins, scene::RaytracingMesh3d},
+    solari::{SolariPlugins, prelude::SolariLighting, scene::RaytracingMesh3d},
 };
 
 fn add_raytracing_meshes_on_scene_load(
@@ -59,11 +61,24 @@ fn add_raytracing_meshes_on_scene_load(
     }
 }
 
+fn added_camera_rt_params(camera: On<Add, Camera3d>, mut commands: Commands) {
+    commands.entity(camera.entity).insert((
+        Camera {
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            ..default()
+        },
+        CameraMainTextureUsages::default().with(TextureUsages::STORAGE_BINDING),
+        Msaa::Off,
+        SolariLighting::default(),
+    ));
+}
+
 pub struct DemoRTPlugin;
 
 impl Plugin for DemoRTPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(SolariPlugins);
-        app.add_observer(add_raytracing_meshes_on_scene_load);
+        app.add_observer(add_raytracing_meshes_on_scene_load)
+            .add_observer(added_camera_rt_params);
     }
 }

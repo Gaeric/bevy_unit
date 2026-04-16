@@ -132,6 +132,8 @@ impl MaterialConverter<HeadMaterialExt> for HeadMaterialExt {
         base: &StandardMaterial,
         asset_server: &AssetServer,
     ) -> ExtendedMaterial<StandardMaterial, HeadMaterialExt> {
+        info!("convert to head mat");
+
         ExtendedMaterial {
             base: base.clone(),
             extension: HeadMaterialExt::default(asset_server),

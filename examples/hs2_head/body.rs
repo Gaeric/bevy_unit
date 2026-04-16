@@ -1,6 +1,7 @@
 use bevy::{
     asset::{Asset, AssetPath, AssetServer, Handle},
     image::Image,
+    log::info,
     pbr::{ExtendedMaterial, MaterialExtension, StandardMaterial},
     reflect::Reflect,
     render::render_resource::AsBindGroup,
@@ -44,6 +45,7 @@ impl MaterialConverter<BodyMaterialExt> for BodyMaterialExt {
         base: &StandardMaterial,
         asset_server: &AssetServer,
     ) -> ExtendedMaterial<StandardMaterial, BodyMaterialExt> {
+        info!("convert to body mat");
         ExtendedMaterial {
             base: base.clone(),
             extension: BodyMaterialExt::default(asset_server),
