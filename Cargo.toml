@@ -88,7 +88,7 @@ dev = [
 [dev-dependencies]
 clap = { version = "4.6.0", features = ["derive"] }
 libdeck = { path = "../libdeck/" }
-libdeck-demo = { path = "../libdeck/units/libdeck-demo/" }
+libdeck-sample = { path = "../libdeck/units/libdeck-sample/" }
 
 # Enable a small amount of optimization in debug mode
 [profile.dev]

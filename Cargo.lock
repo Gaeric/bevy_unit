@@ -2049,7 +2049,7 @@ dependencies = [
  "clap",
  "crossbeam-channel",
  "libdeck",
- "libdeck-demo",
+ "libdeck-sample",
  "rand 0.9.2",
  "tracing-appender",
 ]
@@ -4093,7 +4093,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "libdeck-demo"
+name = "libdeck-sample"
 version = "0.1.0"
 dependencies = [
  "inventory",

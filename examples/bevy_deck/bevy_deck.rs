@@ -4,7 +4,7 @@ use libdeck::core::interface::Interface;
 use libdeck::core::room::Room;
 use libdeck::core::{agent::Agent, category::Mode};
 
-use libdeck_demo::standard::{
+use libdeck_sample::standard::{
     abilities::gen_yingzi_ability, cards::init_cards, mode_rules::gen_standard_mode,
 };
 
