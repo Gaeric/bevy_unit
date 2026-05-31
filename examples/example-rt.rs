@@ -1,6 +1,7 @@
 use bevy::{
     camera::CameraMainTextureUsages,
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
+    core_pipeline::Skybox,
     gltf::GltfMaterialName,
     mesh::{Indices, MeshVertexAttributeId},
     prelude::*,
@@ -25,13 +26,13 @@ fn setup_pica_pica(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let sphere = meshes.add(Sphere::default());
-    let material = materials.add(StandardMaterial::default());
+    // let sphere = meshes.add(Sphere::default());
+    // let material = materials.add(StandardMaterial::default());
 
-    let mesh = meshes.get_mut(&sphere).unwrap();
-    mesh.generate_tangents().unwrap();
+    // let mesh = meshes.get_mut(&sphere).unwrap();
+    // mesh.generate_tangents().unwrap();
 
-    info!("sphere is {:?}", sphere);
+    // info!("sphere is {:?}", sphere);
 
     // commands.spawn((
     //     Mesh3d(sphere.clone()),
@@ -40,9 +41,9 @@ fn setup_pica_pica(
     // ));
 
     commands
-        .spawn((SceneRoot(asset_server.load(
-            GltfAssetLabel::Scene(0).from_asset("materials/hs2_body_greybox_mini_2.glb"),
-        )),))
+        .spawn(SceneRoot(asset_server.load(
+            GltfAssetLabel::Scene(0).from_asset("http://localhost:8000/hs2_torso_2.glb"),
+        )))
         .observe(add_raytracing_meshes_on_scene_load);
 
     // commands
@@ -112,7 +113,7 @@ fn add_raytracing_meshes_on_scene_load(
             // Add raytracing mesh component
             commands
                 .entity(descendant)
-                .insert(MeshMaterial3d(material.clone()))
+                // .insert(MeshMaterial3d(material.clone()))
                 .insert(RaytracingMesh3d(mesh_handle.clone()));
 
             // Ensure meshes are Solari compatible
@@ -148,15 +149,12 @@ fn add_raytracing_meshes_on_scene_load(
                 mesh.insert_indices(Indices::U32(new_indices));
             }
 
-
             let vertex_attributes = mesh.attributes().map(|(attribute, _)| attribute.id);
             let indexed_32 = matches!(mesh.indices(), Some(Indices::U32(..)));
             info!("mesh indexed 32? {}", indexed_32);
             for attribute in vertex_attributes {
                 info!("mesh attributes {:?}", attribute);
             }
-
         }
-        
     }
 }

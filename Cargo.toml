@@ -26,6 +26,8 @@ bevy = { version = "0.18.1", features = [
         "free_camera",
         "dds",
         "bevy_solari",
+        "http",
+        "https",
 ] }
 # bevy_shine = { path = "bevy_shine" }
 # modular_character = { path = "units/modular_character" }
