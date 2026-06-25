@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.18.0", features = ["bevy_solari"] }
+bevy = { version = "0.19.0", features = ["bevy_solari"] }
 tracing = { version = "0.1", default-features = false, optional = true }
-bytemuck = "1.23.0"
+bytemuck = "1"
 radsort = "0.1"
 itertools = "0.14.0"
