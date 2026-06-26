@@ -13,39 +13,43 @@ use bevy::{
         system::{Commands, EntityCommands, Query},
     },
     platform::collections::{HashMap, hash_map::Entry},
+    world_serialization::{WorldAsset, WorldAssetRoot, WorldInstanceReady},
 };
 use bevy_asset::Handle;
-use bevy_scene::{Scene, SceneInstanceReady, SceneRoot};
 
 use crate::relationship::AttachedTo;
 
 /// Extension trait for [`EntityCommands`] to allow attaching a [`Scene`] to an [`Entity`](bevy_ecs::entity::Entity).
 pub trait SceneAttachmentExt {
-    /// Attaches a [`Scene`] to an [`Entity`]
-    fn attach_scene(&mut self, scene: Handle<Scene>) -> &mut Self;
+    /// Attaches a [`WorldAsset`] to an [`Entity`]
+    fn attach_scene(&mut self, scene: Handle<WorldAsset>) -> &mut Self;
 
-    /// Attaches a [`Scene`] to an [`Entity`](bevy_ecs::entity::Entity) and inserts an extra [`Bundle`]
+    /// Attaches a [`WorldAsset`] to an [`Entity`](bevy_ecs::entity::Entity) and inserts an extra [`Bundle`]
     /// on the attachment
-    fn attach_scene_with_extras(&mut self, scene: Handle<Scene>, extras: impl Bundle) -> &mut Self;
+    fn attach_scene_with_extras(
+        &mut self,
+        scene: Handle<WorldAsset>,
+        extras: impl Bundle,
+    ) -> &mut Self;
 }
 
 impl<'a> SceneAttachmentExt for EntityCommands<'a> {
     #[inline]
-    fn attach_scene(&mut self, scene: Handle<Scene>) -> &mut EntityCommands<'a> {
+    fn attach_scene(&mut self, scene: Handle<WorldAsset>) -> &mut EntityCommands<'a> {
         self.attach_scene_with_extras(scene, ())
     }
 
     #[inline]
     fn attach_scene_with_extras(
         &mut self,
-        scene: Handle<Scene>,
+        scene: Handle<WorldAsset>,
         extras: impl Bundle,
     ) -> &mut EntityCommands<'a> {
         tracing::debug!("attach scene with extras entity is {:?}", self.id());
 
         self.with_related_entities(|spawner: &mut RelatedSpawnerCommands<AttachedTo>| {
             spawner
-                .spawn((SceneRoot(scene), extras))
+                .spawn((WorldAssetRoot(scene), extras))
                 .observe(scene_attachment_when_ready);
             // .observe(scene_attachment_ready);
         })
@@ -75,7 +79,7 @@ fn collect_path(
 }
 
 fn scene_attachment_when_ready(
-    trigger: On<SceneInstanceReady>,
+    trigger: On<WorldInstanceReady>,
     mut commands: Commands,
     scene_attachments: Query<&AttachedTo>,
     childrens: Query<&Children>,

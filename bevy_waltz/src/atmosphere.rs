@@ -2,9 +2,10 @@ use bevy::{
     camera::Exposure,
     core_pipeline::tonemapping::Tonemapping,
     light::{
-        AtmosphereEnvironmentMapLight, CascadeShadowConfigBuilder, VolumetricFog, light_consts::lux,
+        Atmosphere, AtmosphereEnvironmentMapLight, CascadeShadowConfigBuilder, VolumetricFog,
+        atmosphere::ScatteringMedium, light_consts::lux,
     },
-    pbr::{Atmosphere, AtmosphereSettings, ScatteringMedium},
+    pbr::AtmosphereSettings,
     post_process::bloom::Bloom,
     prelude::*,
 };
@@ -29,7 +30,7 @@ fn added_atmosphere(
 
     commands.entity(entity).insert((
         // Earthlike atmosphere
-        Atmosphere::earthlike(scattering_mediums.add(ScatteringMedium::default())),
+        Atmosphere::earth(scattering_mediums.add(ScatteringMedium::default())),
         // Can be adjusted to change the scene scale and rendering quality
         AtmosphereSettings::default(),
         // The directional light illuminance used in this scene
@@ -59,7 +60,7 @@ fn added_atmosphere(
 
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             illuminance: lux::RAW_SUNLIGHT,
             ..default()
         },

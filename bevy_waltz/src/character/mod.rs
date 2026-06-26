@@ -10,15 +10,13 @@ use bevy_tnua::builtins::{
     TnuaBuiltinDashConfig, TnuaBuiltinJumpConfig, TnuaBuiltinKnockback, TnuaBuiltinWalkConfig,
     TnuaBuiltinWalkHeadroom, TnuaBuiltinWallSlide, TnuaBuiltinWallSlideConfig,
 };
-use bevy_tnua::control_helpers::TnuaAirActionDefinition;
+use bevy_tnua::control_helpers::{TnuaActionsCounter, TnuaAirActionDefinition};
 use bevy_tnua::math::AsF32;
 use bevy_tnua::{TnuaConfig, TnuaGhostOverwrites, TnuaScheme};
 
 use bevy_tnua::{
     TnuaAnimatingState, TnuaObstacleRadar, TnuaToggle,
-    control_helpers::{
-        TnuaBlipReuseAvoidance, TnuaSimpleAirActionsCounter, TnuaSimpleFallThroughPlatformsHelper,
-    },
+    control_helpers::{TnuaBlipReuseAvoidance, TnuaSimpleFallThroughPlatformsHelper},
     math::Vector3,
     prelude::{TnuaBuiltinWalk, TnuaController, TnuaControllerPlugin},
     radar_lens::TnuaRadarLens,
@@ -249,7 +247,7 @@ fn setup_character_with_entity_cmd(
     cmd.insert(TnuaSimpleFallThroughPlatformsHelper::default());
 
     // This helper keeps track of air actions like jumps or air dashes.
-    cmd.insert(TnuaSimpleAirActionsCounter::<WaltzTnuaCtrlScheme>::default());
+    cmd.insert(TnuaActionsCounter::<WaltzTnuaCtrlScheme>::default());
 
     // handle the equip weapon action
     cmd.observe(equip_weapon);

@@ -66,7 +66,7 @@ impl<'w, 's> LevelSetupHelper<'w, 's> {
         let scene = self.asset_server.load(path.to_string());
         let mut cmd = self.spawn_named(name);
 
-        cmd.insert((SceneRoot(scene), transform));
+        cmd.insert((WorldAssetRoot(scene), transform));
 
         cmd.insert(RigidBody::Static);
         cmd.insert(Collider::cuboid(size.x, size.y, size.z));

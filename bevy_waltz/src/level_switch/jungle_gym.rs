@@ -12,7 +12,7 @@ pub fn setup_level(mut helper: LevelSetupHelper) {
     helper.spawn((
         DirectionalLight {
             illuminance: 4000.0,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..Default::default()
         },
         Transform::default().looking_at(-Vec3::Y, Vec3::Z),
