@@ -3,15 +3,15 @@ use bevy::ecs::system::Query;
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
-use bevy_tnua::control_helpers::TnuaSimpleAirActionsCounter;
+use bevy_tnua::control_helpers::TnuaActionsCounter;
 use bevy_tnua::math::AsF32;
 use bevy_tnua::prelude::*;
 
 use crate::character::config::CharacterMotionConfig;
 use crate::character::{
-    EquipWeapon, WaltzTnuaCtrlScheme, WaltzTnuaCtrlSchemeActionDiscriminant, WeaponKind,
+    EquipWeapon, WaltzAirActionSlots, WaltzTnuaCtrlScheme, WaltzTnuaCtrlSchemeActionDiscriminant,
+    WeaponKind,
 };
-use crate::control::fixed_update_inspection::did_fixed_update_happen;
 use crate::level_switch::Climable;
 use crate::{WaltzCamera, WaltzPlayer};
 
@@ -129,7 +129,7 @@ fn clear_accumulated_input(mut accumulated_inputs: Query<&mut AccumulatedInput>)
 struct TnuaCtrlQuery {
     controller: &'static mut TnuaController<WaltzTnuaCtrlScheme>,
     accumulated_input: &'static AccumulatedInput,
-    air_actions_counter: &'static mut TnuaSimpleAirActionsCounter<WaltzTnuaCtrlScheme>,
+    air_actions_counter: &'static mut TnuaActionsCounter<WaltzAirActionSlots>,
     motion_config: &'static CharacterMotionConfig,
 }
 
@@ -144,10 +144,9 @@ fn apply_tnua_ctrl(
     camera_query: Option<Single<TnuaCameraQuery>>,
 ) {
     let mut tnua_ctrl = tnua_ctrl_query.into_inner();
-    let (controller, accumulated_input, air_actions_counter, motion_config) = (
+    let (controller, accumulated_input, motion_config) = (
         &mut tnua_ctrl.controller,
         tnua_ctrl.accumulated_input,
-        &mut tnua_ctrl.air_actions_counter,
         tnua_ctrl.motion_config,
     );
 
@@ -181,8 +180,6 @@ fn apply_tnua_ctrl(
         desired_motion: direction * motion_config.speed,
         desired_forward: Dir3::new(-direction.f32()).ok(),
     };
-
-    air_actions_counter.update(controller.as_ref());
 }
 
 /// handle jump action for walk/climp/walljump
@@ -190,15 +187,13 @@ fn apply_jump(
     jump: On<Fire<Jump>>,
     mut query: Query<(
         &CharacterMotionConfig,
-        &mut TnuaSimpleAirActionsCounter<WaltzTnuaCtrlScheme>,
+        &mut TnuaActionsCounter<WaltzAirActionSlots>,
         &mut TnuaController<WaltzTnuaCtrlScheme>,
     )>,
 ) {
     let (config, air_actions_counter, mut controller) = query.get_mut(jump.context).unwrap();
 
     let current_action_discriminant = controller.action_discriminant();
-    let _jump_counter =
-        air_actions_counter.air_count_for(WaltzTnuaCtrlSchemeActionDiscriminant::Jump);
 
     controller.action(WaltzTnuaCtrlScheme::Jump(TnuaBuiltinJump {
         // Jumping, like crouching, is an action that we either feed or don't. However,
@@ -210,14 +205,14 @@ fn apply_jump(
         // was considered "grounded" - including the first jump (if it was done from the
         // ground) or the initiation of a free fall.
         //
-        // `air_count_for` needs the name of the action to be performed (in this case
+        // `count_for` needs the name of the action to be performed (in this case
         // `TnuaBuiltinJump::NAME`) because if the player is still holding the jump button,
         // we want it to be considered as the same air action number. So, if the player
-        // performs an air jump, before the air jump `air_count_for` will return 1 for any
+        // performs an air jump, before the air jump `count_for` will return 1 for any
         // action, but after it it'll return 1 only for `TnuaBuiltinJump::NAME`
         // (maintaining the jump) and 2 for any other action. Of course, if the player
         // releases the button and press it again it'll return 2.
-        allow_in_air: air_actions_counter.air_count_for(WaltzTnuaCtrlSchemeActionDiscriminant::Jump)
+        allow_in_air: air_actions_counter.count_for(WaltzTnuaCtrlSchemeActionDiscriminant::Jump)
             <= config.actions_in_air
             // we also want to be able to jump from a climb
             || current_action_discriminant == Some(WaltzTnuaCtrlSchemeActionDiscriminant::Climb),

@@ -10,7 +10,9 @@ use bevy_tnua::builtins::{
     TnuaBuiltinDashConfig, TnuaBuiltinJumpConfig, TnuaBuiltinKnockback, TnuaBuiltinWalkConfig,
     TnuaBuiltinWalkHeadroom, TnuaBuiltinWallSlide, TnuaBuiltinWallSlideConfig,
 };
-use bevy_tnua::control_helpers::{TnuaActionsCounter, TnuaAirActionDefinition};
+use bevy_tnua::control_helpers::{
+    TnuaActionSlots, TnuaAirActionDefinition, TnuaAirActionsPlugin, TnuaHasTargetEntity,
+};
 use bevy_tnua::math::AsF32;
 use bevy_tnua::{TnuaConfig, TnuaGhostOverwrites, TnuaScheme};
 
@@ -66,8 +68,46 @@ pub enum WaltzTnuaCtrlScheme {
     Dash(TnuaBuiltinDash),
     Knockback(TnuaBuiltinKnockback),
     WallSlide(TnuaBuiltinWallSlide, Entity),
+    #[scheme(same_trigger(Jump))]
     WallJump(TnuaBuiltinJump),
     Climb(TnuaBuiltinClimb, Entity, Vector3),
+}
+
+impl TnuaAirActionDefinition for WaltzTnuaCtrlScheme {
+    fn is_air_action(action: Self::ActionDiscriminant) -> bool {
+        match action {
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, TnuaActionSlots)]
+#[slots(scheme = WaltzTnuaCtrlScheme, ending(WallSlide, WallJump, Climb))]
+pub struct WaltzAirActionSlots {
+    #[slots(Jump)]
+    jump: usize,
+}
+
+// impl TnuaAirActionDefinition for WaltzTnuaCtrlScheme {
+//     fn is_air_action(action: Self::ActionDiscriminant) -> bool {
+//         match action {
+//             WaltzTnuaCtrlSchemeActionDiscriminant::Jump => true,
+//             WaltzTnuaCtrlSchemeActionDiscriminant::Crouch => false,
+//             WaltzTnuaCtrlSchemeActionDiscriminant::Dash => true,
+//             WaltzTnuaCtrlSchemeActionDiscriminant::Knockback => true,
+//             WaltzTnuaCtrlSchemeActionDiscriminant::WallSlide => true,
+//             WaltzTnuaCtrlSchemeActionDiscriminant::WallJump => true,
+//             WaltzTnuaCtrlSchemeActionDiscriminant::Climb => true,
+//         }
+//     }
+// }
+
+impl TnuaHasTargetEntity for WaltzTnuaCtrlScheme {
+    fn target_entity(action_state: &Self::ActionState) -> Option<Entity> {
+        match action_state {
+            _ => None,
+        }
+    }
 }
 
 impl Default for WaltzTnuaCtrlSchemeConfig {
@@ -115,20 +155,6 @@ impl Default for WaltzTnuaCtrlSchemeConfig {
     }
 }
 
-impl TnuaAirActionDefinition for WaltzTnuaCtrlScheme {
-    fn is_air_action(action: Self::ActionDiscriminant) -> bool {
-        match action {
-            WaltzTnuaCtrlSchemeActionDiscriminant::Jump => true,
-            WaltzTnuaCtrlSchemeActionDiscriminant::Crouch => false,
-            WaltzTnuaCtrlSchemeActionDiscriminant::Dash => true,
-            WaltzTnuaCtrlSchemeActionDiscriminant::Knockback => true,
-            WaltzTnuaCtrlSchemeActionDiscriminant::WallSlide => true,
-            WaltzTnuaCtrlSchemeActionDiscriminant::WallJump => true,
-            WaltzTnuaCtrlSchemeActionDiscriminant::Climb => true,
-        }
-    }
-}
-
 pub struct WaltzCharacterPlugin;
 
 impl Plugin for WaltzCharacterPlugin {
@@ -139,6 +165,10 @@ impl Plugin for WaltzCharacterPlugin {
             FixedUpdate,
         ));
         app.add_plugins(PhysicsDebugPlugin::default());
+        app.add_plugins(TnuaAirActionsPlugin::<WaltzAirActionSlots>::new(
+            // This has to be the same schedule `TnuaControllerPlugin` was registered with
+            FixedUpdate,
+        ));
 
         app.add_plugins(assets::plugin);
         app.add_plugins(sound::plugin);
@@ -246,9 +276,6 @@ fn setup_character_with_entity_cmd(
     // fall-through behavior where the player can intentionally fall through a one-way platform.
     cmd.insert(TnuaSimpleFallThroughPlatformsHelper::default());
 
-    // This helper keeps track of air actions like jumps or air dashes.
-    cmd.insert(TnuaActionsCounter::<WaltzTnuaCtrlScheme>::default());
-
     // handle the equip weapon action
     cmd.observe(equip_weapon);
 }
@@ -275,7 +302,7 @@ fn setup_player(
     ctrl_scheme_cfg_assets: ResMut<Assets<WaltzTnuaCtrlSchemeConfig>>,
 ) {
     let cmd = commands.spawn((
-        SceneRoot(asset_server.load("waltz/player.glb#Scene0")),
+        WorldAssetRoot(asset_server.load("waltz/player.glb#Scene0")),
         GltfSceneHandler {
             names_from: asset_server.load("waltz/player.glb"),
         },
