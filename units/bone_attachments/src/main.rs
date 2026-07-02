@@ -1,5 +1,6 @@
-use bevy::{light::CascadeShadowConfigBuilder, prelude::*};
-use bevy_scene::SceneInstanceReady;
+use bevy::{
+    light::CascadeShadowConfigBuilder, prelude::*, world_serialization::WorldInstanceReady,
+};
 use bone_attachments::{BoneAttachmentsPlugin, scene::SceneAttachmentExt};
 use std::f32::consts::PI;
 
@@ -48,7 +49,8 @@ fn setup_mesh_and_animation(
         index,
     };
 
-    let mesh_scene = SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(GLTF_PATH)));
+    let mesh_scene =
+        WorldAssetRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(GLTF_PATH)));
 
     let mut entity = commands.spawn((animation_to_play, mesh_scene));
 
@@ -60,7 +62,7 @@ fn setup_mesh_and_animation(
 }
 
 fn play_animation_when_ready(
-    trigger: On<SceneInstanceReady>,
+    trigger: On<WorldInstanceReady>,
     mut commands: Commands,
     children: Query<&Children>,
     animations_to_play: Query<&AnimationToPlay>,
@@ -80,7 +82,7 @@ fn play_animation_when_ready(
 }
 
 fn attach_helm(
-    trigger: On<SceneInstanceReady>,
+    trigger: On<WorldInstanceReady>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
@@ -118,7 +120,7 @@ fn setup_camera_and_environment(
     commands.spawn((
         Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, 1.0, -PI / 4.0)),
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         CascadeShadowConfigBuilder {
