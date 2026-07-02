@@ -4,7 +4,6 @@ use std::{
 };
 
 use bevy::prelude::*;
-use bevy::scene::InstanceId;
 use modular_character::{
     ModularAppExt, ModularCharacter, NewModularAsset, ResetChanged, create_modular_segment,
 };
@@ -125,8 +124,10 @@ fn spawn_camera(mut commands: Commands) {
 
 fn spawn_text(mut commands: Commands, asset_server: Res<AssetServer>) {
     let text_font = TextFont {
-        font: asset_server.load("modular_character/FiraSans-Regular.ttf"),
-        font_size: 16.0,
+        font: asset_server
+            .load("modular_character/FiraSans-Regular.ttf")
+            .into(),
+        font_size: FontSize::Px(16.0),
         ..Default::default()
     };
 
@@ -164,7 +165,7 @@ fn spawn_text(mut commands: Commands, asset_server: Res<AssetServer>) {
 
 fn spawn_models(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
-        SceneRoot(
+        WorldAssetRoot(
             asset_server.load(GltfAssetLabel::Scene(0).from_asset(mc_model_path("Witch.gltf"))),
         ),
         Transform::from_xyz(1.0, 0.0, 0.0),
@@ -295,7 +296,7 @@ fn cycle_modular<T: ModularCharacter>(
 
 fn spawn_modular(
     mut commands: Commands,
-    mut scene_spawner: ResMut<SceneSpawner>,
+    mut scene_spawner: ResMut<WorldInstanceSpawner>,
     asset_server: Res<AssetServer>,
 ) {
     let entity = commands

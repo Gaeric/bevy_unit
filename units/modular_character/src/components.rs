@@ -4,7 +4,7 @@ use bevy::{
         entity::Entity,
     },
     prelude::*,
-    scene::InstanceId,
+    world_serialization::InstanceId,
 };
 
 pub trait ModularCharacter: Component<Mutability = Mutable> {
@@ -26,7 +26,7 @@ macro_rules! create_modular_segment {
             #[derive(Debug, Component)]
             pub struct [<ModularCharacter $name>] {
                 pub id: usize,
-                pub instance_id: Option<InstanceId>,
+             pub instance_id: Option<bevy::world_serialization::InstanceId>,
                 pub entities: Vec<Entity>,
             }
             impl ModularCharacter for [<ModularCharacter $name>] {
@@ -34,7 +34,7 @@ macro_rules! create_modular_segment {
                     &mut self.id
                 }
 
-                fn instance_id_mut(&mut self) -> &mut Option<InstanceId> {
+                fn instance_id_mut(&mut self) -> &mut Option<bevy::world_serialization::InstanceId> {
                     &mut self.instance_id
                 }
 
@@ -46,7 +46,7 @@ macro_rules! create_modular_segment {
                     &self.id
                 }
 
-                fn instance_id(&self) -> Option<&InstanceId> {
+                fn instance_id(&self) -> Option<&bevy::world_serialization::InstanceId> {
                     self.instance_id.as_ref()
                 }
 

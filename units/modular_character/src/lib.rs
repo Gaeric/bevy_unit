@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 
-use bevy::scene::SceneInstanceReady;
+use bevy::world_serialization::WorldInstanceReady;
 use bevy::{
     camera::primitives::Aabb, mesh::skinning::SkinnedMesh, render::batching::NoAutomaticBatching,
 };
@@ -43,13 +43,13 @@ type MeshPrimitiveParamSet = (
 );
 
 fn update_modular<T: ModularCharacter>(
-    scene_ready: On<SceneInstanceReady>,
+    scene_ready: On<WorldInstanceReady>,
     mut commands: Commands,
     mut changed_modular: Query<(Entity, &mut T)>,
     mesh_primitives_query: Query<MeshPrimitiveParamSet>,
     children: Query<&Children>,
     names: Query<&Name>,
-    mut scene_spawner: ResMut<SceneSpawner>,
+    mut scene_spawner: ResMut<WorldInstanceSpawner>,
 ) {
     for (entity, mut modular) in &mut changed_modular {
         let Some(scene_instance) = modular.instance_id().copied() else {
@@ -185,7 +185,7 @@ fn update_modular<T: ModularCharacter>(
 fn cycle_modular_observer<T: ModularCharacter>(
     asset: On<NewModularAsset>,
     modular_query: Single<&mut T>,
-    mut scene_spawner: ResMut<SceneSpawner>,
+    mut scene_spawner: ResMut<WorldInstanceSpawner>,
     asset_server: Res<AssetServer>,
 ) {
     let mut modular = modular_query.into_inner();
