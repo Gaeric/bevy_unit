@@ -24,11 +24,11 @@ fn setup_scene(mut command: Commands, asset_server: Res<AssetServer>) {
         Transform::from_xyz(10.0, 10.0, 10.0).looking_to(Vec3::new(20.0, 20.0, 20.0), Vec3::Y),
     ));
 
-    command.spawn(SceneRoot(asset_server.load(
+    command.spawn(WorldAssetRoot(asset_server.load(
         GltfAssetLabel::Scene(0).from_asset("modular_character/female_body.glb"),
     )));
 
-    command.spawn(SceneRoot(asset_server.load(
+    command.spawn(WorldAssetRoot(asset_server.load(
         GltfAssetLabel::Scene(0).from_asset("modular_character/female_top.glb"),
     )));
 }

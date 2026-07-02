@@ -20,20 +20,19 @@ bevy-tnua-avian3d = "0.12.0"
 # control system
 bevy_enhanced_input = "0.26"
 
+# develop ui toolkit
+bevy_perf_ui = "0.7.0"
+
 #
 serde = { version = "1", features = ["derive"] }
 
 # bone attachments
 bone_attachments = { path = "../units/bone_attachments" }
 
-bevy_mod_outline = { git = "https://github.com/PancakesArchitect/bevy_mod_outline", branch = "bevy-0.18" }
+bevy_mod_outline = { git = "https://github.com/komadori/bevy_mod_outline", branch = "master" }
 
+# todo: comment on bevy 0.19
 # frame limit
-[dependencies.bevy_framepace]
-git = "https://github.com/aevyrie/bevy_framepace/"
-branch = "main"
-
-# develop ui toolkit
-[dependencies.iyes_perf_ui]
-git = "https://github.com/blip-radar/iyes_perf_ui/"
-branch = "bevy-0-18"
+# [dependencies.bevy_framepace]
+# git = "https://github.com/aevyrie/bevy_framepace/"
+# branch = "main"

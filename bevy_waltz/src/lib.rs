@@ -13,7 +13,7 @@ mod camera;
 mod character;
 mod control;
 mod level_switch;
-// mod perf;
+mod perf;
 mod utils;
 mod gp;
 

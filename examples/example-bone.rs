@@ -38,7 +38,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.insert_resource(GltfHandle::new(asset_server.load(GLTF_PATH)));
 
-    commands.spawn(SceneRoot(
+    commands.spawn(WorldAssetRoot(
         asset_server.load(GltfAssetLabel::Scene(0).from_asset(GLTF_PATH)),
     ));
 }

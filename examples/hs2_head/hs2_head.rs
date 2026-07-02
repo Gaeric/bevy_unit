@@ -62,7 +62,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         .load(GltfAssetLabel::Scene(0).from_asset("materials/hs2_body_greybox_mini_2.glb"));
 
     commands.spawn((
-        SceneRoot(hs2_head),
+        WorldAssetRoot(hs2_head),
         Transform::from_scale(Vec3::new(10.0, 10.0, 10.0)),
     ));
 }

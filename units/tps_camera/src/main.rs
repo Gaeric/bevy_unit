@@ -49,7 +49,7 @@ fn setup(
         PointLight {
             intensity: 2_000_000.0,
             range: 50.0,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(0.0, 15.0, 0.0),
@@ -119,7 +119,7 @@ fn movement_player(
 }
 
 fn movement_character(
-    trigger: Trigger<CharacterMovement>,
+    trigger: On<CharacterMovement>,
     mut player: Query<&mut Transform, (With<Character>, Without<MainCamera>)>,
     mut camera: Query<&mut Transform, (With<MainCamera>, Without<Character>)>,
 ) {

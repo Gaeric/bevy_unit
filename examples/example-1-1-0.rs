@@ -47,7 +47,7 @@ fn spawn_camera(mut commands: Commands) {
 
 // This demonstrates how to load glTF models using asset_server and spawn their entities in the World
 fn spawn_fox(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.spawn(SceneRoot(
+    commands.spawn(WorldAssetRoot(
         asset_server.load("waltz/scenes/library/Fox.glb#Scene0"),
     ));
 }

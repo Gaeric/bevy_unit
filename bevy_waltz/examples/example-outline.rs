@@ -55,7 +55,7 @@ fn setup(
     // Light
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, 1.0, -PI / 4.)),
@@ -63,7 +63,7 @@ fn setup(
 
     // Fox
     commands.spawn((
-        SceneRoot(asset_server.load("Fox.glb#Scene0")),
+        WorldAssetRoot(asset_server.load("Fox.glb#Scene0")),
         OutlineVolume {
             visible: true,
             width: 3.0,

@@ -41,14 +41,14 @@ fn setup_pica_pica(
     // ));
 
     commands
-        .spawn(SceneRoot(asset_server.load(
+        .spawn(WorldAssetRoot(asset_server.load(
             GltfAssetLabel::Scene(0).from_asset("http://localhost:8000/hs2_torso_2.glb"),
         )))
         .observe(add_raytracing_meshes_on_scene_load);
 
     // commands
     //     .spawn((
-    //         SceneRoot(
+    //         WorldAssetRoot(
     //             asset_server.load(GltfAssetLabel::Scene(0).from_asset("mini_diorama_01.glb")),
     //         ),
     //         Transform::from_scale(Vec3::splat(10.0)),

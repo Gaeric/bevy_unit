@@ -22,7 +22,7 @@ fn main() {
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands
         .spawn((
-            SceneRoot(
+            WorldAssetRoot(
                 asset_server
                     .load(GltfAssetLabel::Scene(0).from_asset("pica_pica/mini_diorama_01.glb")),
             ),
@@ -32,7 +32,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands
         .spawn((
-            SceneRoot(
+            WorldAssetRoot(
                 asset_server.load(GltfAssetLabel::Scene(0).from_asset("pica_pica/robot_01.glb")),
             ),
             Transform::from_scale(Vec3::splat(2.0))

@@ -71,7 +71,7 @@ fn assets_setup(
         graph: graph.clone(),
     });
 
-    commands.spawn(SceneRoot(
+    commands.spawn(WorldAssetRoot(
         asset_server.load(GltfAssetLabel::Scene(0).from_asset("female_base/untitled.glb")),
         // asset_server.load(GltfAssetLabel::Scene(0).from_asset("female_base/ani-model4.gltf")),
     ));
