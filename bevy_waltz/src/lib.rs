@@ -54,6 +54,6 @@ impl Plugin for WaltzPlugin {
         // app.add_systems(Startup, setup_level);
         app.add_plugins((WaltzCharacterPlugin, WaltzCameraPlugin, WaltzControlPlugin));
         app.add_plugins(atmosphere::plugin);
-        // app.add_plugins(perf::plugin);
+        app.add_plugins(perf::plugin);
     }
 }
