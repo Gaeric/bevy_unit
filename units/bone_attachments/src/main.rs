@@ -94,7 +94,8 @@ fn attach_helm(
     //     },
     // );
 
-    let attachment_scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(ATTACHMENT_PATH));
+    let attachment_scene: Handle<WorldAsset> =
+        asset_server.load(GltfAssetLabel::Scene(0).from_asset(ATTACHMENT_PATH));
 
     commands
         .entity(trigger.entity)

@@ -87,7 +87,7 @@ fn scene_attachment_when_ready(
     names: Query<(&Name, Entity)>,
 ) {
     let Ok(parent) = scene_attachments.get(trigger.entity) else {
-        unreachable!("AttachedTo must be available on SceneInstanceReady.");
+        unreachable!("AttachedTo must be available on WorldInstanceReady.");
     };
 
     let mut entity_path: HashMap<Entity, Vec<Name>> = HashMap::new();
