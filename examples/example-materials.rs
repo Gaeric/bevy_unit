@@ -2,21 +2,19 @@ use bevy::{
     feathers::{
         FeathersPlugins,
         controls::{
-            ColorChannel, ColorSlider, ColorSliderProps, SliderBaseColor, SliderProps,
-            color_slider, color_swatch, slider,
+            ColorChannel, ColorSlider, FeathersColorSlider, FeathersColorSwatch, SliderBaseColor,
         },
         dark_theme::create_dark_theme,
+        display::label,
         theme::{ThemeBackgroundColor, UiTheme},
         tokens,
     },
     input_focus::tab_navigation::TabGroup,
     prelude::*,
-    ui_widgets::{
-        SliderPrecision, SliderStep, SliderValue, ValueChange, observe, slider_self_update,
-    },
+    ui_widgets::{SliderValue, ValueChange},
 };
 
-#[derive(Component)]
+#[derive(Component, Default, Clone, Copy, PartialEq, FromTemplate)]
 struct HslSwatch;
 
 #[derive(Resource)]
@@ -40,7 +38,8 @@ fn main() {
         .insert_resource(HslWidgetStates {
             hsl_color: Srgba::new(0.57254905, 0.2509804, 0.05490196, 0.5).into(),
         })
-        .add_systems(Startup, (setup_cube, setup_ui))
+        .add_systems(Startup, scene.spawn())
+        .add_systems(Startup, setup_cube)
         .add_systems(Update, update_colors)
         .add_systems(Update, update_materials)
         .run();
@@ -65,8 +64,12 @@ fn setup_cube(
     ));
 }
 
-fn setup_ui(mut commands: Commands) {
-    commands.spawn((
+fn scene() -> impl SceneList {
+    bsn_list![hsl_slider()]
+}
+
+fn hsl_slider() -> impl Scene {
+    bsn! {
         Node {
             width: percent(20),
             height: percent(30),
@@ -75,103 +78,176 @@ fn setup_ui(mut commands: Commands) {
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
             row_gap: px(10),
-            ..default()
-        },
-        TabGroup::default(),
-        ThemeBackgroundColor(tokens::WINDOW_BG),
-        children![(
-            Node {
-                display: Display::Flex,
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Stretch,
-                justify_content: JustifyContent::Start,
-                padding: UiRect::all(px(8)),
-                row_gap: px(8),
-                width: percent(30),
-                min_width: px(200),
-                ..default()
-            },
-            children![
-                (
-                    Node {
-                        display: Display::Flex,
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::SpaceBetween,
-                        ..default()
-                    },
-                    children![Text("Hsl".to_owned()), color_swatch(HslSwatch),]
-                ),
-                (
-                    color_slider(
-                        ColorSliderProps {
-                            value: 0.5,
-                            channel: ColorChannel::HslHue
-                        },
-                        ()
+        }
+        TabGroup
+        ThemeBackgroundColor(tokens::WINDOW_BG)
+        Children [
+            (
+                Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Stretch,
+                    justify_content: JustifyContent::Start,
+                    padding: UiRect::all(px(8)),
+                    row_gap: px(8),
+                    width: percent(30),
+                    min_width: px(200),
+                }
+                Children [
+                    (
+                        Node {
+                            display: Display::Flex,
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::SpaceBetween,
+                        }
+                        Children[
+                            label("Hsl"),
+                            (@FeathersColorSwatch HslSwatch)
+                        ]
                     ),
-                    observe(
-                        |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
+                    (
+                        @FeathersColorSlider {
+                            @value: 0.5,
+                            @channel: ColorChannel::HslHue
+                        }
+                        AccessibleLabel("Hue Channel")
+                        on(|change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
                             color.hsl_color.hue = change.value
-                        }
-                    )
-                ),
-                (
-                    color_slider(
-                        ColorSliderProps {
-                            value: 0.5,
-                            channel: ColorChannel::HslSaturation
-                        },
-                        ()
+                        })
                     ),
-                    observe(
-                        |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
+                    (
+                        @FeathersColorSlider {
+                            @value: 0.5,
+                            @channel: ColorChannel::HslSaturation
+                        }
+                        AccessibleLabel("Saturation Channel")
+                        on(|change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
                             color.hsl_color.saturation = change.value
-                        }
-                    )
-                ),
-                (
-                    color_slider(
-                        ColorSliderProps {
-                            value: 0.5,
-                            channel: ColorChannel::HslLightness
-                        },
-                        ()
+                        })
                     ),
-                    observe(
-                        |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
+                    (
+                        @FeathersColorSlider {
+                            @value: 0.5,
+                            @channel: ColorChannel::HslLightness
+                        }
+                        AccessibleLabel("Lightness Channel")
+                        on(|change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
                             color.hsl_color.lightness = change.value
-                        }
+                        })
                     )
-                ),
-                (
-                    color_slider(
-                        ColorSliderProps {
-                            value: 0.5,
-                            channel: ColorChannel::Alpha
-                        },
-                        ()
-                    ),
-                    observe(
-                        |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
-                            color.hsl_color.alpha = change.value
-                        }
-                    )
-                ),
-                (
-                    slider(
-                        SliderProps {
-                            max: 100.0,
-                            value: 20.0,
-                            ..default()
-                        },
-                        (SliderStep(1.0), SliderPrecision(2),)
-                    ),
-                    observe(slider_self_update)
-                ),
-            ]
-        ),],
-    ));
+                ]
+            )
+        ]
+    }
 }
+
+// fn setup_ui(mut commands: Commands) {
+//     commands.spawn((
+//         Node {
+//             width: percent(20),
+//             height: percent(30),
+//             align_items: AlignItems::Start,
+//             justify_content: JustifyContent::Start,
+//             display: Display::Flex,
+//             flex_direction: FlexDirection::Column,
+//             row_gap: px(10),
+//             ..default()
+//         },
+//         TabGroup::default(),
+//         ThemeBackgroundColor(tokens::WINDOW_BG),
+//         children![(
+//             Node {
+//                 display: Display::Flex,
+//                 flex_direction: FlexDirection::Column,
+//                 align_items: AlignItems::Stretch,
+//                 justify_content: JustifyContent::Start,
+//                 padding: UiRect::all(px(8)),
+//                 row_gap: px(8),
+//                 width: percent(30),
+//                 min_width: px(200),
+//                 ..default()
+//             },
+//             children![
+//                 (
+//                     Node {
+//                         display: Display::Flex,
+//                         flex_direction: FlexDirection::Row,
+//                         justify_content: JustifyContent::SpaceBetween,
+//                         ..default()
+//                     },
+//                     children![Text("Hsl".to_owned()), color_swatch(HslSwatch),]
+//                 ),
+//                 (
+//                     color_slider(
+//                         ColorSliderProps {
+//                             value: 0.5,
+//                             channel: ColorChannel::HslHue
+//                         },
+//                         ()
+//                     ),
+//                     observe(
+//                         |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
+//                             color.hsl_color.hue = change.value
+//                         }
+//                     )
+//                 ),
+//                 (
+//                     color_slider(
+//                         ColorSliderProps {
+//                             value: 0.5,
+//                             channel: ColorChannel::HslSaturation
+//                         },
+//                         ()
+//                     ),
+//                     observe(
+//                         |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
+//                             color.hsl_color.saturation = change.value
+//                         }
+//                     )
+//                 ),
+//                 (
+//                     color_slider(
+//                         ColorSliderProps {
+//                             value: 0.5,
+//                             channel: ColorChannel::HslLightness
+//                         },
+//                         ()
+//                     ),
+//                     observe(
+//                         |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
+//                             color.hsl_color.lightness = change.value
+//                         }
+//                     )
+//                 ),
+//                 (
+//                     color_slider(
+//                         ColorSliderProps {
+//                             value: 0.5,
+//                             channel: ColorChannel::Alpha
+//                         },
+//                         ()
+//                     ),
+//                     observe(
+//                         |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
+//                             color.hsl_color.alpha = change.value
+//                         }
+//                     )
+//                 ),
+//                 (
+//                     slider(
+//                         SliderProps {
+//                             max: 100.0,
+//                             value: 20.0,
+//                             ..default()
+//                         },
+//                         (SliderStep(1.0), SliderPrecision(2),)
+//                     ),
+//                     observe(slider_self_update)
+//                 ),
+//             ]
+//         ),],
+//     ));
+// }
 
 fn update_materials(
     material_handles: Query<&MeshMaterial3d<StandardMaterial>, With<ActiveEntity>>,
@@ -179,7 +255,7 @@ fn update_materials(
     color: Res<HslWidgetStates>,
 ) {
     for material_handle in material_handles.iter() {
-        if let Some(material) = materials.get_mut(material_handle)
+        if let Some(mut material) = materials.get_mut(material_handle)
             && let Color::Hsla(ref mut hsla) = material.base_color
         {
             *hsla = color.hsl_color;
