@@ -17,12 +17,11 @@ use bevy::{
     transform::components::Transform,
 };
 
-use crate::relationship::AttachingModels;
+use crate::relationship::Attachments;
 
 /// Most frequently used objects of [`bevy_bone_attachments`](self) for easy access
 pub mod prelude {
     pub use super::{
-        // relationship::{AttachedTo, AttachingModels},
         BoneAttachmentsPlugin,
     };
 }
@@ -33,7 +32,7 @@ pub struct BoneAttachmentsPlugin;
 
 impl Plugin for BoneAttachmentsPlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        app.register_type::<relationship::AttachingModels>()
+        app.register_type::<relationship::Attachments>()
             .register_type::<relationship::AttachedTo>();
 
         // app.add_systems(PostUpdate, propagate_transform_to_attachments).after(TransformSystem::TransformPropagate);
@@ -42,7 +41,7 @@ impl Plugin for BoneAttachmentsPlugin {
 }
 
 fn propagate_transform_to_attachments(
-    parents: Query<(Entity, &AttachingModels)>,
+    parents: Query<(Entity, &Attachments)>,
     mut transforms: Query<&mut Transform>,
 ) {
     // let mut parents_without_transform = Vec::new();

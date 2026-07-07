@@ -66,6 +66,7 @@ fn collect_path(
     let mut current_path = parent_path.to_vec();
 
     if let Ok((name, _)) = names.get(node) {
+        tracing::trace!("collect name is {name:?} {}", name.as_str());
         current_path.push(name.clone());
     }
 
@@ -78,6 +79,29 @@ fn collect_path(
     }
 }
 
+/// Observer fired when an attached scene finishes loading.
+///
+/// Binds the attachment's bones to the host's existing animation player so the
+/// attachment (e.g. a weapon) follows the host's (e.g. a character's) animation
+/// without needing its own animation data.
+///
+/// # How it works
+///
+/// 1. Resolve the host entity via the attachment's [`AttachedTo`].
+/// 2. Walk the host's `Children` descendants and collect, for every bone that
+///    already has an [`AnimationTargetId`] and [`AnimatedBy`], a map of
+///    `AnimationTargetId -> AnimatedBy`. This is the host's "which bone is
+///    driven by which player" table.
+/// 3. Walk the attachment scene's own `Children` descendants and record each
+///    node's `Name` path (root-to-self).
+/// 4. For every attachment node, rebuild an `AnimationTargetId` from its name
+///    path and look it up in the host's table. A match means "this attachment
+///    bone corresponds to that host bone", so we insert the same
+///    `AnimationTargetId` and `AnimatedBy` onto the attachment node, letting
+///    the host's `AnimationPlayer` drive it too.
+///
+/// Matching relies on identical bone-name paths between the host and the
+/// attachment scene (e.g. both export `root/Hips/Spine/...`).
 fn scene_attachment_when_ready(
     trigger: On<WorldInstanceReady>,
     mut commands: Commands,
@@ -86,17 +110,49 @@ fn scene_attachment_when_ready(
     animation_targets: Query<(&AnimationTargetId, &AnimatedBy)>,
     names: Query<(&Name, Entity)>,
 ) {
+    // `trigger.entity` is the attachment root that was spawned with
+    // `WorldAssetRoot`. Resolve the host it is attached to via `AttachedTo`.
     let Ok(parent) = scene_attachments.get(trigger.entity) else {
         unreachable!("AttachedTo must be available on WorldInstanceReady.");
     };
 
+    // Collect each attachment node's Name path (root-to-self) to rebuild its
+    // `AnimationTargetId` later.
+    //
+    // We must start from the glTF scene's root nodes, NOT from `trigger.entity`
+    // (the `WorldAssetRoot`). The glTF loader wraps the scene's root nodes in a
+    // container entity (named e.g. "Scene0") that sits as a child of the
+    // `WorldAssetRoot`. The loader computes `AnimationTargetId` starting from
+    // the scene's root nodes — skipping that container — so we must skip both
+    // the `WorldAssetRoot` and the scene wrapper to produce matching paths.
+    //
+    // Hierarchy:
+    //   trigger.entity (WorldAssetRoot)       ← skip
+    //     └─ scene wrapper ("Scene0")         ← skip
+    //         └─ glTF root node ("root")      ← start here, path = ["root"]
+    //             └─ ...
     let mut entity_path: HashMap<Entity, Vec<Name>> = HashMap::new();
-    collect_path(trigger.entity, &[], childrens, names, &mut entity_path);
+    if let Ok(scene_wrappers) = childrens.get(trigger.entity) {
+        for scene_wrapper in scene_wrappers.iter() {
+            if let Ok(root_nodes) = childrens.get(*scene_wrapper) {
+                for root_node in root_nodes.iter() {
+                    collect_path(*root_node, &[], childrens, names, &mut entity_path);
+                }
+            }
+        }
+    }
 
+    // Build the host's animation-target table by walking the host's `Children`
+    // descendants (i.e. the host's own skeleton). We skip the attachment root
+    // itself — we only want bones that belong to the host and already carry
+    // `AnimationTargetId` + `AnimatedBy` from the host's own scene load.
+    // Result: `target_ids` maps `AnimationTargetId -> AnimatedBy`, telling us
+    // which player drives each host bone.
     let mut duplicate_target_ids_on_parent_hierarchy = Vec::new();
     let mut target_ids = HashMap::new();
 
     for child in childrens.iter_descendants(**parent) {
+        // Skip the attachment root; we are only interested in the host's bones.
         if child == trigger.entity {
             continue;
         }
@@ -108,6 +164,9 @@ fn scene_attachment_when_ready(
                 player
             );
 
+            // Keep the first occurrence of each `AnimationTargetId`. Duplicates
+            // are recorded for a warning below; only the first wins so the
+            // binding is deterministic.
             match target_ids.entry(animation_target) {
                 Entry::Vacant(vacancy) => {
                     vacancy.insert(player);
@@ -127,8 +186,19 @@ fn scene_attachment_when_ready(
         );
     }
 
+    // Bind attachment bones to the host's animation player.
+    //
+    // For each attachment node, rebuild an `AnimationTargetId` from its name
+    // path and look it up in the host's `target_ids` table built above.
+    // - Match: the attachment bone shares a name path with a host bone, so
+    //   insert the same `AnimationTargetId` and `AnimatedBy` onto it. The
+    //   host's `AnimationPlayer` will now drive this attachment bone too.
+    // - No match: the attachment node has no corresponding host bone, so it
+    //   is left unanimated (only logged).
     entity_path.iter().for_each(|(entity, path)| {
         let animation_target_id = AnimationTargetId::from_names(path.iter());
+        tracing::info!("animation target id is {animation_target_id:?}");
+
         if let Some(player) = target_ids.get(&animation_target_id) {
             commands
                 .entity(*entity)
