@@ -71,13 +71,13 @@ fn scene() -> impl SceneList {
 fn hsl_slider() -> impl Scene {
     bsn! {
         Node {
-            width: percent(20),
-            height: percent(30),
-            align_items: AlignItems::Start,
-            justify_content: JustifyContent::Start,
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
-            row_gap: px(10),
+            align_items: AlignItems::Stretch,
+            justify_content: JustifyContent::Start,
+            padding: px(8),
+            row_gap: px(8),
+            width: px(220),
         }
         TabGroup
         ThemeBackgroundColor(tokens::WINDOW_BG)
@@ -140,114 +140,6 @@ fn hsl_slider() -> impl Scene {
         ]
     }
 }
-
-// fn setup_ui(mut commands: Commands) {
-//     commands.spawn((
-//         Node {
-//             width: percent(20),
-//             height: percent(30),
-//             align_items: AlignItems::Start,
-//             justify_content: JustifyContent::Start,
-//             display: Display::Flex,
-//             flex_direction: FlexDirection::Column,
-//             row_gap: px(10),
-//             ..default()
-//         },
-//         TabGroup::default(),
-//         ThemeBackgroundColor(tokens::WINDOW_BG),
-//         children![(
-//             Node {
-//                 display: Display::Flex,
-//                 flex_direction: FlexDirection::Column,
-//                 align_items: AlignItems::Stretch,
-//                 justify_content: JustifyContent::Start,
-//                 padding: UiRect::all(px(8)),
-//                 row_gap: px(8),
-//                 width: percent(30),
-//                 min_width: px(200),
-//                 ..default()
-//             },
-//             children![
-//                 (
-//                     Node {
-//                         display: Display::Flex,
-//                         flex_direction: FlexDirection::Row,
-//                         justify_content: JustifyContent::SpaceBetween,
-//                         ..default()
-//                     },
-//                     children![Text("Hsl".to_owned()), color_swatch(HslSwatch),]
-//                 ),
-//                 (
-//                     color_slider(
-//                         ColorSliderProps {
-//                             value: 0.5,
-//                             channel: ColorChannel::HslHue
-//                         },
-//                         ()
-//                     ),
-//                     observe(
-//                         |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
-//                             color.hsl_color.hue = change.value
-//                         }
-//                     )
-//                 ),
-//                 (
-//                     color_slider(
-//                         ColorSliderProps {
-//                             value: 0.5,
-//                             channel: ColorChannel::HslSaturation
-//                         },
-//                         ()
-//                     ),
-//                     observe(
-//                         |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
-//                             color.hsl_color.saturation = change.value
-//                         }
-//                     )
-//                 ),
-//                 (
-//                     color_slider(
-//                         ColorSliderProps {
-//                             value: 0.5,
-//                             channel: ColorChannel::HslLightness
-//                         },
-//                         ()
-//                     ),
-//                     observe(
-//                         |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
-//                             color.hsl_color.lightness = change.value
-//                         }
-//                     )
-//                 ),
-//                 (
-//                     color_slider(
-//                         ColorSliderProps {
-//                             value: 0.5,
-//                             channel: ColorChannel::Alpha
-//                         },
-//                         ()
-//                     ),
-//                     observe(
-//                         |change: On<ValueChange<f32>>, mut color: ResMut<HslWidgetStates>| {
-//                             color.hsl_color.alpha = change.value
-//                         }
-//                     )
-//                 ),
-//                 (
-//                     slider(
-//                         SliderProps {
-//                             max: 100.0,
-//                             value: 20.0,
-//                             ..default()
-//                         },
-//                         (SliderStep(1.0), SliderPrecision(2),)
-//                     ),
-//                     observe(slider_self_update)
-//                 ),
-//             ]
-//         ),],
-//     ));
-// }
 
 fn update_materials(
     material_handles: Query<&MeshMaterial3d<StandardMaterial>, With<ActiveEntity>>,
