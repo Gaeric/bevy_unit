@@ -1,4 +1,8 @@
 * bevy_shine
+  This project is on hold; I need to deliver Waltz first. Survive first, thrive later. 
+
+  Survive first, thrive later.
+
   My interest in high-quality rendering, particularly real-time ray tracing, led me to develop bevy_shine. This project is a ray tracing plugin I created for the Bevy engine to further my understanding of its implementation.
 ** Intro
    bevy_shine is a GI plugin based on wgpu's hardware ray tracing capabilities. It draws inspiration from solari, bevy's built-in ray tracing plugin.
