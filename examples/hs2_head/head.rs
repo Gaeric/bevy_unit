@@ -110,10 +110,12 @@ impl HeadMaterialExt {
             ex_data,
             main_texture: Some(asset_server.load(main_texture_path)),
             detail_texture: Some(asset_server.load(detail_texture_path)),
-            detail_gloss_texture: Some(asset_server.load_with_settings(
-                detail_gloss_texture_path,
-                |settings: &mut ImageLoaderSettings| settings.is_srgb = false,
-            )),
+            detail_gloss_texture: Some(
+                asset_server
+                    .load_builder()
+                    .with_settings(|settings: &mut ImageLoaderSettings| settings.is_srgb = false)
+                    .load(detail_gloss_texture_path),
+            ),
             eyebrow_texture: Some(asset_server.load(eyebrow_texture_path)),
             bump_texture: Some(asset_server.load(bump_texture_path)),
             bump_ex_texture: Some(asset_server.load(bump_ex_texture_path)),

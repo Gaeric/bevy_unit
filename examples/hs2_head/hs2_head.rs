@@ -1,9 +1,9 @@
 use crate::headless::HeadlessPlugin;
 use crate::raytracing::DemoRTPlugin;
 use crate::{camera::OrbitCameraPlugin, mat_convert::MatConvertPlugin};
+use bevy::camera::Hdr;
 use bevy::core_pipeline::Skybox;
 use bevy::prelude::*;
-use bevy::render::view::Hdr;
 use clap::Parser;
 
 mod camera;
@@ -79,7 +79,7 @@ fn added_lights(camera: On<Add, Camera3d>, mut commands: Commands, asset_server:
     commands.spawn((
         DirectionalLight {
             illuminance: light_consts::lux::FULL_DAYLIGHT,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_rotation(Quat::from_xyzw(
@@ -90,10 +90,12 @@ fn added_lights(camera: On<Add, Camera3d>, mut commands: Commands, asset_server:
         )),
     ));
 
+    let skybox_handler = asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2");
+
     commands.entity(camera.entity).insert((
         Skybox {
             brightness: 5000.0,
-            image: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
+            image: Some(skybox_handler.clone()),
             ..default()
         },
         EnvironmentMapLight {

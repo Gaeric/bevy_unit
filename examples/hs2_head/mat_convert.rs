@@ -4,8 +4,7 @@ use bevy::{
     gltf::GltfMaterialName,
     pbr::{ExtendedMaterial, MaterialExtension},
     platform::collections::HashMap,
-    prelude::*,
-    scene::SceneInstanceReady,
+    prelude::*, world_serialization::WorldInstanceReady,
 };
 
 use crate::{
@@ -91,7 +90,7 @@ impl MaterialApplier for DefaultTransparentApplier {
 }
 
 fn update_material(
-    scene_ready: On<SceneInstanceReady>,
+    scene_ready: On<WorldInstanceReady>,
     children: Query<&Children>,
     mesh_materials: Query<(&MeshMaterial3d<StandardMaterial>, &GltfMaterialName)>,
     mut asset_materials: ResMut<Assets<StandardMaterial>>,

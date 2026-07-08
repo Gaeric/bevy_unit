@@ -25,12 +25,14 @@ impl EyelashMaterialExt {
 
     pub fn new(eyeslash_texture_path: AssetPath, asset_server: &AssetServer) -> Self {
         EyelashMaterialExt {
-            eyelash_texture: Some(asset_server.load_with_settings(
-                eyeslash_texture_path,
-                |settings: &mut ImageLoaderSettings| {
-                    settings.is_srgb = true;
-                },
-            )),
+            eyelash_texture: Some(
+                asset_server
+                    .load_builder()
+                    .with_settings(|settings: &mut ImageLoaderSettings| {
+                        settings.is_srgb = true;
+                    })
+                    .load(eyeslash_texture_path),
+            ),
         }
     }
 }

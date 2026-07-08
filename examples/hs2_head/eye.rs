@@ -113,17 +113,19 @@ impl EyeMaterialExt {
             sclera_texture: Some(asset_server.load(sclera_texture_path)),
             iris_texture: Some(asset_server.load(iris_texture_path)),
             highlight_texture: Some(asset_server.load(highlight_texture_path)),
-            pupil_texture: Some(asset_server.load_with_settings(
-                pupil_texture_path,
-                |settings: &mut ImageLoaderSettings| {
-                    settings.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-                        address_mode_u: ImageAddressMode::ClampToBorder,
-                        address_mode_v: ImageAddressMode::ClampToBorder,
-                        border_color: Some(ImageSamplerBorderColor::TransparentBlack),
-                        ..default()
-                    });
-                },
-            )),
+            pupil_texture: Some(
+                asset_server
+                    .load_builder()
+                    .with_settings(|settings: &mut ImageLoaderSettings| {
+                        settings.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+                            address_mode_u: ImageAddressMode::ClampToBorder,
+                            address_mode_v: ImageAddressMode::ClampToBorder,
+                            border_color: Some(ImageSamplerBorderColor::TransparentBlack),
+                            ..default()
+                        });
+                    })
+                    .load(pupil_texture_path),
+            ),
         }
     }
 }

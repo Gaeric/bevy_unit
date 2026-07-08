@@ -7,12 +7,12 @@ use bevy::{
     pbr::{MeshMaterial3d, StandardMaterial},
     prelude::*,
     render::render_resource::TextureUsages,
-    scene::SceneInstanceReady,
     solari::{SolariPlugins, prelude::SolariLighting, scene::RaytracingMesh3d},
+    world_serialization::WorldInstanceReady,
 };
 
 fn add_raytracing_meshes_on_scene_load(
-    scene_ready: On<SceneInstanceReady>,
+    scene_ready: On<WorldInstanceReady>,
     children: Query<&Children>,
     mesh_query: Query<(
         &Mesh3d,
@@ -43,7 +43,7 @@ fn add_raytracing_meshes_on_scene_load(
                 .insert(RaytracingMesh3d(mesh_handle.clone()));
 
             // Ensure meshes are Solari compatible
-            let mesh = meshes.get_mut(mesh_handle).unwrap();
+            let mut mesh = meshes.get_mut(mesh_handle).unwrap();
             if !mesh.contains_attribute(Mesh::ATTRIBUTE_UV_0) {
                 info!("mesh uv0 miss.");
             }

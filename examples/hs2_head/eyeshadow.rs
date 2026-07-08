@@ -25,12 +25,14 @@ impl EyeshadowMaterialExt {
 
     pub fn new(eyeshadow_texture_path: AssetPath, asset_server: &AssetServer) -> Self {
         EyeshadowMaterialExt {
-            eyeshadow_texture: Some(asset_server.load_with_settings(
-                eyeshadow_texture_path,
-                |settings: &mut ImageLoaderSettings| {
-                    settings.is_srgb = true;
-                },
-            )),
+            eyeshadow_texture: Some(
+                asset_server
+                    .load_builder()
+                    .with_settings(|settings: &mut ImageLoaderSettings| {
+                        settings.is_srgb = true;
+                    })
+                    .load(eyeshadow_texture_path),
+            ),
         }
     }
 }
