@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use libdeck::core::agent::AgentId;
 use libdeck::core::interface::Interface;
-use libdeck::core::room::Room;
+use libdeck::core::room::{Room, RoomId};
 use libdeck::core::{agent::Agent, category::Mode};
 
 use libdeck_sample::standard::{
@@ -43,7 +43,7 @@ impl FromWorld for Deck {
         let mut agent_ids: Vec<(AgentId, Box<dyn Interface>)> = Vec::new();
         agent_ids.push((agent.id(), Box::new(GuiInterface::default())));
 
-        let mut room = Room::new(mode, vec![agent, fakeai], deck_cards);
+        let mut room = Room::new(RoomId::new(u32::MAX), mode, vec![agent, fakeai], deck_cards);
         room.ready();
         debug!("{:?}", room);
 
@@ -74,7 +74,7 @@ fn gui_interface(
     }
 
     if input.just_pressed(KeyCode::KeyN) {
-        if let Some(event) = interface.tracker.track_next(&mut deck.room) {
+        if let Some(event) = interface.tracker.track_next(&mut deck.room.analyzer) {
             info!("event is {:?}", event)
         } else {
             info!("unreadable event")

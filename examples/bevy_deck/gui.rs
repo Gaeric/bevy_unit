@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 use libdeck::core::{
     agent::{Agent, AgentId},
+    analytics::EventTracker,
     card::CardArea,
-    event::{CardUseContent, Event, EventTracker},
+    event::{CardUseContent, Event},
     interface::Interface,
     room::Room,
     timing::{Phase, Stage, Timing},
@@ -17,32 +18,32 @@ use std::{
 
 #[derive(Clone, Resource)]
 pub struct GuiInterface {
-    pub events: VecDeque<Arc<RwLock<Event>>>,
+    // pub events: VecDeque<Arc<RwLock<Event>>>,
     pub tracker: EventTracker,
 }
 
-impl Debug for GuiInterface {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let events_debug: Vec<_> = self
-            .events
-            .iter()
-            .map(|arc| match arc.read() {
-                Ok(event) => format!("{:?}", *event),
-                Err(_) => "<Locked>".to_string(),
-            })
-            .collect();
+// impl Debug for GuiInterface {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         let events_debug: Vec<_> = self
+//             .events
+//             .iter()
+//             .map(|arc| match arc.read() {
+//                 Ok(event) => format!("{:?}", *event),
+//                 Err(_) => "<Locked>".to_string(),
+//             })
+//             .collect();
 
-        f.debug_struct("GuiInterface")
-            .field("events", &events_debug)
-            .field("tracker", &self.tracker)
-            .finish()
-    }
-}
+//         f.debug_struct("GuiInterface")
+//             .field("events", &events_debug)
+//             .field("tracker", &self.tracker)
+//             .finish()
+//     }
+// }
 
 impl Default for GuiInterface {
     fn default() -> Self {
         Self {
-            events: VecDeque::new(),
+            // events: VecDeque::new(),
             tracker: EventTracker::new(),
         }
     }
@@ -53,7 +54,7 @@ impl Default for GuiInterface {
 /// For now, we are opting for the latter, And we assume all interface are online.
 impl Interface for GuiInterface {
     fn handle_event(&mut self, room: &mut Room, owner: AgentId) -> Option<Event> {
-        let events = self.tracker.track(&room.analytics);
+        let events = self.tracker.track(&room.analyzer);
         let mut action: Option<Event>;
 
         // 1. first process the room/server request response event
