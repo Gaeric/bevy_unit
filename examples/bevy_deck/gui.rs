@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 use libdeck::core::{
     agent::{Agent, AgentId},
+    analytics::EventTracker,
     card::CardArea,
-    event::{CardUseContent, Event, EventTracker},
+    event::{CardUseContent, Event},
     interface::Interface,
     room::Room,
     timing::{Phase, Stage, Timing},
@@ -43,7 +44,7 @@ impl Default for GuiInterface {
     fn default() -> Self {
         Self {
             events: VecDeque::new(),
-            tracker: EventTracker::new(),
+            tracker: EventTracker::default(),
         }
     }
 }
@@ -53,7 +54,7 @@ impl Default for GuiInterface {
 /// For now, we are opting for the latter, And we assume all interface are online.
 impl Interface for GuiInterface {
     fn handle_event(&mut self, room: &mut Room, owner: AgentId) -> Option<Event> {
-        let events = self.tracker.track(&room.analytics);
+        let events = self.tracker.track(&room.analyzer);
         let mut action: Option<Event>;
 
         // 1. first process the room/server request response event
@@ -97,7 +98,7 @@ impl Interface for GuiInterface {
             return Some(room.next_proc());
         };
 
-        return if timing.eq(Timing::new(owner, Phase::Play, Stage::In)) {
+        return if timing.equal(Timing::new(owner, Phase::Play, Stage::In)) {
             gui_handle_play(room, owner)
         } else {
             debug!("agent {owner:?} driver next proc");
