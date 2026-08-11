@@ -16,6 +16,7 @@ mod eyeshadow;
 mod head;
 mod mat_convert;
 mod raytracing;
+mod texture_bake;
 
 #[derive(Parser, Debug)]
 struct Args {
