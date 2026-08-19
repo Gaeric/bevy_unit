@@ -143,7 +143,12 @@ impl BakeKind {
     }
 
     fn entry_point(self) -> &'static str {
-        "bake"
+        match self {
+            BakeKind::ToneMap => "tonemap bake",
+            BakeKind::Eye => "eye bake",
+            BakeKind::Eyelash => "eyelash bake",
+            BakeKind::Eyeshadow => "eyeshadow bake",
+        }
     }
 
     fn pipeline_index(self) -> usize {
