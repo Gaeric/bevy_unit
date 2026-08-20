@@ -3,13 +3,12 @@
 use std::borrow::Cow;
 
 use bevy::{
-    asset::RenderAssetUsages,
     ecs::system::StaticSystemParam,
     prelude::*,
     render::{
         Render, RenderApp, RenderStartup,
         RenderSystems::{self},
-        extract_resource::ExtractResource,
+        extract_resource::{ExtractResource, ExtractResourcePlugin},
         gpu_readback::{Readback, ReadbackComplete},
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
@@ -18,7 +17,7 @@ use bevy::{
 
 const EYELASH_BAKE_SHADER_PATH: &str = "materials/shaders/hs2_head_bake_eyelash.wgsl";
 const WORKGROUP_SIZE: u32 = 8;
-const SIZE: UVec2 = UVec2::new(2048, 2048);
+const SIZE: UVec2 = UVec2::new(256, 256);
 
 #[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
 pub enum AssetBakeStatus {
@@ -27,9 +26,6 @@ pub enum AssetBakeStatus {
     Ready,
     Dirty,
 }
-
-#[derive(Resource, ExtractResource, Clone)]
-struct ReadbackImage(Handle<Image>);
 
 #[derive(Resource)]
 struct EyelashPipeline {
@@ -50,28 +46,28 @@ struct EyelashBakePlugin;
 
 impl Plugin for EyelashBakePlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(ExtractResourcePlugin::<EyelashImages>::default());
+
+        // app.init_state::<AssetBakeStatus>();
+
         app.add_systems(Startup, setup);
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app.add_systems(RenderStartup, init_compute_pipeline);
         render_app.add_systems(
             Render,
-            prepare_bind_group
-                .in_set(RenderSystems::PrepareBindGroups)
-                .run_if(in_state(AssetBakeStatus::Dirty)),
+            prepare_bind_group.in_set(RenderSystems::PrepareBindGroups), // .run_if(in_state(AssetBakeStatus::Dirty)),
         );
         render_app.add_systems(RenderGraph, compute);
     }
 }
-
-const BUFFER_LEN: usize = 16;
 
 fn setup(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     asset_server: Res<AssetServer>,
 ) {
-    let texture = asset_server.load::<Image>("materials/textures/elelash.png");
+    let texture = asset_server.load::<Image>("materials/c_t_eyelash_04-DXT1.dds");
 
     let mut output = Image::new_target_texture(SIZE.x, SIZE.y, TextureFormat::Rgba32Float, None);
     output.texture_descriptor.usage |= TextureUsages::STORAGE_BINDING;
@@ -135,8 +131,12 @@ fn compute(
     mut render_context: RenderContext,
     pipeline_cache: Res<PipelineCache>,
     pipeline: Res<EyelashPipeline>,
-    bind_group: Res<EyelashBindgroup>,
+    bind_group: Option<Res<EyelashBindgroup>>,
 ) {
+    let Some(bind_group) = bind_group else {
+        return;
+    };
+
     if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) {
         let mut pass =
             render_context
@@ -148,7 +148,7 @@ fn compute(
 
         pass.set_bind_group(0, &bind_group.0, &[]);
         pass.set_pipeline(pipeline);
-        pass.dispatch_workgroups(BUFFER_LEN as u32, 1, 1);
+        pass.dispatch_workgroups(SIZE.x / WORKGROUP_SIZE, SIZE.y / WORKGROUP_SIZE, 1);
     }
 }
 
