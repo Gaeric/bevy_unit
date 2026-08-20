@@ -1,5 +1,6 @@
 //! use compute shader to render the assets to a standard material for rr or raster
 
+use image;
 use std::borrow::Cow;
 
 use bevy::{
@@ -77,9 +78,15 @@ fn setup(
 
     commands
         .spawn(Readback::texture(output.clone()))
-        .observe(|event: On<ReadbackComplete>| {
-            let data: Vec<u32> = event.to_shader_type();
-            info!("image {:?}", data);
+        .observe(move |event: On<ReadbackComplete>, mut commands: Commands| {
+            let data: Vec<f32> = event.to_shader_type();
+            if let Some(img) = image::Rgba32FImage::from_raw(SIZE.x, SIZE.y, data) {
+                let png = image::DynamicImage::ImageRgba32F(img).to_rgba8();
+                if let Err(e) = png.save("bake_output.png") {
+                    warn!("failed to save bake result: {e}");
+                }
+            }
+            commands.entity(event.entity).despawn();
         });
 
     commands.insert_resource(EyelashImages { texture, output });
