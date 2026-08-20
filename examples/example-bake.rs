@@ -111,7 +111,7 @@ fn prepare_bind_group(
     mut param: StaticSystemParam<<EyelashBake as AsBindGroup>::Param>,
     render_device: Res<RenderDevice>,
 ) {
-    let bg = EyelashBake {
+    let Ok(prepared) = EyelashBake {
         origin_texture: images.texture.clone(),
         output: images.output.clone(),
     }
@@ -120,11 +120,14 @@ fn prepare_bind_group(
         &render_device,
         &pipeline_cache,
         &mut param,
-    )
-    .expect("eyelash bake should be available in the render world")
-    .bind_group;
+    ) else {
+        // The source texture or shader asset is still loading asynchronously.
+        // Skip this frame and retry on the next update; keep any previously
+        // prepared bind group intact.
+        return;
+    };
 
-    commands.insert_resource(EyelashBindgroup(bg));
+    commands.insert_resource(EyelashBindgroup(prepared.bind_group));
 }
 
 fn compute(
