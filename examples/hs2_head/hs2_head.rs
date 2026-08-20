@@ -18,6 +18,7 @@ mod mat_convert;
 mod raytracing;
 mod texture_bake;
 mod bake_jobs;
+mod bake;
 
 #[derive(Parser, Debug)]
 struct Args {
