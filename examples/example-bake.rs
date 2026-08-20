@@ -66,26 +66,27 @@ impl Plugin for EyelashBakePlugin {
 
 const BUFFER_LEN: usize = 16;
 
-fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
-    let size = Extent3d {
-        width: BUFFER_LEN as u32,
-        height: 1,
-        ..default()
-    };
+fn setup(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    asset_server: Res<AssetServer>,
+) {
+    let texture = asset_server.load::<Image>("materials/textures/elelash.png");
 
-    let image = images.add(Image::new_uninit(
-        size,
-        TextureDimension::D2,
-        TextureFormat::R32Uint,
-        RenderAssetUsages::RENDER_WORLD,
-    ));
+    let mut output = Image::new_target_texture(SIZE.x, SIZE.y, TextureFormat::Rgba32Float, None);
+    output.texture_descriptor.usage |= TextureUsages::STORAGE_BINDING;
+    output.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+
+    let output = images.add(output);
 
     commands
-        .spawn(Readback::texture(image.clone()))
+        .spawn(Readback::texture(output.clone()))
         .observe(|event: On<ReadbackComplete>| {
             let data: Vec<u32> = event.to_shader_type();
             info!("image {:?}", data);
         });
+
+    commands.insert_resource(EyelashImages { texture, output });
 }
 
 fn init_compute_pipeline(
