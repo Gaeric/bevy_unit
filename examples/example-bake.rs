@@ -76,6 +76,21 @@ fn setup(
 
     let output = images.add(output);
 
+    // NOTE(todo): This readback is only needed if you want to bring the baked
+    // result back to the CPU side (one-shot bake into a static asset, export to
+    // PNG/EXR, or CPU-side verification).
+    //
+    // If you only want to use the baked result at runtime as a material, the
+    // whole readback can be removed: `output` is already a Handle<Image>
+    // (new_target_texture keeps CPU-side zero data and RenderAssetUsages defaults
+    // to MAIN_WORLD | RENDER_WORLD). Just assign it to
+    // StandardMaterial::base_color_texture and the material system will bind its
+    // GpuImage through the handle — no custom pipeline hookup required.
+    //
+    // If you keep the one-shot readback path: only attach Readback after the
+    // compute pass has actually dispatched (otherwise the first event reads the
+    // all-zero initial texture -> fully transparent image), then despawn the
+    // entity after handling the event.
     commands
         .spawn(Readback::texture(output.clone()))
         .observe(move |event: On<ReadbackComplete>, mut commands: Commands| {
