@@ -5,6 +5,8 @@ use std::borrow::Cow;
 
 use bevy::{
     ecs::system::StaticSystemParam,
+    light::light_consts::lux::MOONLESS_NIGHT,
+    mesh::{SphereKind, SphereMeshBuilder},
     prelude::*,
     render::{
         Render, RenderApp, RenderStartup,
@@ -18,7 +20,8 @@ use bevy::{
 
 const EYELASH_LABEL: &str = "eyelash";
 const EYELASH_BAKE_SHADER_PATH: &str = "materials/shaders/hs2_head_bake_eyelash.wgsl";
-const EYELASH_BAKE_TEXTURE: &str = "materials/c_t_eyelash_04-DXT1.dds";
+// const EYELASH_BAKE_TEXTURE: &str = "materials/c_t_eyelash_04-DXT1.dds";
+const EYELASH_BAKE_TEXTURE: &str = "materials/uv_checker_bw.png";
 const WORKGROUP_SIZE: u32 = 8;
 const SIZE: UVec2 = UVec2::new(256, 256);
 
@@ -74,7 +77,7 @@ impl Plugin for EyelashBakePlugin {
         // app.init_state::<AssetBakeState>();
 
         app.add_systems(Startup, setup);
-        app.add_systems(Update, hotkey_compute_texture);
+        app.add_systems(Update, (hotkey_compute_texture, rotate_sphere));
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app.add_systems(RenderStartup, init_compute_pipeline);
@@ -98,6 +101,8 @@ impl Plugin for EyelashBakePlugin {
 fn setup(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
     let texture = asset_server.load::<Image>(EYELASH_BAKE_TEXTURE);
@@ -107,6 +112,37 @@ fn setup(
     image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
     let output = images.add(image);
 
+    let material = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        base_color_texture: Some(output.clone()),
+        ..default()
+    });
+
+    commands.spawn((
+        Mesh3d(meshes.add(SphereMeshBuilder::new(
+            1.0,
+            SphereKind::Uv {
+                sectors: 20,
+                stacks: 20,
+            },
+        ))),
+        MeshMaterial3d(material),
+        Transform::from_xyz(0.0, 0.5, 0.0),
+    ));
+
+    commands.spawn((
+        DirectionalLight {
+            illuminance: MOONLESS_NIGHT,
+            ..default()
+        },
+        Transform::from_xyz(1.0, 1.0, 1.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+
     commands.spawn(RecipeMat::new(
         EYELASH_LABEL,
         EYELASH_BAKE_SHADER_PATH,
@@ -115,6 +151,17 @@ fn setup(
 
     commands.insert_resource(AssetBakeState::Loading);
     commands.insert_resource(EyelashImages { texture, output });
+}
+
+fn rotate_sphere(mut meshes: Query<&mut Transform, With<Mesh3d>>, time: Res<Time>) {
+    // for mut transform in &mut meshes {
+    //     transform.rotation = Quat::from_euler(
+    //         EulerRot::YXZ,
+    //         -time.elapsed_secs(),
+    //         std::f32::consts::FRAC_PI_2 * 3.0,
+    //         0.0,
+    //     );
+    // }
 }
 
 // Readback timing contract:
@@ -231,8 +278,8 @@ fn compute(
 // make eyelash as example
 #[derive(Asset, Clone, Reflect, AsBindGroup)]
 pub struct EyelashBake {
-    #[texture(60)]
-    #[sampler(61)]
+    #[texture(60, visibility(compute))]
+    #[sampler(61, visibility(compute))]
     origin_texture: Handle<Image>,
 
     #[storage_texture(62, image_format = Rgba32Float, access = ReadWrite)]
