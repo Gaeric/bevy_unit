@@ -1,0 +1,264 @@
+#+title: Bake
+#+startup: content
+#+author: Gaeric
+#+HTML_HEAD: <link href="./worg.css" rel="stylesheet" type="text/css">
+#+HTML_HEAD: <link href="/static/css/worg.css" rel="stylesheet" type="text/css">
+#+OPTIONS: ^:{}
+* Bake
+  Texture baking 抽象的设计文档。
+
+  目标：把"一组素材 + 参数"烘焙成一个新的 [[./bake.org#standard-material][StandardMaterial]]。
+  从素材到产物的生成过程，既可以是普通的 CPU 变换，也可以是 compute shader。
+  每个 material 有自己的生成方式；用薄封装对每一个 material 做执行。
+** 背景
+*** 老方案 texture_bake 的问题
+    - [[./bake.org#texture_bake][texture_bake]] 用 =BakeKind= 枚举穷举所有处理类型，并给它们套一套固定 shader 契约
+      （=@compute @workgroup_size(8,8,1)= 入口 =bake=、统一 binding 布局、统一 =BakeParams=）。
+    - 这是"观察了 4 种材质得出一个规律，然后把它当公理"。新材质进来会被硬塞进
+      这个契约，塞不进就崩。
+*** example-bake 的理想形态
+    - [[./bake.org#example-bake][example-bake]] 接近单例形式的理想形态：一个 =EyelashBakePlugin= 服务一种材质。
+    - 难点在于：加入多个 label（多种材质）时，应该抽取它们公用的部分，
+      用薄封装对每一种 material 做执行。
+    - 结论：套用 Bevy 自己的 =MaterialPlugin= 模式。
+      =trait Material=（每个材质声明生成方式）+ =MaterialPlugin<M>=（薄封装，执行渲染管道）。
+      把同一套路搬到 compute baking 上。
+** 核心抽象
+    - 每种 material 是一个**自己的类型**（自己的 shader、layout、入口、CPU 或 GPU），
+      实现 [[./bake.org#recipe-trait][BakeRecipe trait]]。
+    - 一个**薄封装泛型插件** [[./bake.org#recipe-plugin][BakeRecipePlugin<R>]]，
+      把公用管道（pipeline 创建、bind group、dispatch、进度）抽出来。
+    - 多个 material = 多次实例化这个泛型插件。
+*** Recipe 定义 / 实例分离
+    - 定义（definition，注册一次）：=BakeRecipe= trait 的实现 = struct + impl=。
+    - 实例（instance，多个）：=RecipeMat= Component，一个 material 对应一个。
+*** 输入 / 处理 / 输出
+    - 输入：一组素材 =Vec<Handle<Image>>= + 参数 =BakeParams=。
+    - 处理：recipe 声明的生成方式（CPU 函数或 compute shader）。
+    - 输出：一个 baked texture，进一步组装成 [[./bake.org#standard-material][StandardMaterial]]。
+** BakeRecipe trait
+    #+begin_src rust
+      /// 一种材质的生成方式。
+      /// 骨架和 Bevy 的 `Material` trait 同构：每个具体类型自己声明，薄封装负责执行。
+      pub trait BakeRecipe: AsBindGroup + Send + Sync + 'static {
+          /// 与 `RecipeMat.label` 对应，用于把实例路由到正确的 pipeline
+          const LABEL: &'static str;
+
+          fn shader() -> ShaderRef;
+          fn entry_point() -> &'static str;
+
+          /// 输出 storage texture 格式
+          fn output_format() -> TextureFormat {
+              TextureFormat::Rgba32Float
+          }
+
+          /// 由实例数据构造自身（渲染世界建 bind group 时调用）
+          fn new(inputs: &[Handle<Image>], output: Handle<Image>, params: &BakeParams) -> Self;
+
+          /// 可选 CPU 生成路径；`None` = 走 compute
+          fn cpu_bake(
+              &self,
+              inputs: &[&Image],
+              params: &BakeParams,
+          ) -> Option<Result<Image, BakeError>> {
+              None
+          }
+      }
+    #+end_src
+
+    具体例子：把 example-bake 里的 =EyelashBake= 原样搬进来 + 声明
+    #+begin_src rust
+      #[derive(Asset, Clone, Reflect, AsBindGroup)]
+      pub struct EyelashBake {
+          #[texture(60, visibility(compute))]
+          #[sampler(61, visibility(compute))]
+          origin_texture: Handle<Image>,
+
+          #[storage_texture(62, image_format = Rgba32Float, access = ReadWrite)]
+          output: Handle<Image>,
+      }
+
+      impl BakeRecipe for EyelashBake {
+          const LABEL: &'static str = "eyelash";
+          fn shader() -> ShaderRef {
+              "materials/shaders/hs2_head_bake_eyelash.wgsl".into()
+          }
+          fn entry_point() -> &'static str { "bake" }
+          fn new(inputs: &[Handle<Image>], output: Handle<Image>, _params: &BakeParams) -> Self {
+              Self {
+                  origin_texture: inputs[0].clone(),
+                  output,
+              }
+          }
+      }
+    #+end_src
+** BakeRecipePlugin 薄封装
+    把 example-bake 里 =EyelashBakePlugin= 的每一行"通用逻辑"换成泛型 =R=。
+    #+begin_src rust
+      pub struct BakeRecipePlugin<R: BakeRecipe>(PhantomData<R>);
+
+      impl<R: BakeRecipe> Plugin for BakeRecipePlugin<R> {
+          fn build(&self, app: &mut App) {
+              // 主世界：实例收集 + CPU 路径
+              app.add_plugins(ExtractResourcePlugin::<BakeInstances<R>>::default());
+              app.add_systems(Update, collect_instances::<R>);
+              app.add_systems(Update, bake_cpu_jobs::<R>);
+
+              // 渲染世界：GPU 路径（对应 example-bake 的 init/prepare/compute）
+              let render_app = app.sub_app_mut(RenderApp);
+              render_app
+                  .insert_resource(BakePipeline::<R>::default())
+                  .insert_resource(BakeProgress::<R>::default())
+                  .add_systems(RenderStartup, init_pipeline::<R>)
+                  .add_systems(Render, prepare_bind_group::<R>)
+                  .add_systems(RenderGraph, compute::<R>);
+          }
+      }
+    #+end_src
+
+    公用部分对照表：
+    | example-bake 单例函数 | 抽成泛型 | 做的事情 |
+    |-----------------------+----------+----------|
+    | =init_compute_pipeline= | =init_pipeline::<R>= | =R::bind_group_layout_descriptor= + =R::shader= + =R::entry_point= 创建 pipeline |
+    | =prepare_bind_group= | =prepare_bind_group::<R>= | =R::new(...).as_bind_group(...)= 建 bind group |
+    | =compute= | =compute::<R>= | dispatch workgroups |
+    | =BakeProgress= | =BakeProgress<R>= | 按 =output.id()= 记版本，防止重复 dispatch |
+    | =EyelashImages= | =BakeInstances<R>= | 某一种 recipe 的所有实例数据 |
+
+*** 公用状态
+    #+begin_src rust
+      // 公用状态：按 recipe 类型泛化
+      #[derive(Resource)]
+      pub struct BakePipeline<R: BakeRecipe> {
+          layout: BindGroupLayoutDescriptor,
+          pipeline: CachedComputePipelineId,
+          _marker: PhantomData<R>,
+      }
+
+      /// 某一种 recipe 的所有实例（主世界 → 渲染世界，替代 EyelashImages）
+      #[derive(Resource, ExtractResource, Clone, Default)]
+      pub struct BakeInstances<R: BakeRecipe> {
+          pub instances: Vec<BakeInstance>,
+      }
+
+      pub struct BakeInstance {
+          pub inputs: Vec<Handle<Image>>,
+          pub output: Handle<Image>,
+          pub params: BakeParams,
+          pub version: u32,
+      }
+
+      /// 某一种 recipe 的进度（替代隐式"每次重算"）
+      #[derive(Resource, Default)]
+      pub struct BakeProgress<R: BakeRecipe> {
+          last_baked: HashMap<AssetId<Image>, u32>,
+          _marker: PhantomData<R>,
+      }
+    #+end_src
+
+*** prepare_bind_group::<R> 示意
+    #+begin_src rust
+      fn prepare_bind_group<R: BakeRecipe>(
+          mut commands: Commands,
+          instances: Res<BakeInstances<R>>,
+          pipeline: Res<BakePipeline<R>>,
+          pipeline_cache: Res<PipelineCache>,
+          mut param: StaticSystemParam<<R as AsBindGroup>::Param>,
+          render_device: Res<RenderDevice>,
+          progress: Res<BakeProgress<R>>,
+      ) {
+          for inst in &instances.instances {
+              if progress.last_baked.get(&inst.output.id()) == Some(&inst.version) {
+                  continue;
+              }
+              let recipe = R::new(&inst.inputs, inst.output.clone(), &inst.params);
+              if let Ok(prepared) = recipe.as_bind_group(
+                  &pipeline.layout,
+                  &render_device,
+                  &pipeline_cache,
+                  &mut param,
+              ) {
+                  commands.insert_resource(BakeBindGroup::<R>(
+                      inst.output.clone(),
+                      prepared.bind_group,
+                  ));
+              }
+          }
+      }
+    #+end_src
+** 注册：多个 label = 多次实例化薄封装
+    #+begin_src rust
+      app.add_plugins((
+          BakeRecipePlugin::<EyelashBake>::default(),
+          BakeRecipePlugin::<ToneMapBake>::default(),
+          BakeRecipePlugin::<EyeBake>::default(),
+      ));
+    #+end_src
+
+    每种 material 一个类型 → 一个 =BakeRecipePlugin<R>= 实例。
+    注册一种新 material 只需要：写一个 struct + impl =BakeRecipe=，再加一行 add_plugins。
+    runner 代码零改动——这就是"薄封装对每一个 material 做执行"。
+** 实例数据流
+    #+begin_src rust
+      #[derive(Component)]
+      pub struct RecipeMat {
+          pub label: &'static str,
+          pub inputs: Vec<Handle<Image>>,
+          pub output: Handle<Image>,
+          pub params: BakeParams,
+          pub version: u32, // rebake 时 ++（替代原来的 BakeRequest.version）
+      }
+    #+end_src
+
+    #+begin_example
+      setup 里 spawn 多个 entity：
+        [Mesh3d, MeshMaterial3d(StandardMaterial{ base_color_texture: Some(output), .. }),
+         RecipeMat{ label: "eyelash", inputs, output, params, version: 1 }]
+
+      collect_instances::<R>（主世界 Update）
+        遍历 Query<&RecipeMat>，label == R::LABEL 的写进 BakeInstances<R>
+            | ExtractResource 每帧克隆到渲染世界
+            v
+      prepare_bind_group::<R>（Render）
+        version 未 bake → R::new(...).as_bind_group() → BakeBindGroup<R>
+            v
+      compute::<R>（RenderGraph）
+        dispatch → 记 BakeProgress<R>
+    #+end_example
+
+    每个 label 的实例被 =collect_instances::<R>= 分流到自己的 =BakeInstances<R>=，
+    互不干扰，单例形态保留。
+** CPU 路径
+    同一套 =BakeRecipe=，=cpu_bake= 返回 =Some= 的类型由主世界的 =bake_cpu_jobs::<R>= 执行：
+
+    - 等输入素材加载完成（=Assets<Image>=）
+    - 调用 =recipe.cpu_bake(...)=
+    - =images.insert(output, result)=
+    - 标记 progress，渲染世界那边自然跳过（progress 已标记，=prepare_bind_group::<R>= 会 =continue=）
+** StandardMaterial
+    输出的组装：recipe 负责烤出 texture；组装 standard material 是薄薄一层、由调用方做：
+    #+begin_src rust
+      let material = materials.add(StandardMaterial {
+          base_color_texture: Some(output.clone()), // 就是 recipe 的 output
+          ..default()
+      });
+    #+end_src
+    与 example-bake 现状一致（它已经把 =output= 直接塞进 =StandardMaterial=）。
+** 问题对应
+    - 加入多个 label → 多个 =BakeRecipePlugin<R>= 实例化，每个 =LABEL= 不同
+    - 抽取公用部分 → =BakePipeline<R>= /=BakeInstances<R>= /=BakeProgress<R>= + =init/prepare/compute= 泛型系统
+    - 每个 material 有自己的生成方式 → 每个 struct impl =BakeRecipe=（shader/entry/layout 都是自己的）
+    - 薄封装对每个 material 执行 → =BakeRecipePlugin<R>= 用 =AsBindGroup= 通用地跑 pipeline/bind group/dispatch
+** 待确认 / 后续
+    - [ ] =BakeParams= 先用共享的简单 POD（=tint: Vec4= 之类），还是每个 recipe 用自己的参数类型
+      （后者 =R::new= 的 params 参数需要类型擦除，会复杂一点）
+    - [ ] 输出格式统一 =Rgba16Float= 还是每 recipe 声明 =output_format()=
+    - [ ] CPU 路径 v1 是否同步执行（大图再考虑 =AsyncComputeTaskPool=）
+    - [ ] bindless 模式是否作为 GPU 路径的可选项平移过来
+    - [ ] 完成信号 =BakeDone= / readback 是否保留（对多实例泛化）
+** 附录：相关代码位置
+    - 新设计示例：=examples/example-bake.rs=
+    - 老方案：=examples/hs2_head/texture_bake.rs=、=examples/hs2_head/bake_jobs.rs=
+    - 参考：=examples/hs2_head/bake/mod.rs=
+    - 材质扩展：=examples/hs2_head/mat_convert.rs=、=head.rs=、=eye.rs=、=body.rs=
+    - shader：=assets/materials/shaders/hs2_head_bake_eyelash.wgsl=
