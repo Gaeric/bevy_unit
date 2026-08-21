@@ -16,12 +16,31 @@ use bevy::{
     },
 };
 
+const EYELASH_LABEL: &str = "eyelash";
 const EYELASH_BAKE_SHADER_PATH: &str = "materials/shaders/hs2_head_bake_eyelash.wgsl";
+const EYELASH_BAKE_TEXTURE: &str = "materials/c_t_eyelash_04-DXT1.dds";
 const WORKGROUP_SIZE: u32 = 8;
 const SIZE: UVec2 = UVec2::new(256, 256);
 
-#[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
-pub enum AssetBakeStatus {
+#[derive(Component)]
+pub struct RecipeMat {
+    label: &'static str,
+    shader: &'static str,
+    output: Handle<Image>,
+}
+
+impl RecipeMat {
+    fn new(label: &'static str, shader: &'static str, output: Handle<Image>) -> Self {
+        Self {
+            label,
+            shader,
+            output,
+        }
+    }
+}
+
+#[derive(Resource, ExtractResource, Default, Clone, PartialEq)]
+pub enum AssetBakeState {
     #[default]
     Loading,
     Ready,
@@ -47,19 +66,32 @@ struct EyelashBakePlugin;
 
 impl Plugin for EyelashBakePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ExtractResourcePlugin::<EyelashImages>::default());
+        app.add_plugins((
+            ExtractResourcePlugin::<EyelashImages>::default(),
+            ExtractResourcePlugin::<AssetBakeState>::default(),
+        ));
 
-        // app.init_state::<AssetBakeStatus>();
+        // app.init_state::<AssetBakeState>();
 
         app.add_systems(Startup, setup);
+        app.add_systems(Update, hotkey_compute_texture);
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app.add_systems(RenderStartup, init_compute_pipeline);
         render_app.add_systems(
             Render,
-            prepare_bind_group.in_set(RenderSystems::PrepareBindGroups), // .run_if(in_state(AssetBakeStatus::Dirty)),
+            prepare_bind_group
+                .in_set(RenderSystems::PrepareBindGroups)
+                .run_if(resource_exists_and_equals::<AssetBakeState>(
+                    AssetBakeState::Dirty,
+                )),
         );
-        render_app.add_systems(RenderGraph, compute);
+        render_app.add_systems(
+            RenderGraph,
+            compute.run_if(resource_exists_and_equals::<AssetBakeState>(
+                AssetBakeState::Dirty,
+            )),
+        );
     }
 }
 
@@ -68,43 +100,58 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     asset_server: Res<AssetServer>,
 ) {
-    let texture = asset_server.load::<Image>("materials/c_t_eyelash_04-DXT1.dds");
+    let texture = asset_server.load::<Image>(EYELASH_BAKE_TEXTURE);
 
-    let mut output = Image::new_target_texture(SIZE.x, SIZE.y, TextureFormat::Rgba32Float, None);
-    output.texture_descriptor.usage |= TextureUsages::STORAGE_BINDING;
-    output.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+    let mut image = Image::new_target_texture(SIZE.x, SIZE.y, TextureFormat::Rgba32Float, None);
+    image.texture_descriptor.usage |= TextureUsages::STORAGE_BINDING;
+    image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+    let output = images.add(image);
 
-    let output = images.add(output);
+    commands.spawn(RecipeMat::new(
+        EYELASH_LABEL,
+        EYELASH_BAKE_SHADER_PATH,
+        output.clone(),
+    ));
 
-    // NOTE(todo): This readback is only needed if you want to bring the baked
-    // result back to the CPU side (one-shot bake into a static asset, export to
-    // PNG/EXR, or CPU-side verification).
-    //
-    // If you only want to use the baked result at runtime as a material, the
-    // whole readback can be removed: `output` is already a Handle<Image>
-    // (new_target_texture keeps CPU-side zero data and RenderAssetUsages defaults
-    // to MAIN_WORLD | RENDER_WORLD). Just assign it to
-    // StandardMaterial::base_color_texture and the material system will bind its
-    // GpuImage through the handle — no custom pipeline hookup required.
-    //
-    // If you keep the one-shot readback path: only attach Readback after the
-    // compute pass has actually dispatched (otherwise the first event reads the
-    // all-zero initial texture -> fully transparent image), then despawn the
-    // entity after handling the event.
-    commands
-        .spawn(Readback::texture(output.clone()))
-        .observe(move |event: On<ReadbackComplete>, mut commands: Commands| {
-            let data: Vec<f32> = event.to_shader_type();
-            if let Some(img) = image::Rgba32FImage::from_raw(SIZE.x, SIZE.y, data) {
-                let png = image::DynamicImage::ImageRgba32F(img).to_rgba8();
-                if let Err(e) = png.save("bake_output.png") {
-                    warn!("failed to save bake result: {e}");
-                }
-            }
-            commands.entity(event.entity).despawn();
-        });
-
+    commands.insert_resource(AssetBakeState::Loading);
     commands.insert_resource(EyelashImages { texture, output });
+}
+
+// Readback timing contract:
+// `Readback` copies the output texture and fires `ReadbackComplete` on the very
+// first frame it is spawned. Within a frame `compute` (on `RenderGraph`) always
+// runs before the readback copy node, so once the source texture and the compute
+// pipeline are ready, a single R press captures the current bake. Guaranteeing
+// that "ready" state (e.g. gating this on asset load state) is the caller's /
+// other modules' responsibility — it is intentionally NOT handled here to keep
+// this plugin's flow minimal. Requesting a bake before resources are ready may
+// capture an empty texture.
+fn hotkey_compute_texture(
+    mut commands: Commands,
+    input: Res<ButtonInput<KeyCode>>,
+    mut bake: ResMut<AssetBakeState>,
+    recipe_mat: Single<&RecipeMat>,
+) {
+    if input.just_pressed(KeyCode::KeyR) {
+        *bake = AssetBakeState::Dirty;
+        let recipe_mat = recipe_mat.into_inner();
+        commands
+            .spawn(Readback::texture(recipe_mat.output.clone()))
+            .observe(save_img);
+    }
+}
+
+fn save_img(event: On<ReadbackComplete>, mut commands: Commands, mut bake: ResMut<AssetBakeState>) {
+    info!("readback image to cpu");
+    let data: Vec<f32> = event.to_shader_type();
+    if let Some(img) = image::Rgba32FImage::from_raw(SIZE.x, SIZE.y, data) {
+        let png = image::DynamicImage::ImageRgba32F(img).to_rgba8();
+        if let Err(e) = png.save("bake_output.png") {
+            warn!("failed to save bake result: {e}");
+        }
+    }
+    commands.entity(event.entity).despawn();
+    *bake = AssetBakeState::Ready;
 }
 
 fn init_compute_pipeline(
@@ -133,6 +180,8 @@ fn prepare_bind_group(
     mut param: StaticSystemParam<<EyelashBake as AsBindGroup>::Param>,
     render_device: Res<RenderDevice>,
 ) {
+    info!("prepare bindgroup");
+
     let Ok(prepared) = EyelashBake {
         origin_texture: images.texture.clone(),
         output: images.output.clone(),
@@ -158,9 +207,11 @@ fn compute(
     pipeline: Res<EyelashPipeline>,
     bind_group: Option<Res<EyelashBindgroup>>,
 ) {
-    let Some(bind_group) = bind_group else {
+    let Some(ref bind_group) = bind_group else {
         return;
     };
+
+    info!("compute");
 
     if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) {
         let mut pass =
