@@ -153,15 +153,21 @@ fn setup(
     commands.insert_resource(EyelashImages { texture, output });
 }
 
+// `SphereMeshBuilder::uv` generates the sphere with its poles aligned to the
+// Z axis, while Bevy's scene convention uses Y as the up axis. Apply this
+// fixed rotation to align the sphere with the expected world orientation.
+// The original `extended_material_bindless` example includes the same
+// correction as part of its animated rotation. Without it, the sphere appears
+// tilted when it is stationary, even though the UV mapping itself is correct.
 fn rotate_sphere(mut meshes: Query<&mut Transform, With<Mesh3d>>, time: Res<Time>) {
-    // for mut transform in &mut meshes {
-    //     transform.rotation = Quat::from_euler(
-    //         EulerRot::YXZ,
-    //         -time.elapsed_secs(),
-    //         std::f32::consts::FRAC_PI_2 * 3.0,
-    //         0.0,
-    //     );
-    // }
+    for mut transform in &mut meshes {
+        transform.rotation = Quat::from_euler(
+            EulerRot::YXZ,
+            -time.elapsed_secs(),
+            std::f32::consts::FRAC_PI_2 * 3.0,
+            0.0,
+        );
+    }
 }
 
 // Readback timing contract:
