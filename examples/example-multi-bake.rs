@@ -10,9 +10,9 @@ use bevy::{
     platform::collections::HashMap,
     prelude::*,
     render::{
-        MainWorld, Render, RenderApp, RenderStartup, RenderSystems,
+        ExtractSchedule, MainWorld, Render, RenderApp, RenderStartup, RenderSystems,
         extract_resource::{ExtractResource, ExtractResourcePlugin},
-        gpu_readback::ReadbackComplete,
+        gpu_readback::{Readback, ReadbackComplete},
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
     },
@@ -47,7 +47,7 @@ pub struct BakedMaterial<M: Asset> {
     pub textures: Vec<(BakeChannel, Handle<Image>)>,
 }
 
-pub trait BakeRecipe: AsBindGroup + Send + Sync + 'static {
+pub trait BakeRecipe: AsBindGroup + Send + Sync + Clone + 'static {
     type Params: Clone + Send + Sync + Default + 'static;
 
     type Output: Asset;
@@ -98,7 +98,7 @@ pub trait BakeRecipe: AsBindGroup + Send + Sync + 'static {
             inputs,
             outputs,
             params,
-            version: 1,
+            version: 0,
         };
         (recipe_mat, BakedMaterial { material, textures })
     }
@@ -160,36 +160,31 @@ impl BakeRecipe for EyelashBake {
     }
 }
 
-#[derive(Resource, ExtractResource, Clone, Default)]
-struct BakeRequest {
-    version: u32,
-}
-
 #[derive(Event)]
-struct BakeDone;
+struct BakeDone<R: BakeRecipe>(Vec<Handle<Image>>, PhantomData<R>);
 
 // #[derive(Resource, Default)]
 // struct BakeProgress {
 //     last_baked: u32,
 // }
 
-#[derive(Resource, Default)]
-struct PendingBakeSignal(bool);
-
 #[derive(Resource)]
-struct EyelashPipeline {
-    pipeline: CachedComputePipelineId,
-    layout: BindGroupLayoutDescriptor,
-}
+struct PendingBakeSignal<R: BakeRecipe>(Option<Vec<Handle<Image>>>, PhantomData<R>);
 
-#[derive(Resource)]
-struct EyelashBindgroup(BindGroup);
+// #[derive(Resource)]
+// struct EyelashPipeline {
+//     pipeline: CachedComputePipelineId,
+//     layout: BindGroupLayoutDescriptor,
+// }
 
-#[derive(Resource, ExtractResource, Clone)]
-struct EyelashImages {
-    texture: Handle<Image>,
-    output: Handle<Image>,
-}
+// #[derive(Resource)]
+// struct EyelashBindgroup(BindGroup);
+
+// #[derive(Resource, ExtractResource, Clone)]
+// struct EyelashImages {
+//     texture: Handle<Image>,
+//     output: Handle<Image>,
+// }
 
 struct EyelashBakePlugin;
 
@@ -199,6 +194,7 @@ impl Plugin for EyelashBakePlugin {
 
         app.add_systems(Startup, setup);
         app.add_systems(Update, rotate_sphere);
+        app.add_systems(Update, hotkey_compute_texture);
     }
 }
 
@@ -222,7 +218,7 @@ fn setup(
 
     commands.spawn((
         Mesh3d(meshes.add(SphereMeshBuilder::new(
-            0.001,
+            1.0,
             SphereKind::Uv {
                 sectors: 20,
                 stacks: 20,
@@ -252,6 +248,13 @@ fn setup(
 pub struct BakePipeline<R: BakeRecipe> {
     layout: BindGroupLayoutDescriptor,
     pipeline: CachedComputePipelineId,
+    _marker: PhantomData<R>,
+}
+
+#[derive(Resource)]
+pub struct BakeBindGroup<R: BakeRecipe> {
+    pub outputs: Vec<Handle<Image>>,
+    pub bind_group: BindGroup,
     _marker: PhantomData<R>,
 }
 
@@ -288,41 +291,58 @@ impl<R: BakeRecipe> Default for BakeRecipePlugin<R> {
     }
 }
 
-impl<R: BakeRecipe + Clone> Plugin for BakeRecipePlugin<R> {
+impl<R: BakeRecipe> Plugin for BakeRecipePlugin<R> {
     fn build(&self, app: &mut App) {
         app.add_plugins(ExtractResourcePlugin::<RecipeMat<R>>::default());
         app.add_systems(Update, bake_cpu_jobs::<R>);
+        app.add_observer(on_bake_done::<R>);
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app.insert_resource(BakePipeline::<R>::default());
         render_app.insert_resource(BakeProgress::<R>::default());
+        render_app.insert_resource(PendingBakeSignal::<R>(None, PhantomData));
+        render_app.add_systems(ExtractSchedule, forward_bake_signal::<R>);
         render_app.add_systems(RenderStartup, init_compute_pipeline::<R>);
         render_app.add_systems(
             Render,
-            prepare_bind_group::<R>.in_set(RenderSystems::PrepareBindGroups),
+            prepare_bind_group::<R>
+                .in_set(RenderSystems::PrepareBindGroups)
+                .run_if(bake_pending::<R>),
         );
-        render_app.add_systems(RenderGraph, compute::<R>);
+        render_app.add_systems(RenderGraph, compute::<R>.run_if(bake_pending::<R>));
     }
 }
 
 fn bake_cpu_jobs<R>() {}
 
-// fn on_bake_done(_event: On<BakeDone>, mut commands: Commands, recipe_mat: Res<RecipeMat>) {
-//     commands
-//         .spawn(Readback::texture(recipe_mat.output.clone()))
-//         .observe(save_img);
-// }
-
-fn forward_bake_signal(mut main_world: ResMut<MainWorld>, mut signal: ResMut<PendingBakeSignal>) {
-    if signal.0 {
-        signal.0 = false;
-        main_world.trigger(BakeDone);
+fn forward_bake_signal<R: BakeRecipe>(
+    mut main_world: ResMut<MainWorld>,
+    mut signal: ResMut<PendingBakeSignal<R>>,
+) {
+    if let Some(outputs) = signal.0.take() {
+        main_world.trigger(BakeDone::<R>(outputs, PhantomData));
     }
 }
 
-// fn bake_pending(request: Res<BakeRequest>, progress: Res<BakeProgress>) -> bool {
-//     request.version > progress.last_baked
-// }
+fn on_bake_done<R: BakeRecipe>(event: On<BakeDone<R>>, mut commands: Commands) {
+    for handle in &event.0 {
+        commands
+            .spawn(Readback::texture(handle.clone()))
+            .observe(save_img);
+    }
+}
+
+fn bake_pending<R: BakeRecipe>(
+    recipe_mat: Res<RecipeMat<R>>,
+    progress: Res<BakeProgress<R>>,
+) -> bool {
+    let last_baked = progress
+        .last_baked
+        .get(&recipe_mat.outputs[0].id())
+        .copied()
+        .unwrap_or(0);
+    last_baked < recipe_mat.version
+}
 
 // `SphereMeshBuilder::uv` generates the sphere with its poles aligned to the
 // Z axis, while Bevy's scene convention uses Y as the up axis. Apply this
@@ -341,20 +361,33 @@ fn rotate_sphere(mut meshes: Query<&mut Transform, With<Mesh3d>>, time: Res<Time
     }
 }
 
-// fn hotkey_compute_texture(input: Res<ButtonInput<KeyCode>>, mut request: ResMut<BakeRequest>) {
-//     if input.just_pressed(KeyCode::KeyR) {
-//         request.version += 1;
-//     }
-// }
+fn hotkey_compute_texture(
+    input: Res<ButtonInput<KeyCode>>,
+    mut request: ResMut<RecipeMat<EyelashBake>>,
+) {
+    if input.just_pressed(KeyCode::KeyR) {
+        request.version += 1;
+    }
+}
 
-fn save_img(event: On<ReadbackComplete>, mut commands: Commands) {
+fn save_img(
+    event: On<ReadbackComplete>,
+    mut commands: Commands,
+    images: Res<Assets<Image>>,
+    readbacks: Query<&Readback>,
+) {
+    let Ok(Readback::Texture(handle)) = readbacks.get(event.entity) else {
+        return;
+    };
+    let Some(source) = images.get(handle) else {
+        warn!("bake output image not found");
+        return;
+    };
+
     info!("readback image to cpu");
+
     let img = Image::new(
-        Extent3d {
-            width: SIZE.x,
-            height: SIZE.y,
-            depth_or_array_layers: 1,
-        },
+        source.texture_descriptor.size,
         TextureDimension::D2,
         event.data.clone(),
         TextureFormat::Rgba8UnormSrgb,
@@ -365,6 +398,8 @@ fn save_img(event: On<ReadbackComplete>, mut commands: Commands) {
         if let Err(e) = dyn_img.save("bake_output.png") {
             warn!("failed to save bake result: {e}");
         }
+    } else {
+        warn!("try into dynamic failed");
     }
 
     commands.entity(event.entity).despawn();
@@ -379,30 +414,40 @@ fn init_compute_pipeline<R: BakeRecipe>(
     render_device: Res<RenderDevice>,
 ) {
     let layout = R::bind_group_layout_descriptor(&render_device);
-    let shader = asset_server.load(EYELASH_BAKE_SHADER_PATH);
+    let shader = match R::shader() {
+        ShaderRef::Handle(handle) => handle,
+        ShaderRef::Path(path) => asset_server.load(path),
+        ShaderRef::Default => panic!("BakeRecipe::shader() must not return ShaderRef::Default"),
+    };
+
     let pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
         layout: vec![layout.clone()],
         shader,
-        entry_point: Some(Cow::from("bake")),
+        entry_point: Some(Cow::from(R::entry_point())),
         ..default()
     });
 
-    commands.insert_resource(EyelashPipeline { layout, pipeline });
+    commands.insert_resource(BakePipeline::<R> {
+        layout,
+        pipeline,
+        _marker: PhantomData,
+    });
 }
 
 fn prepare_bind_group<R: BakeRecipe>(
     mut commands: Commands,
     instance: Res<RecipeMat<R>>,
-    pipeline: Res<EyelashPipeline>,
+    pipeline: Res<BakePipeline<R>>,
     pipeline_cache: Res<PipelineCache>,
     mut param: StaticSystemParam<<R as AsBindGroup>::Param>,
     render_device: Res<RenderDevice>,
     progress: Res<BakeProgress<R>>,
 ) {
-    info!("prepare bindgroup");
     if progress.last_baked.get(&instance.outputs[0].id()) == Some(&instance.version) {
         return;
     }
+
+    info!("prepare bindgroup");
 
     let recipe = R::new(&instance.inputs, &instance.outputs, &instance.params);
 
@@ -412,24 +457,27 @@ fn prepare_bind_group<R: BakeRecipe>(
         &pipeline_cache,
         &mut param,
     ) {
-        commands.insert_resource(EyelashBindgroup(prepared.bind_group));
+        commands.insert_resource(BakeBindGroup::<R> {
+            outputs: instance.outputs.clone(),
+            bind_group: prepared.bind_group,
+            _marker: PhantomData,
+        });
     };
 }
 
 fn compute<R: BakeRecipe>(
     mut render_context: RenderContext,
     pipeline_cache: Res<PipelineCache>,
-    pipeline: Res<EyelashPipeline>,
-    bind_group: Option<Res<EyelashBindgroup>>,
+    pipeline: Res<BakePipeline<R>>,
+    bind_group: Option<Res<BakeBindGroup<R>>>,
     instance: Res<RecipeMat<R>>,
     mut progress: ResMut<BakeProgress<R>>,
-    // mut signal: ResMut<PendingBakeSignal>,
+    mut signal: ResMut<PendingBakeSignal<R>>,
 ) {
     let Some(ref bind_group) = bind_group else {
         return;
     };
 
-    info!("compute");
     if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) {
         let mut pass =
             render_context
@@ -439,7 +487,7 @@ fn compute<R: BakeRecipe>(
                     ..default()
                 });
 
-        pass.set_bind_group(0, &bind_group.0, &[]);
+        pass.set_bind_group(0, &bind_group.bind_group, &[]);
         pass.set_pipeline(pipeline);
         pass.dispatch_workgroups(SIZE.x / WORKGROUP_SIZE, SIZE.y / WORKGROUP_SIZE, 1);
 
@@ -447,7 +495,7 @@ fn compute<R: BakeRecipe>(
             .last_baked
             .insert(instance.outputs[0].id(), instance.version);
 
-        // signal.0 = true;
+        signal.0 = Some(instance.outputs.clone());
     }
 }
 

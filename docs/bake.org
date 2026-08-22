@@ -73,6 +73,26 @@
       }
     #+end_src
 
+    =BakeOutputSpec.format= 是**精度策略**：同一通道选不同格式，最终色彩精度差别很大。
+
+    | 格式 | 每通道等级 | 特点 | 建议用途 |
+    |------+------------+------+----------|
+    | =Rgba8UnormSrgb= | 256 | sRGB 编码，码字密度给暗部，感知均匀 | =BaseColor=、显示用颜色 |
+    | =Rgba8Unorm= | 256 | 线性，暗部 banding 明显 | 粗糙度 / 遮罩等线性槽位 |
+    | =Rgba16Unorm= | 65536 | 线性、无肉眼 banding | =NormalMap=（或 =Rgba16Float=） |
+    | =Rgba16Float= | ~1024/倍频程 | 半精度：相对精度 2⁻¹¹≈0.05%，动态范围到 65504 | =NormalMap=、=Emissive=、HDR 数据 |
+    | =Rgba32Float= | 海量 | 全精度，实际无损失，4 倍带宽 | 中间量 / 数据类，慎用 |
+
+    决定精度的三个维度：
+    - **位深**：8-bit 全量程 256 级，平滑渐变会 banding；16-bit / float 不可见。
+    - **编码空间**：8-bit 下 sRGB vs 线性决定暗部精度；必须和材质槽位约定对齐
+      （=base_color_texture= 是 sRGB 槽位，=normal_map_texture= / roughness 是线性槽位）。
+    - **动态范围**：unorm 只能存 =[0,1]=，超了直接 clamp；HDR 亮部必须 float。
+
+    精度在"源 → bake → 采样 → tonemap"每一级都会叠加损失，**终点格式决定最终精度**：
+    源是 8-bit PNG 时烤进 float 不丢东西但浪费带宽；源是 HDR 场景时烤进 8-bit 会把 HDR 直接砍掉。
+    另外格式也决定了 debug 抓图是否需要转换，见 [[./bake.org#debug-从材质抓图][Debug：从材质抓图]]。
+
     #+begin_src rust
       /// 一种材质的生成方式。
       pub trait BakeRecipe: AsBindGroup + Send + Sync + 'static {
