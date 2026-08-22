@@ -39,7 +39,6 @@ rand = "0.10.0"
 
 # develop ui toolkit
 bevy-inspector-egui = "0.37.0"
-image = "0.25.10"
 
 [patch.crates-io]
 bevy = { path = "../bevy_engines/bevy_0.19/" }

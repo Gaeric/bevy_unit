@@ -384,22 +384,39 @@
     - 未来 extended material 把 =BakeRecipe::Output= 换成
       =ExtendedMaterial<StandardMaterial, E>= 即可，薄封装不需要改。
 ** Debug：从材质抓图
-    产物是材质，材质里的图按 =BakeChannel= 命名导出，肉眼检查每个槽位：
+    产物是材质，材质里的图按 =BakeChannel= 命名导出，肉眼检查每个槽位。
+    =Handle<Image>= 能不能"抓出来"，取决于数据在哪一侧：
+
+    - **CPU 侧**（加载的素材、CPU bake 的产物）：=Assets<Image>::get(&handle)= 直接拿，
+      但 =Image::try_into_dynamic()= 只支持 8bit 格式；bake 输出若是浮点格式要先
+      =Image::convert(Rgba8UnormSrgb)=。
+    - **GPU 侧**（compute 写的 storage texture）：=Image.data= 是空的
+      （=new_target_texture= 的 CPU 数据为 `None`，compute 只写 GPU 不写回 CPU），
+      必须走 =Readback::texture(handle)= 读回。
+
     #+begin_src rust
-      /// 把 BakedMaterial 的每个通道导出成 PNG（bake_debug/{label}_{channel}.png）
-      fn debug_dump_material(
+      /// GPU 路径：把 BakedMaterial 的每个通道读回 CPU 再导出 PNG
+      /// （bake_debug/{label}_{channel}.png）
+      fn dump_gpu_baked(
           label: &str,
           baked: &BakedMaterial<StandardMaterial>,
-          images: &Assets<Image>,
+          mut commands: Commands,
       ) {
           for (channel, handle) in &baked.textures {
-              let Some(img) = images.get(handle.id()) else { continue };
-              let path = format!("bake_debug/{label}_{channel}.png");
-              // img -> Rgba8 -> save(path)
+              let label = label.to_string();
+              let channel = *channel;
+              commands
+                  .spawn(Readback::texture(handle.clone()))
+                  .observe(move |event: On<ReadbackComplete>| {
+                      // 按 channel 的 texture format 重建像素，再存 PNG
+                  });
           }
       }
     #+end_src
-    这样"材质的每个槽位"可以直接检查，而不是只看到拼好的最终效果。
+
+    所以 GPU 路径的 debug 抓图**必须有 readback** —— =BakedMaterial.textures= 里的 handle
+    一鱼两吃：既喂给材质字段，又是 readback 的入口。这样"材质的每个槽位"可以直接检查，
+    而不是只看到拼好的最终效果。
 ** 问题对应
     - 加入多个 label → 多个 =BakeRecipePlugin<R>= 实例化，每个 recipe 一个类型
     - 抽取公用部分 → =BakePipeline<R>= /=BakeInstances<R>= /=BakeProgress<R>= + =init/prepare/compute= 泛型系统
@@ -414,7 +431,7 @@
     - [ ] =Params= 是否需要 `Reflect`（后续可能做序列化 / 调参 UI）
     - [ ] CPU 路径 v1 是否同步执行（大图再考虑 =AsyncComputeTaskPool=）
     - [ ] bindless 模式是否作为 GPU 路径的可选项平移过来
-    - [ ] 完成信号 =BakeDone= / readback 是否保留（对多实例泛化）
+    - [x] 完成信号 =BakeDone= / readback：GPU 路径必须保留，否则无法把材质里的图抓出来 debug
 ** 附录：相关代码位置
     - 新设计示例：=examples/example-bake.rs=
     - 老方案：=examples/hs2_head/texture_bake.rs=、=examples/hs2_head/bake_jobs.rs=

@@ -2,7 +2,7 @@
 @group(0) @binding(60) var eyelash_texture: texture_2d<f32>;
 @group(0) @binding(61) var eyelash_sampler: sampler;
 
-@group(0) @binding(62) var output: texture_storage_2d<rgba32float, read_write>;
+@group(0) @binding(62) var output: texture_storage_2d<rgba8unorm, read_write>;
 
 fn hash(value: u32) -> u32 {
     var state = value;

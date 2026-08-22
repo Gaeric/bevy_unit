@@ -1,9 +1,9 @@
 //! use compute shader to render the assets to a standard material for rr or raster
 
-use image;
 use std::borrow::Cow;
 
 use bevy::{
+    asset::RenderAssetUsages,
     ecs::system::StaticSystemParam,
     light::light_consts::lux::MOONLESS_NIGHT,
     mesh::{SphereKind, SphereMeshBuilder},
@@ -100,7 +100,7 @@ fn setup(
 ) {
     let texture = asset_server.load::<Image>(EYELASH_BAKE_TEXTURE);
 
-    let mut image = Image::new_target_texture(SIZE.x, SIZE.y, TextureFormat::Rgba32Float, None);
+    let mut image = Image::new_target_texture(SIZE.x, SIZE.y, TextureFormat::Rgba8Unorm, None);
     image.texture_descriptor.usage |= TextureUsages::STORAGE_BINDING;
     image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
     let output = images.add(image);
@@ -186,13 +186,24 @@ fn hotkey_compute_texture(input: Res<ButtonInput<KeyCode>>, mut request: ResMut<
 
 fn save_img(event: On<ReadbackComplete>, mut commands: Commands) {
     info!("readback image to cpu");
-    let data: Vec<f32> = event.to_shader_type();
-    if let Some(img) = image::Rgba32FImage::from_raw(SIZE.x, SIZE.y, data) {
-        let png = image::DynamicImage::ImageRgba32F(img).to_rgba8();
-        if let Err(e) = png.save("bake_output.png") {
+    let img = Image::new(
+        Extent3d {
+            width: SIZE.x,
+            height: SIZE.y,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        event.data.clone(),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::MAIN_WORLD,
+    );
+
+    if let Ok(dyn_img) = img.try_into_dynamic() {
+        if let Err(e) = dyn_img.save("bake_output.png") {
             warn!("failed to save bake result: {e}");
         }
     }
+
     commands.entity(event.entity).despawn();
 }
 
@@ -283,7 +294,7 @@ pub struct EyelashBake {
     #[sampler(61, visibility(compute))]
     origin_texture: Handle<Image>,
 
-    #[storage_texture(62, image_format = Rgba32Float, access = ReadWrite)]
+    #[storage_texture(62, image_format = Rgba8Unorm, access = ReadWrite)]
     output: Handle<Image>,
 }
 
