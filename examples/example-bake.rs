@@ -24,21 +24,9 @@ const EYELASH_BAKE_TEXTURE: &str = "materials/uv_checker_bw.png";
 const WORKGROUP_SIZE: u32 = 8;
 const SIZE: UVec2 = UVec2::new(256, 256);
 
-#[derive(Component)]
+#[derive(Resource)]
 pub struct RecipeMat {
-    label: &'static str,
-    shader: &'static str,
     output: Handle<Image>,
-}
-
-impl RecipeMat {
-    fn new(label: &'static str, shader: &'static str, output: Handle<Image>) -> Self {
-        Self {
-            label,
-            shader,
-            output,
-        }
-    }
 }
 
 #[derive(Resource, ExtractResource, Clone, Default)]
@@ -148,17 +136,15 @@ fn setup(
         Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    commands.spawn(RecipeMat::new(
-        EYELASH_LABEL,
-        EYELASH_BAKE_SHADER_PATH,
-        output.clone(),
-    ));
+    commands.insert_resource(RecipeMat {
+        output: output.clone(),
+    });
 
     commands.insert_resource(EyelashImages { texture, output });
     commands.insert_resource(BakeRequest::default());
 }
 
-fn on_bake_done(_event: On<BakeDone>, mut commands: Commands, recipe_mat: Single<&RecipeMat>) {
+fn on_bake_done(_event: On<BakeDone>, mut commands: Commands, recipe_mat: Res<RecipeMat>) {
     commands
         .spawn(Readback::texture(recipe_mat.output.clone()))
         .observe(save_img);
