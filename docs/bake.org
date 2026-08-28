@@ -9,113 +9,162 @@
   一句话核心：**定义 / 实例分离 + 信号驱动**。
 
 ** 核心思想
-  - 定义（definition）：每种材质是**自己的类型**，实现[[#recipe-trait][BakeRecipe]]——
-    声明 shader / 入口 / 参数 / 输出通道 / 材质组装。全局只写一次。
-  - 实例（instance）：[[#instance][RecipeMat<R>]] 是挂到实体的 Component，一个
-    （角色 × 材质）一份，携带运行时的 inputs / outputs / 参数 / 进度。
-  - 薄封装 [[#recipe-plugin][BakeRecipePlugin<R>]] 抽走公共管道；多种材质 = 多次实例化
-    它；同一种材质被多个角色用 = 多个 Component。
-  - 烘焙只在「出生 / 收到 re-bake 信号」时发生，不是每帧。渲染侧按变更信号驱动，
-    避免每帧全量 Extract。
+   - 定义（definition）：每种材质是**自己的类型**，实现[[#recipe-trait][BakeRecipe]]——
+     声明 shader / 入口 / 参数 / 输出通道 / 材质组装。全局只写一次。
+   - 实例（instance）：[[#instance][RecipeInstance<R>]] 是挂到实体的 Component，一个
+     （角色 × 材质）一份，携带运行时的 inputs / outputs / 参数 / 版本状态。
+   - 请求（request）：Component 的变化只负责产生一个持久的[[#pending-requests][待处理请求]]，
+     不直接依赖 `Changed<T>` 在当前帧完成烘焙。请求快照只在需要时提取到 Render World。
+   - 薄封装 [[#recipe-plugin][BakeRecipePlugin<R>]] 抽走公共管道；多种材质 = 多次实例化
+     它；同一种材质被多个角色用 = 多个 Component。
+   - 烘焙只在「出生 / 收到 re-bake 信号」时发生，不是每帧。渲染侧只处理待处理列表；
+     请求在 GPU / CPU 确认完成前保留，完成后移除，避免每帧全量 Extract。
+
+** Pending requests：持久化的按需提取列表
+   :PROPERTIES:
+   :CUSTOM_ID: pending-requests
+   :END:
+   `Changed<T>` 是瞬时条件：它只在 Component 被修改的那一帧成立。如果这一帧 pipeline、
+   输入纹理或 bind group 尚未准备好，直接在 `Changed<T>` 系统中烘焙会丢失请求。因此变化
+   检测只负责把实例快照写入一个持久的待处理列表：
+
+   #+begin_src rust
+     #[derive(Resource, Default)]
+     struct PendingBakeRequests<R: BakeRecipe> {
+     // 实际实现可以使用 HashMap<Entity, BakeRequest<R>>，按实例合并最新请求
+     items: Vec<BakeRequest<R>>,
+     }
+
+     struct BakeRequest<R: BakeRecipe> {
+     instance: Entity,
+     version: u64,
+     inputs: Vec<Handle<Image>>,
+     outputs: Vec<Handle<Image>>,
+     params: R::Params,
+     }
+   #+end_src
+
+   主世界每帧只查询变化的实例，并把请求快照加入列表。`Changed` 只用于捕获变化，不能作为
+   Render World 中真正的执行条件。Render World 应以待处理列表是否为空作为条件，并在资源
+   未就绪时保留请求、下一帧继续尝试。
+
+   同一实例在尚未开始处理前连续变化时，通常只保留最新版本即可：旧版本已经没有烘焙价值。
+   因此实际实现适合使用 `HashMap<Entity, BakeRequest<R>>` 或等价的 upsert 结构；如果业务
+   要求每个版本都执行，再使用 `VecDeque` 保存完整队列。不同实例的请求必须彼此独立。
+
+   请求的生命周期应为：
+
+   #+begin_src text
+     Pending -> Extracted -> WaitingForResources -> Dispatched -> Completed -> Removed
+   #+end_src
+
+   Extracted 不等于 Completed。pipeline、输入资源、bind group、GPU 执行和 readback 都可能
+   跨越多个帧。只有在 CPU 结果已写入，或 GPU 烘焙/readback 已确认完成后，才能从主世界的
+   待处理列表中删除请求。若执行失败或资源暂时不可用，应保留请求并重试。
 
 ** Recipe（定义）
-  产物是材质，不是单张图。`material()` 组装材质，同时保留每个输出通道的纹理 handle
-  供 debug 抓图。
+   产物是材质，不是单张图。`material()` 组装材质，同时保留每个输出通道的纹理 handle
+   供 debug 抓图。
 
-  #+begin_src rust
-    /// 一个材质里会被烘焙的通道（对应 StandardMaterial 的某个纹理槽位）
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub enum BakeChannel {
-        BaseColor, NormalMap, MetallicRoughness, Occlusion, Emissive, Custom(&'static str),
-    }
+   #+begin_src rust
+     /// 一个材质里会被烘焙的通道（对应 StandardMaterial 的某个纹理槽位）
+     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+     pub enum BakeChannel {
+     BaseColor, NormalMap, MetallicRoughness, Occlusion, Emissive, Custom(&'static str),
+     }
 
-    /// 一个输出纹理的声明：喂哪个通道 + 用什么格式（格式即精度策略）
-    #[derive(Debug, Clone)]
-    pub struct BakeOutputSpec { pub channel: BakeChannel, pub format: TextureFormat }
+     /// 一个输出纹理的声明：喂哪个通道 + 用什么格式（格式即精度策略）
+     #[derive(Debug, Clone)]
+     pub struct BakeOutputSpec { pub channel: BakeChannel, pub format: TextureFormat }
 
-    /// 一次烘焙的产物：真正的产出是材质，textures 保留各通道的图供 debug
-    #[derive(Debug, Clone)]
-    pub struct BakedMaterial<M: Asset> {
-        pub material: Handle<M>,
-        pub textures: Vec<(BakeChannel, Handle<Image>)>,
-    }
+     /// 一次烘焙的产物：真正的产出是材质，textures 保留各通道的图供 debug
+     #[derive(Debug, Clone)]
+     pub struct BakedMaterial<M: Asset> {
+     pub material: Handle<M>,
+     pub textures: Vec<(BakeChannel, Handle<Image>)>,
+     }
 
-    /// 一种材质的生成方式
-    pub trait BakeRecipe: AsBindGroup + Send + Sync + 'static {
-        type Params: Clone + Sync + Default + 'static;   // 每个 recipe 自己的参数，无则用 ()
-        type Output: Asset;                             // v1 通常 StandardMaterial
-        const LABEL: &'static str;
+     /// 一种材质的生成方式
+     pub trait BakeRecipe: AsBindGroup + Send + Sync + 'static {
+     type Params: Clone + Sync + Default + 'static;   // 每个 recipe 自己的参数，无则用 ()
+     type Output: Asset;                             // v1 通常 StandardMaterial
+     const LABEL: &'static str;
 
-        fn shader() -> ShaderRef;
-        fn entry_point() -> &'static str;
-        fn output_specs() -> &'static [BakeOutputSpec]; // 顺序与 new 的 outputs 一一对应
-        fn new(inputs: &[Handle<Image>], outputs: &[Handle<Image>], params: &Self::Params) -> Self;
-        fn material(&self, asset_server: &AssetServer) -> Self::Output;
-        fn cpu_bake(&self, inputs: &[&Image], params: &Self::Params) -> Option<...> { None }
+     fn shader() -> ShaderRef;
+     fn entry_point() -> &'static str;
+     fn output_specs() -> &'static [BakeOutputSpec]; // 顺序与 new 的 outputs 一一对应
+     fn new(inputs: &[Handle<Image>], outputs: &[Handle<Image>], params: &Self::Params) -> Self;
+     fn material(&self, asset_server: &AssetServer) -> Self::Output;
+     fn cpu_bake(&self, inputs: &[&Image], params: &Self::Params) -> Option<...> { None }
 
-        /// 一站式：建输出纹理 → 组装材质 → 返回可挂载的实例
-        fn bake(size: UVec2, ...) -> (RecipeMat<Self>, BakedMaterial<Self::Output>) { ... }
-    }
-  #+end_src
+     /// 一站式：建输出纹理 → 组装材质 → 返回可挂载的实例
+     fn bake(size: UVec2, ...) -> (RecipeMat<Self>, BakedMaterial<Self::Output>) { ... }
+     }
+   #+end_src
 
-** 实例：RecipeMat（定义之上的运行时状态，支持多实例）
-  #+begin_src rust
-    #[derive(Component)]
-    pub struct RecipeMat<R: BakeRecipe> {
-        pub owner: Entity,            // 属于哪个角色 / mesh，用于烘后把结果回写
-        pub slot: Entity,             // 消费这份材质的具体实体（写回 material）
-        pub inputs: Vec<Handle<Image>>,
-        pub outputs: Vec<Handle<Image>>, // 与 output_specs 一一对应，由 bake() 建
-        pub params: R::Params,
-        pub version: u32,             // re-bake 时 ++（进度判断）
-    }
-  #+end_src
+** 实例：RecipeInstance（定义之上的运行时状态，支持多实例）
+   #+begin_src rust
+     #[derive(Component)]
+     pub struct RecipeInstance<R: BakeRecipe> {
+     pub owner: Entity,        // 属于哪个角色 / mesh，用于烘后把结果回写
+     pub slot: Entity,         // 消费这份材质的具体实体（写回 material）
+     pub inputs: Vec<Handle<Image>>,
+     pub outputs: Vec<Handle<Image>>, // 与 output_specs 一一对应，由 bake() 建
+     pub params: R::Params,
+     pub version: u64,         // 请求 re-bake 时递增
+     pub baked_version: u64,   // 最近确认完成的版本
+     }
+   #+end_src
 
-  多实例靠「组件 + owner」区分，不用 label 字符串。同一种模块 R 挂在 A、B 两个角色的实体
-  上，即为两个不相干实例。与具体实例相关的参数/资源留在每份 RecipeMat（每实例一份），
-  避免互相污染。
+   Component 是主世界中的权威实例状态，但不应被每帧完整提取到 Render World。实例发生
+   变化时，主世界系统将其必要字段复制到 `BakeRequest`；Resource 形式的请求列表只是按需
+   提取载体，而不是实例模型本身。
+
+   多实例靠「组件 + owner」区分，不用 label 字符串。同一种模块 R 挂在 A、B 两个角色的实体
+   上，即为两个不相干实例。与具体实例相关的参数/资源留在每份 `RecipeInstance`（每实例一份），
+   避免互相污染。
 
 ** 渲染世界：按变更信号驱动（不每帧全量 Extract）
-  bake 极少发生，所以渲染侧不「每帧全量提取实例库」，而是：
-  - 渲染世界只维护一个小的信号资源（表示「哪个 instance 的 version 需要重烤」），
-    用变更检测 / 事件驱动；主世界以 Component 实例为准。
-  - 渲染侧 bake 系统用 `.run_if(has_pending)` 整体挂起，无待烤时不进场，成本趋近 0。
-  - 进度 BakeProgressmentation 按 (owner, version) 记账，防重复 dispatch；烤完经
-    owner / slot 把材质回写。
+   bake 极少发生，所以渲染侧不「每帧全量提取实例库」，而是：
+   - 渲染世界只维护一个小的信号资源（表示「哪个 instance 的 version 需要重烤」），
+     用变更检测 / 事件驱动；主世界以 Component 实例为准。
+   - 渲染侧 bake 系统用 `.run_if(has_pending)` 整体挂起，无待烤时不进场，成本趋近 0。
+   - 进度 BakeProgressmentation 按 (owner, version) 记账，防重复 dispatch；烤完经
+     owner / slot 把材质回写。
 
 ** 注册：多个 recipe = 多次实例化薄插件
-  #+begin_src rust
-    app.add_plugins((
-        BakeRecipePlugin::<EyelashBake>::default(),
-        BakeRecipePlugin::<TonemapBake>::default(),
-        BakeRecipePlugin::<EyeBake>::default(),
-    ));
-  #+end_src
+   #+begin_src rust
+     app.add_plugins((
+     BakeRecipePlugin::<EyelashBake>::default(),
+     BakeRecipePlugin::<TonemapBake>::default(),
+     BakeRecipePlugin::<EyeBake>::default(),
+     ));
+   #+end_src
 
-  新加一种材质 = 写一个 struct + impl BakeRecipe + 加一行 add_plugins，其余不动。
+   新加一种材质 = 写一个 struct + impl BakeRecipe + 加一行 add_plugins，其余不动。
 
 ** CPU / GPU 两条路径
-  - GPU（默认走 compute）：建输出 texture → prepare bind group → dispatch → readback。
-  - CPU：cpu_bake 返回 Some 的由主世界执行，把每张 insert 进 outputs 并记进度，
-    渲染侧视进度即跳过。
+   - GPU（默认走 compute）：建输出 texture → prepare bind group → dispatch → readback。
+   - CPU：cpu_bake 返回 Some 的由主世界执行，把每张 insert 进 outputs 并记进度，
+     渲染侧视进度即跳过。
 
 ** StandardMaterial 与调试
-  - 产物是材质，材质样式由 recipe 的 material() 组装。
-  - BakedMaterial.textures 保留每个通道的图：CPU 侧 `Assets<Image>::get` 直接拿，
-    GPU 侧用 Readback 读回（new_target_texture 的 CPU 数据为空）。
-  - 换 extended material：把 Output 换成 ExtendedMaterial 即可，插件不改。
+   - 产物是材质，材质样式由 recipe 的 material() 组装。
+   - BakedMaterial.textures 保留每个通道的图：CPU 侧 `Assets<Image>::get` 直接拿，
+     GPU 侧用 Readback 读回（new_target_texture 的 CPU 数据为空）。
+   - 换 extended material：把 Output 换成 ExtendedMaterial 即可，插件不改。
 
 ** 需求 / 取舍对照
-  - 多 label / 多材质 → 多个 BakeRecipePlugin 实例化
-  - 相通管道 → BakePipeline / 泛型抽取
-  - 每种材质自己的生成思路 → 一个 struct impl BakeRecipe
-  - 参数不统一（无全局 BakeParams） → 每 recipe 用关联类型 Params 自定
-  - 输出是材质不是图 → material() 组装并返回 BakedMaterial
-  - 多实例同模块、相同流程、资源不同 → Component + owner/slot 路由
-  - 烘焙很少发生、避免每帧浪费 → 变更信号驱动 + run_if 挂起
-  - 从材质抓图 debug → BakedMaterial.textures 按 BakeChannel 导出
+   - 多 label / 多材质 → 多个 BakeRecipePlugin 实例化
+   - 相通管道 → BakePipeline / 泛型抽取
+   - 每种材质自己的生成思路 → 一个 struct impl BakeRecipe
+   - 参数不统一（无全局 BakeParams） → 每 recipe 用关联类型 Params 自定
+   - 输出是材质不是图 → material() 组装并返回 BakedMaterial
+   - 多实例同模块、相同流程、资源不同 → Component + owner/slot 路由
+   - 烘焙很少发生、避免每帧浪费 → 变更信号驱动 + run_if 挂起
+   - 从材质抓图 debug → BakedMaterial.textures 按 BakeChannel 导出
 
 ** 附录：相关位置
-  - 新设计实现示例：examples/example-multi-bake.rs、examples/hs2_head/bake/mod.rs
-  - 老方案：examples/hs2_head/texture_bake.rs、bake_jobs.rs
-  - 示例 shader：assets/materials/shaders/hs2_head_bake_eyelash.wgsl
+   - 新设计实现示例：examples/example-multi-bake.rs、examples/hs2_head/bake/mod.rs
+   - 老方案：examples/hs2_head/texture_bake.rs、bake_jobs.rs
+   - 示例 shader：assets/materials/shaders/hs2_head_bake_eyelash.wgsl
