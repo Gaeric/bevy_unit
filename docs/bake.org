@@ -153,7 +153,6 @@
    - BakedMaterial.textures 保留每个通道的图：CPU 侧 `Assets<Image>::get` 直接拿，
      GPU 侧用 Readback 读回（new_target_texture 的 CPU 数据为空）。
    - 换 extended material：把 Output 换成 ExtendedMaterial 即可，插件不改。
-
 ** 需求 / 取舍对照
    - 多 label / 多材质 → 多个 BakeRecipePlugin 实例化
    - 相通管道 → BakePipeline / 泛型抽取
@@ -163,7 +162,6 @@
    - 多实例同模块、相同流程、资源不同 → Component + owner/slot 路由
    - 烘焙很少发生、避免每帧浪费 → 变更信号驱动 + run_if 挂起
    - 从材质抓图 debug → BakedMaterial.textures 按 BakeChannel 导出
-
 ** 附录：相关位置
    - 新设计实现示例：examples/example-multi-bake.rs、examples/hs2_head/bake/mod.rs
    - 老方案：examples/hs2_head/texture_bake.rs、bake_jobs.rs
