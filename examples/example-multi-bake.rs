@@ -132,7 +132,7 @@ impl BakeRecipe for EyelashBake {
     type Params = ();
     type Output = StandardMaterial;
 
-    const LABEL: &'static str = "eyelash";
+    const LABEL: &'static str = EYELASH_LABEL;
 
     fn shader() -> ShaderRef {
         EYELASH_BAKE_SHADER_PATH.into()
@@ -166,30 +166,18 @@ impl BakeRecipe for EyelashBake {
 }
 
 #[derive(Event)]
-struct BakeDispatch<R: BakeRecipe>(Vec<Handle<Image>>, PhantomData<R>);
+struct BakeDispatch<R: BakeRecipe> {
+    outputs: Vec<Handle<Image>>,
+    version: u32,
+    _marker: PhantomData<R>,
+}
 
-// #[derive(Resource, Default)]
-// struct BakeProgress {
-//     last_baked: u32,
-// }
-
-#[derive(Resource)]
-struct PendingBakeSignal<R: BakeRecipe>(Option<Vec<Handle<Image>>>, PhantomData<R>);
-
-// #[derive(Resource)]
-// struct EyelashPipeline {
-//     pipeline: CachedComputePipelineId,
-//     layout: BindGroupLayoutDescriptor,
-// }
-
-// #[derive(Resource)]
-// struct EyelashBindgroup(BindGroup);
-
-// #[derive(Resource, ExtractResource, Clone)]
-// struct EyelashImages {
-//     texture: Handle<Image>,
-//     output: Handle<Image>,
-// }
+#[derive(Resource, Default)]
+struct PendingBakeSignal<R: BakeRecipe> {
+    outputs: Option<Vec<Handle<Image>>>,
+    version: u32,
+    _markder: PhantomData<R>,
+}
 
 struct EyelashBakePlugin;
 
@@ -305,7 +293,7 @@ impl<R: BakeRecipe> Plugin for BakeRecipePlugin<R> {
         let render_app = app.sub_app_mut(RenderApp);
         render_app.insert_resource(BakePipeline::<R>::default());
         render_app.insert_resource(BakeProgress::<R>::default());
-        render_app.insert_resource(PendingBakeSignal::<R>(None, PhantomData));
+        render_app.insert_resource(PendingBakeSignal::<R>::default());
         render_app.add_systems(ExtractSchedule, forward_bake_signal::<R>);
         render_app.add_systems(RenderStartup, init_compute_pipeline::<R>);
         render_app.add_systems(
@@ -322,8 +310,12 @@ fn forward_bake_signal<R: BakeRecipe>(
     mut main_world: ResMut<MainWorld>,
     mut signal: ResMut<PendingBakeSignal<R>>,
 ) {
-    if let Some(outputs) = signal.0.take() {
-        main_world.trigger(BakeDispatch::<R>(outputs, PhantomData));
+    if let Some(outputs) = signal.outputs.take() {
+        main_world.trigger(BakeDispatch::<R> {
+            outputs,
+            version: signal.version,
+            _marker: PhantomData,
+        });
     }
 }
 
@@ -332,13 +324,20 @@ fn on_bake_done<R: BakeRecipe>(
     mut commands: Commands,
     mut request: ResMut<PendingBakeRequests<R>>,
 ) {
-    for handle in &event.0 {
+    for handle in &event.outputs {
         commands
             .spawn(Readback::texture(handle.clone()))
             .observe(save_img);
     }
 
-    request.items.remove(0);
+    if let Some(index) = request
+        .items
+        .iter()
+        .position(|item| item.version == event.version && item.outputs == event.outputs)
+    {
+        info!("request index {index} remove");
+        request.items.remove(index);
+    }
 }
 
 fn bake_pending<R: BakeRecipe>(
@@ -377,6 +376,7 @@ fn hotkey_compute_texture(
     if input.just_pressed(KeyCode::KeyR) {
         for mut mat in recipe_mat {
             mat.version += 1;
+            request.items.clear();
             request.items.push(mat.clone());
         }
     }
@@ -516,7 +516,8 @@ fn compute<R: BakeRecipe>(
             .last_baked
             .insert(instance.outputs[0].id(), instance.version);
 
-        signal.0 = Some(instance.outputs.clone());
+        signal.outputs = Some(instance.outputs.clone());
+        signal.version = instance.version;
     }
 }
 
