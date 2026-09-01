@@ -85,8 +85,8 @@ pub trait BakeRecipe: AsBindGroup + Send + Sync + Clone + Default + 'static {
             .collect();
 
         let recipe = Self::new(&inputs, &outputs, &params);
-        let built = recipe.material(asset_server);
-        let material = materials.add(built);
+        let mat_asset = recipe.material(asset_server);
+        let material = materials.add(mat_asset);
 
         let textures = specs
             .iter()
@@ -114,7 +114,7 @@ pub struct RecipeMat<R: BakeRecipe> {
 
 #[derive(Resource, ExtractResource, Clone, Default)]
 pub struct PendingBakeRequests<R: BakeRecipe> {
-    items: Vec<RecipeMat<R>>,
+    items: HashMap<Entity, RecipeMat<R>>,
 }
 
 // make eyelash as example
@@ -245,6 +245,11 @@ pub struct BakePipeline<R: BakeRecipe> {
 }
 
 #[derive(Resource)]
+pub struct BakeBindGroups<R: BakeRecipe> {
+    bind_groups: Vec<BakeBindGroup<R>>,
+    _marker: PhantomData<R>,
+}
+
 pub struct BakeBindGroup<R: BakeRecipe> {
     pub outputs: Vec<Handle<Image>>,
     pub bind_group: BindGroup,
@@ -330,25 +335,24 @@ fn on_bake_done<R: BakeRecipe>(
             .observe(save_img);
     }
 
-    if let Some(index) = request
-        .items
-        .iter()
-        .position(|item| item.version == event.version && item.outputs == event.outputs)
-    {
-        info!("request index {index} remove");
-        request.items.remove(index);
-    }
+    request.items.retain(|entity, mat| {
+        if mat.version == event.version && mat.outputs == event.outputs {
+            info!("request entity {entity} remove");
+            false
+        } else {
+            true
+        }
+    });
 }
 
 fn bake_pending<R: BakeRecipe>(
     instances: Res<PendingBakeRequests<R>>,
     progress: Res<BakeProgress<R>>,
 ) -> bool {
-    let Some(instance) = instances.items.first() else {
-        return false;
-    };
-
-    progress.last_baked.get(&instance.outputs[0].id()) != Some(&instance.version)
+    instances
+        .items
+        .iter()
+        .any(|(_, mat)| progress.last_baked.get(&mat.outputs[0].id()) != Some(&mat.version))
 }
 
 // `SphereMeshBuilder::uv` generates the sphere with its poles aligned to the
@@ -370,14 +374,13 @@ fn rotate_sphere(mut meshes: Query<&mut Transform, With<Mesh3d>>, time: Res<Time
 
 fn hotkey_compute_texture(
     input: Res<ButtonInput<KeyCode>>,
-    recipe_mat: Query<&mut RecipeMat<EyelashBake>>,
+    mat_components: Query<(Entity, &mut RecipeMat<EyelashBake>)>,
     mut request: ResMut<PendingBakeRequests<EyelashBake>>,
 ) {
     if input.just_pressed(KeyCode::KeyR) {
-        for mut mat in recipe_mat {
-            mat.version += 1;
-            request.items.clear();
-            request.items.push(mat.clone());
+        for (entity, mut recipe_mat) in mat_components {
+            recipe_mat.version += 1;
+            request.items.insert(entity, recipe_mat.clone());
         }
     }
 }
@@ -456,57 +459,68 @@ fn prepare_bind_group<R: BakeRecipe>(
     render_device: Res<RenderDevice>,
     progress: Res<BakeProgress<R>>,
 ) {
-    let Some(instance) = instances.items.first() else {
-        return;
-    };
+    let mut bind_groups = Vec::new();
+    for (_entity, instance) in instances.items.iter() {
+        if progress.last_baked.get(&instance.outputs[0].id()) == Some(&instance.version) {
+            continue;
+        }
 
-    if progress.last_baked.get(&instance.outputs[0].id()) == Some(&instance.version) {
-        return;
+        info!("prepare bindgroup");
+
+        let recipe = R::new(&instance.inputs, &instance.outputs, &instance.params);
+
+        if let Ok(prepared) = recipe.as_bind_group(
+            &pipeline.layout,
+            &render_device,
+            &pipeline_cache,
+            &mut param,
+        ) {
+            bind_groups.push(BakeBindGroup::<R> {
+                outputs: instance.outputs.clone(),
+                bind_group: prepared.bind_group,
+                _marker: PhantomData,
+            });
+        };
     }
 
-    info!("prepare bindgroup");
-
-    let recipe = R::new(&instance.inputs, &instance.outputs, &instance.params);
-
-    if let Ok(prepared) = recipe.as_bind_group(
-        &pipeline.layout,
-        &render_device,
-        &pipeline_cache,
-        &mut param,
-    ) {
-        commands.insert_resource(BakeBindGroup::<R> {
-            outputs: instance.outputs.clone(),
-            bind_group: prepared.bind_group,
-            _marker: PhantomData,
-        });
-    };
+    commands.insert_resource(BakeBindGroups::<R> {
+        bind_groups,
+        _marker: PhantomData,
+    });
 }
 
 fn compute<R: BakeRecipe>(
     mut render_context: RenderContext,
     pipeline_cache: Res<PipelineCache>,
     pipeline: Res<BakePipeline<R>>,
-    bind_group: Option<Res<BakeBindGroup<R>>>,
+    bind_groups: Option<Res<BakeBindGroups<R>>>,
     instances: Res<PendingBakeRequests<R>>,
     mut progress: ResMut<BakeProgress<R>>,
     mut signal: ResMut<PendingBakeSignal<R>>,
 ) {
-    let Some(ref bind_group) = bind_group else {
+    let Some(ref bind_groups) = bind_groups else {
         return;
     };
 
-    let Some(instance) = instances.items.first() else {
+    let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
         return;
     };
 
-    if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) {
-        let mut pass =
-            render_context
-                .command_encoder()
-                .begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("compute bake"),
-                    ..default()
-                });
+    let mut pass = render_context
+        .command_encoder()
+        .begin_compute_pass(&ComputePassDescriptor {
+            label: Some("compute bake"),
+            ..default()
+        });
+
+    for bind_group in &bind_groups.bind_groups {
+        let Some(instance) = instances
+            .items
+            .values()
+            .find(|instance| instance.outputs == bind_group.outputs)
+        else {
+            continue;
+        };
 
         pass.set_bind_group(0, &bind_group.bind_group, &[]);
         pass.set_pipeline(pipeline);
