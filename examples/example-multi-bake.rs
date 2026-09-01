@@ -29,7 +29,7 @@ const SIZE: UVec2 = UVec2::new(256, 256);
 pub enum BakeChannel {
     BaseColor,
     NormalMap,
-    MatallicRoughness,
+    MetallicRoughness,
     Occlusion,
     Emissive,
     Custom(&'static str),
@@ -167,15 +167,23 @@ impl BakeRecipe for EyelashBake {
 
 #[derive(Event)]
 struct BakeDispatch<R: BakeRecipe> {
-    outputs: Vec<Handle<Image>>,
-    version: u32,
+    instance: BakeInstance,
+    // entity: Entity,
+    // version: u32,
     _marker: PhantomData<R>,
+}
+
+#[derive(Clone)]
+struct BakeInstance {
+    entity: Entity,
+    version: u32,
 }
 
 #[derive(Resource, Default)]
 struct PendingBakeSignal<R: BakeRecipe> {
-    outputs: Option<Vec<Handle<Image>>>,
-    version: u32,
+    // outputs: Option<Vec<Handle<Image>>>,
+    // version: u32,
+    instances: Vec<BakeInstance>,
     _markder: PhantomData<R>,
 }
 
@@ -251,7 +259,7 @@ pub struct BakeBindGroups<R: BakeRecipe> {
 }
 
 pub struct BakeBindGroup<R: BakeRecipe> {
-    pub outputs: Vec<Handle<Image>>,
+    pub entity: Entity,
     pub bind_group: BindGroup,
     _marker: PhantomData<R>,
 }
@@ -268,7 +276,7 @@ impl<R: BakeRecipe> Default for BakePipeline<R> {
 
 #[derive(Resource)]
 pub struct BakeProgress<R: BakeRecipe> {
-    last_baked: HashMap<AssetId<Image>, u32>,
+    last_baked: HashMap<Entity, u32>,
     _marker: PhantomData<R>,
 }
 
@@ -315,13 +323,14 @@ fn forward_bake_signal<R: BakeRecipe>(
     mut main_world: ResMut<MainWorld>,
     mut signal: ResMut<PendingBakeSignal<R>>,
 ) {
-    if let Some(outputs) = signal.outputs.take() {
+    for instance in signal.instances.iter() {
         main_world.trigger(BakeDispatch::<R> {
-            outputs,
-            version: signal.version,
+            instance: instance.clone(),
             _marker: PhantomData,
         });
     }
+
+    signal.instances.clear()
 }
 
 fn on_bake_done<R: BakeRecipe>(
@@ -329,20 +338,19 @@ fn on_bake_done<R: BakeRecipe>(
     mut commands: Commands,
     mut request: ResMut<PendingBakeRequests<R>>,
 ) {
-    for handle in &event.outputs {
-        commands
-            .spawn(Readback::texture(handle.clone()))
-            .observe(save_img);
-    }
+    let Some(mat) = request.items.get(&event.instance.entity) else {
+        return;
+    };
 
-    request.items.retain(|entity, mat| {
-        if mat.version == event.version && mat.outputs == event.outputs {
-            info!("request entity {entity} remove");
-            false
-        } else {
-            true
+    if mat.version <= event.instance.version {
+        for h in &mat.outputs {
+            commands
+                .spawn(Readback::texture(h.clone()))
+                .observe(save_img);
         }
-    });
+
+        request.items.remove(&event.instance.entity);
+    }
 }
 
 fn bake_pending<R: BakeRecipe>(
@@ -352,7 +360,7 @@ fn bake_pending<R: BakeRecipe>(
     instances
         .items
         .iter()
-        .any(|(_, mat)| progress.last_baked.get(&mat.outputs[0].id()) != Some(&mat.version))
+        .any(|(entity, mat)| progress.last_baked.get(entity) != Some(&mat.version))
 }
 
 // `SphereMeshBuilder::uv` generates the sphere with its poles aligned to the
@@ -460,12 +468,12 @@ fn prepare_bind_group<R: BakeRecipe>(
     progress: Res<BakeProgress<R>>,
 ) {
     let mut bind_groups = Vec::new();
-    for (_entity, instance) in instances.items.iter() {
-        if progress.last_baked.get(&instance.outputs[0].id()) == Some(&instance.version) {
+    for (entity, instance) in instances.items.iter() {
+        if progress.last_baked.get(entity) == Some(&instance.version) {
             continue;
         }
 
-        info!("prepare bindgroup");
+        info!("{} prepare bindgroup", R::LABEL);
 
         let recipe = R::new(&instance.inputs, &instance.outputs, &instance.params);
 
@@ -476,7 +484,7 @@ fn prepare_bind_group<R: BakeRecipe>(
             &mut param,
         ) {
             bind_groups.push(BakeBindGroup::<R> {
-                outputs: instance.outputs.clone(),
+                entity: *entity,
                 bind_group: prepared.bind_group,
                 _marker: PhantomData,
             });
@@ -496,7 +504,7 @@ fn compute<R: BakeRecipe>(
     bind_groups: Option<Res<BakeBindGroups<R>>>,
     instances: Res<PendingBakeRequests<R>>,
     mut progress: ResMut<BakeProgress<R>>,
-    mut signal: ResMut<PendingBakeSignal<R>>,
+    mut signals: ResMut<PendingBakeSignal<R>>,
 ) {
     let Some(ref bind_groups) = bind_groups else {
         return;
@@ -506,6 +514,8 @@ fn compute<R: BakeRecipe>(
         return;
     };
 
+    info!("{} bake dispatch", R::LABEL);
+
     let mut pass = render_context
         .command_encoder()
         .begin_compute_pass(&ComputePassDescriptor {
@@ -514,10 +524,10 @@ fn compute<R: BakeRecipe>(
         });
 
     for bind_group in &bind_groups.bind_groups {
-        let Some(instance) = instances
+        let Some((entity, instance)) = instances
             .items
-            .values()
-            .find(|instance| instance.outputs == bind_group.outputs)
+            .iter()
+            .find(|(entity, _)| **entity == bind_group.entity)
         else {
             continue;
         };
@@ -526,12 +536,12 @@ fn compute<R: BakeRecipe>(
         pass.set_pipeline(pipeline);
         pass.dispatch_workgroups(SIZE.x / WORKGROUP_SIZE, SIZE.y / WORKGROUP_SIZE, 1);
 
-        progress
-            .last_baked
-            .insert(instance.outputs[0].id(), instance.version);
+        progress.last_baked.insert(entity.clone(), instance.version);
 
-        signal.outputs = Some(instance.outputs.clone());
-        signal.version = instance.version;
+        signals.instances.push(BakeInstance {
+            entity: *entity,
+            version: instance.version,
+        });
     }
 }
 
