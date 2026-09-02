@@ -91,7 +91,7 @@ pub trait BakeRecipe: AsBindGroup + Send + Sync + Clone + Default + 'static {
         let textures = specs
             .iter()
             .zip(outputs.iter())
-            .map(|(sepc, handle)| (sepc.channel, handle.clone()))
+            .map(|(spec, handle)| (spec.channel, handle.clone()))
             .collect();
 
         let recipe_mat = RecipeMat {
@@ -186,7 +186,7 @@ struct PendingBakeSignal<R: BakeRecipe> {
     // outputs: Option<Vec<Handle<Image>>>,
     // version: u32,
     instances: Vec<BakeInstance>,
-    _markder: PhantomData<R>,
+    _marker: PhantomData<R>,
 }
 
 struct EyelashBakePlugin;
@@ -407,6 +407,7 @@ fn save_img(
     readbacks: Query<&Readback>,
     names: Query<&Name>,
 ) {
+    commands.entity(event.entity).despawn();
     let Ok(Readback::Texture(handle)) = readbacks.get(event.entity) else {
         return;
     };
@@ -415,9 +416,6 @@ fn save_img(
         warn!("bake output image not found");
         return;
     };
-
-    let filename = "bake_output".into();
-    let name = names.get(event.entity).unwrap_or(&filename);
 
     info!("readback image to cpu");
 
@@ -429,6 +427,11 @@ fn save_img(
         RenderAssetUsages::MAIN_WORLD,
     );
 
+    let name = names
+        .get(event.entity)
+        .map(|n| n.as_str())
+        .unwrap_or("bake_output");
+
     if let Ok(dyn_img) = img.try_into_dynamic() {
         if let Err(e) = dyn_img.save(format!("{}.png", name)) {
             warn!("failed to save bake result: {e}");
@@ -436,8 +439,6 @@ fn save_img(
     } else {
         warn!("try into dynamic failed");
     }
-
-    commands.entity(event.entity).despawn();
 }
 
 // ----------------------------------------------------------------------
