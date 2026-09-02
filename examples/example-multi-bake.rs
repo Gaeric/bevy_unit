@@ -57,13 +57,12 @@ pub trait BakeRecipe: AsBindGroup + Send + Sync + Clone + Default + 'static {
     fn shader() -> ShaderRef;
     fn entry_point() -> &'static str;
     fn output_specs() -> &'static [BakeOutputSpec];
-
+    fn output_size() -> UVec2;
     fn new(inputs: &[Handle<Image>], outputs: &[Handle<Image>], params: &Self::Params) -> Self;
 
     fn material(&self, asset_server: &AssetServer) -> Self::Output;
 
     fn bake(
-        size: UVec2,
         inputs: Vec<Handle<Image>>,
         params: Self::Params,
         images: &mut Assets<Image>,
@@ -74,6 +73,7 @@ pub trait BakeRecipe: AsBindGroup + Send + Sync + Clone + Default + 'static {
         Self: Sized,
     {
         let specs = Self::output_specs();
+        let size = Self::output_size();
         let outputs: Vec<Handle<Image>> = specs
             .iter()
             .map(|spec| {
@@ -151,6 +151,10 @@ impl BakeRecipe for EyelashBake {
         }]
     }
 
+    fn output_size() -> UVec2 {
+        SIZE
+    }
+
     fn new(inputs: &[Handle<Image>], outputs: &[Handle<Image>], _params: &Self::Params) -> Self {
         Self {
             origin_texture: inputs[0].clone(),
@@ -211,7 +215,6 @@ fn setup(
     let texture = asset_server.load::<Image>(EYELASH_BAKE_TEXTURE);
 
     let (mut recipe_mat, baked) = EyelashBake::bake(
-        SIZE,
         vec![texture],
         (),
         &mut images,
@@ -544,9 +547,15 @@ fn compute<R: BakeRecipe>(
             continue;
         };
 
+        let size = R::output_size();
+
         pass.set_bind_group(0, &bind_group.bind_group, &[]);
         pass.set_pipeline(pipeline);
-        pass.dispatch_workgroups(SIZE.x / WORKGROUP_SIZE, SIZE.y / WORKGROUP_SIZE, 1);
+        pass.dispatch_workgroups(
+            size.x.div_ceil(WORKGROUP_SIZE),
+            size.y.div_ceil(WORKGROUP_SIZE),
+            1,
+        );
 
         progress.last_baked.insert(entity.clone(), instance.version);
 

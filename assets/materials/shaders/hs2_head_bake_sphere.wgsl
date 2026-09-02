@@ -30,11 +30,4 @@ fn bake(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
   let final_color = source_color * vec4(1.0, 0.0, 0.0, 1.0);
 
   textureStore(output, location, final_color);
-
-  // let random_r = randomFloat((invocation_id.y << 16u) | invocation_id.x);
-  // let random_g = randomFloat((invocation_id.y << 16u) | invocation_id.x);
-  // let random_b = randomFloat((invocation_id.y << 16u) | invocation_id.x);
-  // let random_a = randomFloat((invocation_id.y << 16u) | invocation_id.x);
-  // let color = vec4(1.0, random_g, random_b, random_a);
-  // textureStore(output, location, color);
 }
