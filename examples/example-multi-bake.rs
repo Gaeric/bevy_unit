@@ -99,6 +99,7 @@ pub trait BakeRecipe: AsBindGroup + Send + Sync + Clone + Default + 'static {
             outputs,
             params,
             version: 0,
+            debug_save: false,
         };
         (recipe_mat, BakedMaterial { material, textures })
     }
@@ -110,6 +111,7 @@ pub struct RecipeMat<R: BakeRecipe> {
     pub outputs: Vec<Handle<Image>>,
     pub params: R::Params,
     pub version: u32,
+    pub debug_save: bool,
 }
 
 #[derive(Resource, ExtractResource, Clone, Default)]
@@ -208,7 +210,7 @@ fn setup(
 ) {
     let texture = asset_server.load::<Image>(EYELASH_BAKE_TEXTURE);
 
-    let (recipe_mat, baked) = EyelashBake::bake(
+    let (mut recipe_mat, baked) = EyelashBake::bake(
         SIZE,
         vec![texture],
         (),
@@ -216,6 +218,8 @@ fn setup(
         &mut materials,
         &asset_server,
     );
+
+    recipe_mat.debug_save = true;
 
     commands.spawn((
         Mesh3d(meshes.add(SphereMeshBuilder::new(
@@ -343,10 +347,13 @@ fn on_bake_done<R: BakeRecipe>(
     };
 
     if mat.version <= event.instance.version {
-        for h in &mat.outputs {
-            commands
-                .spawn(Readback::texture(h.clone()))
-                .observe(save_img);
+        if mat.debug_save {
+            for h in &mat.outputs {
+                commands
+                    .spawn(Readback::texture(h.clone()))
+                    .insert(Name::new(format!("{}_{}", R::LABEL, event.instance.entity)))
+                    .observe(save_img);
+            }
         }
 
         request.items.remove(&event.instance.entity);
@@ -398,6 +405,7 @@ fn save_img(
     mut commands: Commands,
     images: Res<Assets<Image>>,
     readbacks: Query<&Readback>,
+    names: Query<&Name>,
 ) {
     let Ok(Readback::Texture(handle)) = readbacks.get(event.entity) else {
         return;
@@ -407,6 +415,9 @@ fn save_img(
         warn!("bake output image not found");
         return;
     };
+
+    let filename = "bake_output".into();
+    let name = names.get(event.entity).unwrap_or(&filename);
 
     info!("readback image to cpu");
 
@@ -419,7 +430,7 @@ fn save_img(
     );
 
     if let Ok(dyn_img) = img.try_into_dynamic() {
-        if let Err(e) = dyn_img.save("bake_output.png") {
+        if let Err(e) = dyn_img.save(format!("{}.png", name)) {
             warn!("failed to save bake result: {e}");
         }
     } else {
