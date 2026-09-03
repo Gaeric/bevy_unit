@@ -1,5 +1,6 @@
 use crate::headless::HeadlessPlugin;
 use crate::raytracing::DemoRTPlugin;
+use crate::sphere::SphereBakePlugin;
 use crate::{camera::OrbitCameraPlugin, mat_convert::MatConvertPlugin};
 use bevy::camera::Hdr;
 use bevy::core_pipeline::Skybox;
@@ -51,13 +52,15 @@ fn main() {
         app.add_plugins(MatConvertPlugin);
     }
 
+    app.add_plugins(SphereBakePlugin);
+
     app.insert_resource(GlobalAmbientLight {
         brightness: 1000.,
         ..default()
     });
 
-    app.add_systems(Startup, setup_camera);
-    app.add_systems(Startup, setup);
+    // app.add_systems(Startup, setup_camera);
+    // app.add_systems(Startup, setup);
     app.run();
 }
 

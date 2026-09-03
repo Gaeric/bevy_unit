@@ -15,7 +15,7 @@ const SPHERE_BAKE_SHADER_PATH: &str = "materials/shaders/hs2_head_bake_sphere.wg
 const SPHERE_BAKE_TEXTURE: &str = "materials/uv_checker_bw.png";
 const SIZE: UVec2 = UVec2::new(256, 256);
 
-struct SphereBakePlugin;
+pub struct SphereBakePlugin;
 
 impl Plugin for SphereBakePlugin {
     fn build(&self, app: &mut App) {
