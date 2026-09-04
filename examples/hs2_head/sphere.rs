@@ -1,5 +1,4 @@
 use bevy::{
-    light::light_consts::lux::MOONLESS_NIGHT,
     mesh::{SphereKind, SphereMeshBuilder},
     prelude::*,
     render::render_resource::{AsBindGroup, TextureFormat},
@@ -22,7 +21,7 @@ impl Plugin for SphereBakePlugin {
         app.add_plugins(BakeRecipePlugin::<SphereBake>::default());
 
         app.add_systems(Startup, setup);
-        app.add_systems(Update, rotate_sphere);
+        // app.add_systems(Update, rotate_sphere);
         app.add_systems(Update, hotkey_compute_texture);
     }
 }
@@ -109,37 +108,7 @@ fn setup(
         Transform::from_xyz(0.0, 0.5, 0.0),
     ));
 
-    commands.spawn((
-        DirectionalLight {
-            illuminance: MOONLESS_NIGHT,
-            ..default()
-        },
-        Transform::from_xyz(1.0, 1.0, 1.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-
     commands.spawn(recipe_mat);
-}
-
-// `SphereMeshBuilder::uv` generates the sphere with its poles aligned to the
-// Z axis, while Bevy's scene convention uses Y as the up axis. Apply this
-// fixed rotation to align the sphere with the expected world orientation.
-// The original `extended_material_bindless` example includes the same
-// correction as part of its animated rotation. Without it, the sphere appears
-// tilted when it is stationary, even though the UV mapping itself is correct.
-fn rotate_sphere(mut meshes: Query<&mut Transform, With<Mesh3d>>, time: Res<Time>) {
-    for mut transform in &mut meshes {
-        transform.rotation = Quat::from_euler(
-            EulerRot::YXZ,
-            -time.elapsed_secs(),
-            std::f32::consts::FRAC_PI_2 * 3.0,
-            0.0,
-        );
-    }
 }
 
 fn hotkey_compute_texture(
