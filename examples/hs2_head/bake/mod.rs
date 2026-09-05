@@ -1,8 +1,16 @@
 //! use compute shader to render the assets to a standard material for rr or raster
 
+mod body;
+mod eye;
 mod eyelash;
+mod eyeshadow;
+mod head;
 
+pub use body::BodyBake;
+pub use eye::EyeBake;
 pub use eyelash::EyelashBake;
+pub use eyeshadow::EyeshadowBake;
+pub use head::HeadBake;
 
 use std::{borrow::Cow, marker::PhantomData};
 

@@ -9,10 +9,10 @@ use bevy::{
 
 use crate::{
     bake::{
-        BakeRecipe, BakeRecipePlugin, BakedMaterial, EyelashBake, PendingBakeRequests, RecipeMat,
+        BakeRecipe, BakeRecipePlugin, BakedMaterial, BodyBake, EyeBake, EyelashBake,
+        EyeshadowBake, HeadBake, PendingBakeRequests, RecipeMat,
     },
-    body::BodyMaterialExt, eye::EyeMaterialExt,
-    eyeshadow::EyeshadowMaterialExt, head::HeadMaterialExt,
+    eye::EyeMaterialExt,
 };
 
 pub trait MaterialConverter<E: Asset + MaterialExtension> {
@@ -36,6 +36,50 @@ pub trait MaterialBaker: BakeRecipe<Output = StandardMaterial> + Sized {
 }
 
 impl MaterialBaker for EyelashBake {
+    fn bake_from_material(
+        _base: &StandardMaterial,
+        asset_server: &AssetServer,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
+        Self::create(asset_server, images, materials)
+    }
+}
+
+impl MaterialBaker for EyeshadowBake {
+    fn bake_from_material(
+        _base: &StandardMaterial,
+        asset_server: &AssetServer,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
+        Self::create(asset_server, images, materials)
+    }
+}
+
+impl MaterialBaker for HeadBake {
+    fn bake_from_material(
+        _base: &StandardMaterial,
+        asset_server: &AssetServer,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
+        Self::create(asset_server, images, materials)
+    }
+}
+
+impl MaterialBaker for BodyBake {
+    fn bake_from_material(
+        _base: &StandardMaterial,
+        asset_server: &AssetServer,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
+        Self::create(asset_server, images, materials)
+    }
+}
+
+impl MaterialBaker for EyeBake {
     fn bake_from_material(
         _base: &StandardMaterial,
         asset_server: &AssetServer,
@@ -205,19 +249,29 @@ impl Plugin for MatConvertPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MaterialRegistry>()
             .add_observer(update_material)
-            // Bake path: provides `PendingBakeRequests<EyelashBake>` and the
-            // render-world compute pipeline / dispatch for `EyelashBake`.
-            .add_plugins(BakeRecipePlugin::<EyelashBake>::default());
+            // Bake path: provides `PendingBakeRequests<R>` and the render-world
+            // compute pipeline / dispatch for each baked material recipe.
+            .add_plugins((
+                BakeRecipePlugin::<EyelashBake>::default(),
+                BakeRecipePlugin::<EyeshadowBake>::default(),
+                BakeRecipePlugin::<HeadBake>::default(),
+                BakeRecipePlugin::<BodyBake>::default(),
+                BakeRecipePlugin::<EyeBake>::default(),
+            ));
         register_ext_materials!(
             app,
-            (EyeMaterialExt, "Eyes_"),
+            // (EyeMaterialExt, "Eyes_"),
             // (EyelashMaterialExt, "Eyelashes_"),
-            (EyeshadowMaterialExt, "Eyeshadow_"),
-            (HeadMaterialExt, "Head_"),
-            (BodyMaterialExt, "Torso_")
+            // (EyeshadowMaterialExt, "Eyeshadow_"),
+            // (HeadMaterialExt, "Head_"),
+            // (BodyMaterialExt, "Torso_")
         );
         app.add_systems(Startup, |mut registry: ResMut<MaterialRegistry>| {
             registry.register_bake::<EyelashBake>("Eyelashes_");
+            registry.register_bake::<EyeshadowBake>("Eyeshadow_");
+            registry.register_bake::<HeadBake>("Head_");
+            registry.register_bake::<BodyBake>("Torso_");
+            registry.register_bake::<EyeBake>("Eyes_");
         });
     }
 }
