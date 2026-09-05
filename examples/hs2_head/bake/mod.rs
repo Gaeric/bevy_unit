@@ -1,5 +1,7 @@
 //! use compute shader to render the assets to a standard material for rr or raster
 
+mod eyelash;
+
 use std::{borrow::Cow, marker::PhantomData};
 
 use bevy::{
