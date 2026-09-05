@@ -8,7 +8,10 @@ use bevy::{
 };
 
 use crate::{
-    body::BodyMaterialExt, eye::EyeMaterialExt, eyelash::EyelashMaterialExt,
+    bake::{
+        BakeRecipe, BakeRecipePlugin, BakedMaterial, EyelashBake, PendingBakeRequests, RecipeMat,
+    },
+    body::BodyMaterialExt, eye::EyeMaterialExt,
     eyeshadow::EyeshadowMaterialExt, head::HeadMaterialExt,
 };
 
@@ -17,6 +20,30 @@ pub trait MaterialConverter<E: Asset + MaterialExtension> {
         base: &StandardMaterial,
         asset_server: &AssetServer,
     ) -> ExtendedMaterial<StandardMaterial, E>;
+}
+
+/// Bake-version of the "conversion method" front door.
+///
+/// The scheduler layer only calls this; each recipe implements it and keeps
+/// its own loading/params logic private (see `EyelashBake::create`).
+pub trait MaterialBaker: BakeRecipe<Output = StandardMaterial> + Sized {
+    fn bake_from_material(
+        base: &StandardMaterial,
+        asset_server: &AssetServer,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>);
+}
+
+impl MaterialBaker for EyelashBake {
+    fn bake_from_material(
+        _base: &StandardMaterial,
+        asset_server: &AssetServer,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
+        Self::create(asset_server, images, materials)
+    }
 }
 
 pub trait MaterialApplier: Send + Sync {
@@ -40,6 +67,36 @@ where
             info!("insert new mat handle");
             e.remove::<MeshMaterial3d<StandardMaterial>>();
             e.insert(MeshMaterial3d(handle));
+        }
+    }
+}
+
+struct BakeApplier<R>(PhantomData<R>);
+
+impl<R> MaterialApplier for BakeApplier<R>
+where
+    R: MaterialBaker,
+{
+    fn apply(&self, entity: Entity, base: &StandardMaterial, world: &mut World) {
+        let asset_server = world.resource::<AssetServer>().clone();
+
+        let (recipe_mat, baked) = world.resource_scope(
+            |world, mut images: Mut<Assets<Image>>| {
+                let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+                R::bake_from_material(base, &asset_server, &mut images, &mut materials)
+            },
+        );
+
+        // Queue the bake: render world dispatches compute on the next frames
+        // and fills the output texture. No callback needed - the material
+        // handle already points at the pre-allocated output image.
+        let mut pending = world.resource_mut::<PendingBakeRequests<R>>();
+        pending.items.insert(entity, recipe_mat);
+
+        if let Ok(mut e) = world.get_entity_mut(entity) {
+            info!("insert baked mat handle");
+            // `StandardMaterial` -> same component type, just overwrite.
+            e.insert(MeshMaterial3d(baked.material));
         }
     }
 }
@@ -69,13 +126,23 @@ impl MaterialRegistry {
             Arc::new(ExtendedApplier::<E>(PhantomData)),
         );
     }
+
+    pub fn register_bake<R>(&mut self, name: &str)
+    where
+        R: MaterialBaker,
+    {
+        self.map.insert(
+            name.to_string(),
+            Arc::new(BakeApplier::<R>(PhantomData)),
+        );
+    }
 }
 
 struct DefaultTransparentApplier;
 
 impl MaterialApplier for DefaultTransparentApplier {
     fn apply(&self, entity: Entity, base: &StandardMaterial, world: &mut World) {
-        let mut mat = base.clone();
+        let mat = base.clone();
 
         // mat.alpha_mode = AlphaMode::Blend;
         // mat.base_color = Color::Srgba(Srgba::new(0.5, 0.5, 0.5, 1.0));
@@ -137,14 +204,20 @@ macro_rules! register_ext_materials {
 impl Plugin for MatConvertPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MaterialRegistry>()
-            .add_observer(update_material);
+            .add_observer(update_material)
+            // Bake path: provides `PendingBakeRequests<EyelashBake>` and the
+            // render-world compute pipeline / dispatch for `EyelashBake`.
+            .add_plugins(BakeRecipePlugin::<EyelashBake>::default());
         register_ext_materials!(
             app,
             (EyeMaterialExt, "Eyes_"),
-            (EyelashMaterialExt, "Eyelashes_"),
+            // (EyelashMaterialExt, "Eyelashes_"),
             (EyeshadowMaterialExt, "Eyeshadow_"),
             (HeadMaterialExt, "Head_"),
             (BodyMaterialExt, "Torso_")
         );
+        app.add_systems(Startup, |mut registry: ResMut<MaterialRegistry>| {
+            registry.register_bake::<EyelashBake>("Eyelashes_");
+        });
     }
 }

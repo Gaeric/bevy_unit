@@ -1,10 +1,11 @@
 use bevy::{
+    image::ImageLoaderSettings,
     prelude::*,
     render::render_resource::{AsBindGroup, TextureFormat},
     shader::ShaderRef,
 };
 
-use crate::bake::{BakeChannel, BakeOutputSpec, BakeRecipe};
+use crate::bake::{BakeChannel, BakeOutputSpec, BakeRecipe, BakedMaterial, RecipeMat};
 
 const SIZE: UVec2 = UVec2::new(1024, 1024);
 const EYELASH_LABEL: &str = "eyelash";
@@ -60,5 +61,25 @@ impl BakeRecipe for EyelashBake {
             alpha_mode: AlphaMode::Blend,
             ..default()
         }
+    }
+}
+
+impl EyelashBake {
+    /// Recipe-private entry point: only EyelashBake knows the source texture
+    /// path and its loader settings. The scheduler layer (`BakeApplier`)
+    /// calls this without touching any per-recipe loading details.
+    pub fn create(
+        asset_server: &AssetServer,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
+        let tex = asset_server
+            .load_builder()
+            .with_settings(|settings: &mut ImageLoaderSettings| {
+                settings.is_srgb = true;
+            })
+            .load("materials/c_t_eyelash_04-DXT1.dds");
+
+        Self::bake(vec![tex], (), images, materials, asset_server)
     }
 }

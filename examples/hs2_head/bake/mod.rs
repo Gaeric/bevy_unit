@@ -2,6 +2,8 @@
 
 mod eyelash;
 
+pub use eyelash::EyelashBake;
+
 use std::{borrow::Cow, marker::PhantomData};
 
 use bevy::{
