@@ -33,6 +33,7 @@ use crate::mat_convert::{MaterialApplier, MaterialRegistry};
 
 const WORKGROUP_SIZE: u32 = 8;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BakeChannel {
     BaseColor,
@@ -41,6 +42,19 @@ pub enum BakeChannel {
     Occlusion,
     Emissive,
     Custom(&'static str),
+}
+
+impl BakeChannel {
+    pub fn label(&self) -> &str {
+        match self {
+            BakeChannel::BaseColor => "base_color",
+            BakeChannel::NormalMap => "normal",
+            BakeChannel::MetallicRoughness => "metallic",
+            BakeChannel::Occlusion => "occlusion",
+            BakeChannel::Emissive => "emissive",
+            BakeChannel::Custom(name) => name,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +66,6 @@ pub struct BakeOutputSpec {
 #[derive(Debug, Clone)]
 pub struct BakedMaterial<M: Asset> {
     pub material: Handle<M>,
-    pub textures: Vec<(BakeChannel, Handle<Image>)>,
 }
 
 pub trait BakeRecipe: AsBindGroup + Send + Sync + Clone + Default + 'static {
@@ -96,12 +109,6 @@ pub trait BakeRecipe: AsBindGroup + Send + Sync + Clone + Default + 'static {
         let mat_asset = recipe.material(asset_server);
         let material = materials.add(mat_asset);
 
-        let textures = specs
-            .iter()
-            .zip(outputs.iter())
-            .map(|(spec, handle)| (spec.channel, handle.clone()))
-            .collect();
-
         let recipe_mat = RecipeMat {
             inputs,
             outputs,
@@ -109,7 +116,7 @@ pub trait BakeRecipe: AsBindGroup + Send + Sync + Clone + Default + 'static {
             version: 0,
             debug_save: false,
         };
-        (recipe_mat, BakedMaterial { material, textures })
+        (recipe_mat, BakedMaterial { material })
     }
 }
 
@@ -308,10 +315,15 @@ fn on_bake_done<R: BakeRecipe>(
 
     if mat.version <= event.instance.version {
         if mat.debug_save {
-            for h in &mat.outputs {
+            for (spec, h) in R::output_specs().iter().zip(mat.outputs.iter()) {
                 commands
                     .spawn(Readback::texture(h.clone()))
-                    .insert(Name::new(format!("{}_{}", R::LABEL, event.instance.entity)))
+                    .insert(Name::new(format!(
+                        "{}_{}_{}",
+                        R::LABEL,
+                        spec.channel.label(),
+                        event.instance.entity
+                    )))
                     .observe(save_img);
             }
         }
