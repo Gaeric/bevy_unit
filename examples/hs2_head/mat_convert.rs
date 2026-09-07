@@ -1,76 +1,14 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 
 use bevy::{
-    gltf::GltfMaterialName,
-    pbr::{ExtendedMaterial, MaterialExtension},
-    platform::collections::HashMap,
-    prelude::*,
+    gltf::GltfMaterialName, platform::collections::HashMap, prelude::*,
     world_serialization::WorldInstanceReady,
 };
 
-use crate::bake::{
-    BakeRecipePlugin, BodyBake, EyeBake, EyelashBake, EyeshadowBake, HeadBake, MaterialBaker,
-    PendingBakeRequests,
-};
-
-pub trait MaterialConverter<E: Asset + MaterialExtension> {
-    fn convert(
-        base: &StandardMaterial,
-        asset_server: &AssetServer,
-    ) -> ExtendedMaterial<StandardMaterial, E>;
-}
+use crate::bake::BakeMatPlugin;
 
 pub trait MaterialApplier: Send + Sync {
     fn apply(&self, entity: Entity, base: &StandardMaterial, world: &mut World);
-}
-
-struct ExtendedApplier<E>(PhantomData<E>);
-
-impl<E> MaterialApplier for ExtendedApplier<E>
-where
-    E: Asset + MaterialExtension + MaterialConverter<E>,
-{
-    fn apply(&self, entity: Entity, base: &StandardMaterial, world: &mut World) {
-        let asset_server = world.resource::<AssetServer>();
-        let ext_mat = E::convert(base, asset_server);
-
-        let mut assets = world.resource_mut::<Assets<ExtendedMaterial<StandardMaterial, E>>>();
-        let handle = assets.add(ext_mat);
-
-        if let Ok(mut e) = world.get_entity_mut(entity) {
-            info!("insert new mat handle");
-            e.remove::<MeshMaterial3d<StandardMaterial>>();
-            e.insert(MeshMaterial3d(handle));
-        }
-    }
-}
-
-struct BakeApplier<R>(PhantomData<R>);
-
-impl<R> MaterialApplier for BakeApplier<R>
-where
-    R: MaterialBaker,
-{
-    fn apply(&self, entity: Entity, base: &StandardMaterial, world: &mut World) {
-        let asset_server = world.resource::<AssetServer>().clone();
-
-        let (recipe_mat, baked) = world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
-            let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
-            R::bake_from_material(base, &asset_server, &mut images, &mut materials)
-        });
-
-        // Queue the bake: render world dispatches compute on the next frames
-        // and fills the output texture. No callback needed - the material
-        // handle already points at the pre-allocated output image.
-        let mut pending = world.resource_mut::<PendingBakeRequests<R>>();
-        pending.items.insert(entity, recipe_mat);
-
-        if let Ok(mut e) = world.get_entity_mut(entity) {
-            info!("insert baked mat handle");
-            // `StandardMaterial` -> same component type, just overwrite.
-            e.insert(MeshMaterial3d(baked.material));
-        }
-    }
 }
 
 #[derive(Resource)]
@@ -89,22 +27,18 @@ impl Default for MaterialRegistry {
 }
 
 impl MaterialRegistry {
-    pub fn register<E>(&mut self, name: &str)
-    where
-        E: Asset + MaterialExtension + MaterialConverter<E>,
-    {
-        self.map.insert(
-            name.to_string(),
-            Arc::new(ExtendedApplier::<E>(PhantomData)),
-        );
+    /// Register any applier under a glTF material name.
+    pub fn register(&mut self, name: impl Into<String>, applier: Arc<dyn MaterialApplier>) {
+        self.map.insert(name.into(), applier);
     }
 
-    pub fn register_bake<R>(&mut self, name: &str)
-    where
-        R: MaterialBaker,
-    {
+    /// Look up the applier for a glTF material name, falling back to the
+    /// default transparent applier.
+    pub fn applier_for(&self, name: &str) -> Arc<dyn MaterialApplier> {
         self.map
-            .insert(name.to_string(), Arc::new(BakeApplier::<R>(PhantomData)));
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| self.default_applier.clone())
     }
 }
 
@@ -147,12 +81,7 @@ fn update_material(
 
         commands.queue(move |world: &mut World| {
             let registry = world.resource::<MaterialRegistry>();
-
-            let applier = registry
-                .map
-                .get(&name)
-                .cloned()
-                .unwrap_or_else(|| registry.default_applier.clone());
+            let applier = registry.applier_for(&name);
             applier.apply(descendant, &mat, world);
         })
     }
@@ -160,44 +89,14 @@ fn update_material(
 
 pub struct MatConvertPlugin;
 
-macro_rules! register_ext_materials {
-    ($app:expr, $( ($ty:ty, $name:expr) ),* $(,)?) => {{
-        $(
-            $app.add_plugins(MaterialPlugin::<ExtendedMaterial<StandardMaterial, $ty>>::default());
-        )*
-        $app.add_systems(Startup, |mut registry: ResMut<MaterialRegistry>| {
-            $( registry.register::<$ty>($name); )*
-        });
-    }};
-}
-
 impl Plugin for MatConvertPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MaterialRegistry>()
             .add_observer(update_material)
-            // Bake path: provides `PendingBakeRequests<R>` and the render-world
-            // compute pipeline / dispatch for each baked material recipe.
-            .add_plugins((
-                BakeRecipePlugin::<EyelashBake>::default(),
-                BakeRecipePlugin::<EyeshadowBake>::default(),
-                BakeRecipePlugin::<HeadBake>::default(),
-                BakeRecipePlugin::<BodyBake>::default(),
-                BakeRecipePlugin::<EyeBake>::default(),
-            ));
-        // register_ext_materials!(
-        //     app,
-        //     (EyeMaterialExt, "Eyes_"),
-        //     (EyelashMaterialExt, "Eyelashes_"),
-        //     (EyeshadowMaterialExt, "Eyeshadow_"),
-        //     (HeadMaterialExt, "Head_"),
-        //     (BodyMaterialExt, "Torso_")
-        // );
-        app.add_systems(Startup, |mut registry: ResMut<MaterialRegistry>| {
-            registry.register_bake::<EyelashBake>("Eyelashes_");
-            registry.register_bake::<EyeshadowBake>("Eyeshadow_");
-            registry.register_bake::<HeadBake>("Head_");
-            registry.register_bake::<BodyBake>("Torso_");
-            registry.register_bake::<EyeBake>("Eyes_");
-        });
+            // Active route: GPU bake for every part.
+            .add_plugins(BakeMatPlugin);
+
+        // CPU `ExtendedMaterial` alternative (dormant): swap `BakeMatPlugin`
+        // for `ext_mat::ExtMatPlugin` to use the ExtendedMaterial route.
     }
 }

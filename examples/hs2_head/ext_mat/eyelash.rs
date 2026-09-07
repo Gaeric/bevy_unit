@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 
-use crate::mat_convert::MaterialConverter;
+use crate::ext_mat::MaterialConverter;
 
 const EYELASHES_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_eyelashes_material.wgsl";
 

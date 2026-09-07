@@ -12,7 +12,7 @@ pub use eyelash::EyelashBake;
 pub use eyeshadow::EyeshadowBake;
 pub use head::HeadBake;
 
-use std::{borrow::Cow, marker::PhantomData};
+use std::{borrow::Cow, marker::PhantomData, sync::Arc};
 
 use bevy::{
     asset::RenderAssetUsages,
@@ -28,6 +28,8 @@ use bevy::{
     },
     shader::ShaderRef,
 };
+
+use crate::mat_convert::{MaterialApplier, MaterialRegistry};
 
 const WORKGROUP_SIZE: u32 = 8;
 
@@ -130,6 +132,43 @@ pub trait MaterialBaker: BakeRecipe<Output = StandardMaterial> + Sized {
     ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
         Self::create(asset_server, images, materials)
     }
+}
+
+/// Applier bridging one baked recipe into the shared registry.
+struct BakeApplier<R>(PhantomData<R>);
+
+impl<R> MaterialApplier for BakeApplier<R>
+where
+    R: MaterialBaker,
+{
+    fn apply(&self, entity: Entity, base: &StandardMaterial, world: &mut World) {
+        let asset_server = world.resource::<AssetServer>().clone();
+
+        let (recipe_mat, baked) = world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
+            let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+            R::bake_from_material(base, &asset_server, &mut images, &mut materials)
+        });
+
+        // Queue the bake: render world dispatches compute on the next frames
+        // and fills the output texture. No callback needed - the material
+        // handle already points at the pre-allocated output image.
+        let mut pending = world.resource_mut::<PendingBakeRequests<R>>();
+        pending.items.insert(entity, recipe_mat);
+
+        if let Ok(mut e) = world.get_entity_mut(entity) {
+            info!("insert baked mat handle");
+            // `StandardMaterial` -> same component type, just overwrite.
+            e.insert(MeshMaterial3d(baked.material));
+        }
+    }
+}
+
+/// Register one baked recipe under its glTF material name.
+pub fn register_bake<R>(registry: &mut MaterialRegistry, name: &str)
+where
+    R: MaterialBaker,
+{
+    registry.register(name, Arc::new(BakeApplier::<R>(PhantomData)));
 }
 
 #[derive(Component, Clone)]
@@ -450,6 +489,30 @@ fn compute<R: BakeRecipe>(
         signals.instances.push(BakeInstance {
             entity: *entity,
             version: instance.version,
+        });
+    }
+}
+
+/// Bake route facade: installs the render-world pipelines for every part
+/// recipe and registers each one in the shared [`MaterialRegistry`].
+pub struct BakeMatPlugin;
+
+impl Plugin for BakeMatPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            BakeRecipePlugin::<EyelashBake>::default(),
+            BakeRecipePlugin::<EyeshadowBake>::default(),
+            BakeRecipePlugin::<HeadBake>::default(),
+            BakeRecipePlugin::<BodyBake>::default(),
+            BakeRecipePlugin::<EyeBake>::default(),
+        ));
+
+        app.add_systems(Startup, |mut registry: ResMut<MaterialRegistry>| {
+            register_bake::<EyelashBake>(&mut registry, "Eyelashes_");
+            register_bake::<EyeshadowBake>(&mut registry, "Eyeshadow_");
+            register_bake::<HeadBake>(&mut registry, "Head_");
+            register_bake::<BodyBake>(&mut registry, "Torso_");
+            register_bake::<EyeBake>(&mut registry, "Eyes_");
         });
     }
 }

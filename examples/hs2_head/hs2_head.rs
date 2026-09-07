@@ -7,19 +7,14 @@ use bevy::core_pipeline::Skybox;
 use bevy::prelude::*;
 use clap::Parser;
 
+mod bake;
 mod camera;
+mod ext_mat;
 mod headless;
-
-mod body;
-mod eye;
-mod eyelash;
-mod eyeshadow;
-mod head;
 mod mat_convert;
 mod raytracing;
 // mod texture_bake;
 // mod bake_jobs;
-mod bake;
 mod sphere;
 
 #[derive(Parser, Debug)]

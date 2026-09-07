@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 
-use crate::mat_convert::MaterialConverter;
+use crate::ext_mat::MaterialConverter;
 
 const EYESHADOWE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_eyeshadow_material.wgsl";
 

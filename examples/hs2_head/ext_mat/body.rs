@@ -8,7 +8,7 @@ use bevy::{
     shader::ShaderRef,
 };
 
-use crate::mat_convert::MaterialConverter;
+use crate::ext_mat::MaterialConverter;
 
 const BODY_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_body_material.wgsl";
 

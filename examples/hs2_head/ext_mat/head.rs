@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 
-use crate::mat_convert::MaterialConverter;
+use crate::ext_mat::MaterialConverter;
 
 const HEAD_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_head_material.wgsl";
 
