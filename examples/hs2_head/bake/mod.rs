@@ -159,13 +159,13 @@ where
         // Queue the bake: render world dispatches compute on the next frames
         // and fills the output texture. No callback needed - the material
         // handle already points at the pre-allocated output image.
-        let mut pending = world.resource_mut::<PendingBakeRequests<R>>();
-        pending.items.insert(entity, recipe_mat);
+        // let mut pending = world.resource_mut::<PendingBakeRequests<R>>();
+        // pending.items.insert(entity, recipe_mat);
 
         if let Ok(mut e) = world.get_entity_mut(entity) {
-            info!("insert baked mat handle");
+            info!("insert {} baked mat handle", R::LABEL);
             // `StandardMaterial` -> same component type, just overwrite.
-            e.insert(MeshMaterial3d(baked.material));
+            e.insert((MeshMaterial3d(baked.material), recipe_mat));
         }
     }
 }
@@ -260,6 +260,12 @@ impl<R: BakeRecipe> Default for BakeProgress<R> {
     }
 }
 
+#[derive(Message)]
+pub struct ReBake<R: BakeRecipe> {
+    pub entity: Entity,
+    pub params: Option<R::Params>,
+}
+
 pub struct BakeRecipePlugin<R: BakeRecipe>(PhantomData<R>);
 
 impl<R: BakeRecipe> Default for BakeRecipePlugin<R> {
@@ -272,6 +278,8 @@ impl<R: BakeRecipe> Plugin for BakeRecipePlugin<R> {
     fn build(&self, app: &mut App) {
         app.insert_resource(PendingBakeRequests::<R>::default());
         app.add_plugins(ExtractResourcePlugin::<PendingBakeRequests<R>>::default());
+        app.add_systems(Update, handle_rebake::<R>);
+        app.add_message::<ReBake<R>>();
         app.add_observer(on_bake_done::<R>);
 
         let render_app = app.sub_app_mut(RenderApp);
@@ -287,6 +295,55 @@ impl<R: BakeRecipe> Plugin for BakeRecipePlugin<R> {
                 .run_if(bake_pending::<R>),
         );
         render_app.add_systems(RenderGraph, compute::<R>.run_if(bake_pending::<R>));
+    }
+}
+
+fn queue_rebake<R: BakeRecipe>(
+    entity: Entity,
+    mat: &mut RecipeMat<R>,
+    pending: &mut PendingBakeRequests<R>,
+) {
+    mat.version += 1;
+    pending.items.insert(entity, mat.clone());
+}
+
+fn handle_rebake<R: BakeRecipe>(
+    mut messages: MessageReader<ReBake<R>>,
+    mut mats: Query<&mut RecipeMat<R>>,
+    mut pending: ResMut<PendingBakeRequests<R>>,
+) {
+    for ReBake { entity, params } in messages.read() {
+        let Ok(mut mat) = mats.get_mut(*entity) else {
+            warn!("[{}] no recipe instance on {entity:?}", R::LABEL);
+            continue;
+        };
+
+        if let Some(p) = params {
+            mat.params = p.clone();
+        }
+
+        queue_rebake(*entity, &mut mat, &mut pending);
+    }
+}
+
+/// `R` hotkey: queue every parked [`RecipeMat`] of this concrete recipe type.
+///
+/// `RecipeMat<R>` is a *separate component for every recipe type*, so an
+/// "rebake all recipes" cannot be expressed as a single `Query`. Instead the
+/// type is spelled out by whoever registers the recipes (see `BakeMatPlugin`).
+/// The sphere demo keeps its own `R` handler in `SphereBakePlugin`, so one
+/// `R` press covers the whole scene without double-queueing the sphere.
+fn rebake_all_on_r<R: BakeRecipe>(
+    input: Res<ButtonInput<KeyCode>>,
+    mut mats: Query<(Entity, &mut RecipeMat<R>)>,
+    mut pending: ResMut<PendingBakeRequests<R>>,
+) {
+    if !input.just_pressed(KeyCode::KeyR) {
+        return;
+    }
+
+    for (entity, mut mat) in &mut mats {
+        queue_rebake(entity, &mut mat, &mut pending);
     }
 }
 
@@ -518,6 +575,19 @@ impl Plugin for BakeMatPlugin {
             BakeRecipePlugin::<BodyBake>::default(),
             BakeRecipePlugin::<EyeBake>::default(),
         ));
+
+        // Debug hotkey: spell out the concrete recipe types since `RecipeMat<R>`
+        // is a distinct component per recipe and cannot be queried generically.
+        app.add_systems(
+            Update,
+            (
+                rebake_all_on_r::<EyelashBake>,
+                rebake_all_on_r::<EyeshadowBake>,
+                rebake_all_on_r::<HeadBake>,
+                rebake_all_on_r::<BodyBake>,
+                rebake_all_on_r::<EyeBake>,
+            ),
+        );
 
         app.add_systems(Startup, |mut registry: ResMut<MaterialRegistry>| {
             register_bake::<EyelashBake>(&mut registry, "Eyelashes_");

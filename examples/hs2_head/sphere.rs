@@ -147,18 +147,10 @@ fn hotkey_compute_texture(
     mat_components: Query<(Entity, &mut RecipeMat<SphereBake>)>,
     mut request: ResMut<PendingBakeRequests<SphereBake>>,
 ) {
-    if input.just_pressed(KeyCode::KeyR) {
+    if input.just_pressed(KeyCode::KeyT) {
         for (entity, mut recipe_mat) in mat_components {
             recipe_mat.version += 1;
             request.items.insert(entity, recipe_mat.clone());
         }
     }
 }
-
-// fn main() {
-//     App::new()
-//         .add_plugins(DefaultPlugins)
-//         .add_plugins(SphereBakePlugin)
-//         .insert_resource(ClearColor(Color::BLACK))
-//         .run();
-// }
