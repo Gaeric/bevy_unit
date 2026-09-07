@@ -111,6 +111,27 @@ pub trait BakeRecipe: AsBindGroup + Send + Sync + Clone + Default + 'static {
     }
 }
 
+/// Bake-version of the "conversion method" front door.
+///
+/// The scheduler layer only calls this; each recipe implements it and keeps
+/// its own loading/params logic private (see `EyelashBake::create`).
+pub trait MaterialBaker: BakeRecipe<Output = StandardMaterial> + Sized {
+    fn create(
+        asset_server: &AssetServer,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>);
+
+    fn bake_from_material(
+        _base: &StandardMaterial,
+        asset_server: &AssetServer,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
+        Self::create(asset_server, images, materials)
+    }
+}
+
 #[derive(Component, Clone)]
 pub struct RecipeMat<R: BakeRecipe> {
     pub inputs: Vec<Handle<Image>>,

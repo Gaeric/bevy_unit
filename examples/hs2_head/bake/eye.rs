@@ -9,7 +9,9 @@ use bevy::{
     shader::ShaderRef,
 };
 
-use crate::bake::{BakeChannel, BakeOutputSpec, BakeRecipe, BakedMaterial, RecipeMat};
+use crate::bake::{
+    BakeChannel, BakeOutputSpec, BakeRecipe, BakedMaterial, MaterialBaker, RecipeMat,
+};
 
 const SIZE: UVec2 = UVec2::new(1024, 1024);
 const EYE_LABEL: &str = "eye";
@@ -111,11 +113,11 @@ impl BakeRecipe for EyeBake {
     }
 }
 
-impl EyeBake {
+impl MaterialBaker for EyeBake {
     /// Recipe-private entry point: only EyeBake knows the source texture
     /// paths and their loader settings. The scheduler layer (`BakeApplier`)
     /// calls this without touching any per-recipe loading details.
-    pub fn create(
+    fn create(
         asset_server: &AssetServer,
         images: &mut Assets<Image>,
         materials: &mut Assets<StandardMaterial>,

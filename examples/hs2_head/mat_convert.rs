@@ -4,15 +4,13 @@ use bevy::{
     gltf::GltfMaterialName,
     pbr::{ExtendedMaterial, MaterialExtension},
     platform::collections::HashMap,
-    prelude::*, world_serialization::WorldInstanceReady,
+    prelude::*,
+    world_serialization::WorldInstanceReady,
 };
 
-use crate::{
-    bake::{
-        BakeRecipe, BakeRecipePlugin, BakedMaterial, BodyBake, EyeBake, EyelashBake,
-        EyeshadowBake, HeadBake, PendingBakeRequests, RecipeMat,
-    },
-    eye::EyeMaterialExt,
+use crate::bake::{
+    BakeRecipePlugin, BodyBake, EyeBake, EyelashBake, EyeshadowBake, HeadBake, MaterialBaker,
+    PendingBakeRequests,
 };
 
 pub trait MaterialConverter<E: Asset + MaterialExtension> {
@@ -20,74 +18,6 @@ pub trait MaterialConverter<E: Asset + MaterialExtension> {
         base: &StandardMaterial,
         asset_server: &AssetServer,
     ) -> ExtendedMaterial<StandardMaterial, E>;
-}
-
-/// Bake-version of the "conversion method" front door.
-///
-/// The scheduler layer only calls this; each recipe implements it and keeps
-/// its own loading/params logic private (see `EyelashBake::create`).
-pub trait MaterialBaker: BakeRecipe<Output = StandardMaterial> + Sized {
-    fn bake_from_material(
-        base: &StandardMaterial,
-        asset_server: &AssetServer,
-        images: &mut Assets<Image>,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>);
-}
-
-impl MaterialBaker for EyelashBake {
-    fn bake_from_material(
-        _base: &StandardMaterial,
-        asset_server: &AssetServer,
-        images: &mut Assets<Image>,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
-        Self::create(asset_server, images, materials)
-    }
-}
-
-impl MaterialBaker for EyeshadowBake {
-    fn bake_from_material(
-        _base: &StandardMaterial,
-        asset_server: &AssetServer,
-        images: &mut Assets<Image>,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
-        Self::create(asset_server, images, materials)
-    }
-}
-
-impl MaterialBaker for HeadBake {
-    fn bake_from_material(
-        _base: &StandardMaterial,
-        asset_server: &AssetServer,
-        images: &mut Assets<Image>,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
-        Self::create(asset_server, images, materials)
-    }
-}
-
-impl MaterialBaker for BodyBake {
-    fn bake_from_material(
-        _base: &StandardMaterial,
-        asset_server: &AssetServer,
-        images: &mut Assets<Image>,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
-        Self::create(asset_server, images, materials)
-    }
-}
-
-impl MaterialBaker for EyeBake {
-    fn bake_from_material(
-        _base: &StandardMaterial,
-        asset_server: &AssetServer,
-        images: &mut Assets<Image>,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
-        Self::create(asset_server, images, materials)
-    }
 }
 
 pub trait MaterialApplier: Send + Sync {
@@ -124,12 +54,10 @@ where
     fn apply(&self, entity: Entity, base: &StandardMaterial, world: &mut World) {
         let asset_server = world.resource::<AssetServer>().clone();
 
-        let (recipe_mat, baked) = world.resource_scope(
-            |world, mut images: Mut<Assets<Image>>| {
-                let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
-                R::bake_from_material(base, &asset_server, &mut images, &mut materials)
-            },
-        );
+        let (recipe_mat, baked) = world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
+            let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+            R::bake_from_material(base, &asset_server, &mut images, &mut materials)
+        });
 
         // Queue the bake: render world dispatches compute on the next frames
         // and fills the output texture. No callback needed - the material
@@ -175,10 +103,8 @@ impl MaterialRegistry {
     where
         R: MaterialBaker,
     {
-        self.map.insert(
-            name.to_string(),
-            Arc::new(BakeApplier::<R>(PhantomData)),
-        );
+        self.map
+            .insert(name.to_string(), Arc::new(BakeApplier::<R>(PhantomData)));
     }
 }
 
@@ -258,14 +184,14 @@ impl Plugin for MatConvertPlugin {
                 BakeRecipePlugin::<BodyBake>::default(),
                 BakeRecipePlugin::<EyeBake>::default(),
             ));
-        register_ext_materials!(
-            app,
-            // (EyeMaterialExt, "Eyes_"),
-            // (EyelashMaterialExt, "Eyelashes_"),
-            // (EyeshadowMaterialExt, "Eyeshadow_"),
-            // (HeadMaterialExt, "Head_"),
-            // (BodyMaterialExt, "Torso_")
-        );
+        // register_ext_materials!(
+        //     app,
+        //     (EyeMaterialExt, "Eyes_"),
+        //     (EyelashMaterialExt, "Eyelashes_"),
+        //     (EyeshadowMaterialExt, "Eyeshadow_"),
+        //     (HeadMaterialExt, "Head_"),
+        //     (BodyMaterialExt, "Torso_")
+        // );
         app.add_systems(Startup, |mut registry: ResMut<MaterialRegistry>| {
             registry.register_bake::<EyelashBake>("Eyelashes_");
             registry.register_bake::<EyeshadowBake>("Eyeshadow_");

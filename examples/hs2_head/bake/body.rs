@@ -4,7 +4,9 @@ use bevy::{
     shader::ShaderRef,
 };
 
-use crate::bake::{BakeChannel, BakeOutputSpec, BakeRecipe, BakedMaterial, RecipeMat};
+use crate::bake::{
+    BakeChannel, BakeOutputSpec, BakeRecipe, BakedMaterial, MaterialBaker, RecipeMat,
+};
 
 const SIZE: UVec2 = UVec2::new(4096, 4096);
 const BODY_LABEL: &str = "body";
@@ -62,11 +64,11 @@ impl BakeRecipe for BodyBake {
     }
 }
 
-impl BodyBake {
+impl MaterialBaker for BodyBake {
     /// Recipe-private entry point: only BodyBake knows the source texture
     /// path and its loader settings. The scheduler layer (`BakeApplier`)
     /// calls this without touching any per-recipe loading details.
-    pub fn create(
+    fn create(
         asset_server: &AssetServer,
         images: &mut Assets<Image>,
         materials: &mut Assets<StandardMaterial>,
