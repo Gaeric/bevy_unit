@@ -1,3 +1,5 @@
+use crate::bake::BakeMatPlugin;
+use crate::ext_mat::ExtMatPlugin;
 use crate::headless::HeadlessPlugin;
 use crate::raytracing::DemoRTPlugin;
 use crate::sphere::SphereBakePlugin;
@@ -13,8 +15,6 @@ mod ext_mat;
 mod headless;
 mod mat_convert;
 mod raytracing;
-// mod texture_bake;
-// mod bake_jobs;
 mod sphere;
 
 #[derive(Parser, Debug)]
@@ -23,8 +23,10 @@ struct Args {
     orbit: bool,
     #[arg(short = 'l', long)]
     light: bool,
-    #[arg(short = 'r', long)]
+    #[arg(short = 'r', long, requires = "bake")]
     raytracing: bool,
+    #[arg(short = 'b', long)]
+    bake: bool,
 }
 
 fn main() {
@@ -43,8 +45,14 @@ fn main() {
 
     if args.raytracing {
         app.add_plugins(DemoRTPlugin);
+    }
+
+    if args.bake {
+        app.add_plugins(MatConvertPlugin);
+        app.add_plugins(BakeMatPlugin);
     } else {
         app.add_plugins(MatConvertPlugin);
+        app.add_plugins(ExtMatPlugin);
     }
 
     app.add_plugins(SphereBakePlugin);
@@ -54,8 +62,8 @@ fn main() {
         ..default()
     });
 
-    // app.add_systems(Startup, setup_camera);
-    // app.add_systems(Startup, setup);
+    app.add_systems(Startup, setup_camera);
+    app.add_systems(Startup, setup);
     app.run();
 }
 

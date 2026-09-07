@@ -5,8 +5,6 @@ use bevy::{
     world_serialization::WorldInstanceReady,
 };
 
-use crate::bake::BakeMatPlugin;
-
 pub trait MaterialApplier: Send + Sync {
     fn apply(&self, entity: Entity, base: &StandardMaterial, world: &mut World);
 }
@@ -92,11 +90,6 @@ pub struct MatConvertPlugin;
 impl Plugin for MatConvertPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MaterialRegistry>()
-            .add_observer(update_material)
-            // Active route: GPU bake for every part.
-            .add_plugins(BakeMatPlugin);
-
-        // CPU `ExtendedMaterial` alternative (dormant): swap `BakeMatPlugin`
-        // for `ext_mat::ExtMatPlugin` to use the ExtendedMaterial route.
+            .add_observer(update_material);
     }
 }
