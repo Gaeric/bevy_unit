@@ -1,21 +1,15 @@
 use std::ops::Range;
 
+use bevy::platform::collections::HashSet;
 use bevy::{
     asset::{UntypedAssetId, embedded_asset, load_embedded_asset},
-    ecs::{
-        component::Tick,
-        query::{QueryItem, ROQueryItem},
-        system::lifetimeless::SRes,
-    },
-    pbr::RenderMeshInstances,
+    ecs::system::lifetimeless::SRes,
     prelude::*,
     render::{
         Extract, Render, RenderApp, RenderSystems,
         batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreprocessingSupport},
-        camera::ExtractedCamera,
-        mesh::{RenderMesh, allocator::SlabId},
-        render_asset::RenderAssets,
-        render_graph::{NodeRunError, RenderGraphExt, ViewNode, ViewNodeRunner},
+        camera::{DirtySpecializations, ExtractedCamera, PendingQueues},
+        mesh::allocator::MeshSlabs,
         render_phase::{
             AddRenderCommand, BinnedPhaseItem, BinnedRenderPhaseType,
             CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions, InputUniformIndex,
@@ -23,14 +17,14 @@ use bevy::{
             RenderCommandResult, SetItemPipeline, ViewBinnedRenderPhases,
         },
         render_resource::{
-            BindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries, BufferUsages,
-            CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState, LoadOp,
-            MultisampleState, Operations, PipelineCache, PrimitiveState, RawBufferVec,
+            BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
+            BufferUsages, CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState,
+            LoadOp, MultisampleState, Operations, PipelineCache, PrimitiveState, RawBufferVec,
             RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
             ShaderStages, ShaderType, SpecializedRenderPipeline, SpecializedRenderPipelines,
             StoreOp, TextureFormat, VertexState, binding_types::uniform_buffer,
         },
-        renderer::{RenderDevice, RenderQueue},
+        renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery},
         sync_world::MainEntity,
         view::{
             ExtractedView, NoIndirectDrawing, RenderVisibleEntities, RetainedViewEntity, ViewTarget,
@@ -39,32 +33,37 @@ use bevy::{
 };
 use bytemuck::{Pod, Zeroable};
 
-use crate::{
-    graph::{ShineRenderGraph, ShineRenderNode},
-    light::LightPassNode,
-    overlay::OverlayPassNode,
-    prepass::{PrepassNode, PrepassPlugin},
-};
+use crate::graph::ShineRenderGraph;
 
 mod light;
 mod mesh;
 mod overlay;
 mod prepass;
 
-/// The ShinePlugin uses its own render graph
-/// Now we only have one node, use for verify the PhaseItem and Render graph node
+/// The shine pipeline uses its own camera-driven render schedule.
+///
+/// Bevy 0.19 replaced the old render-graph nodes (`RenderSubGraph`,
+/// `ViewNodeRunner`, ...) with schedule-based, camera-driven rendering: each
+/// camera selects which render schedule to run through its
+/// [`CameraRenderGraph`](bevy::render::camera::CameraRenderGraph) component.
+///
+/// `ShineRenderGraph` is that custom schedule. Systems registered here run
+/// once per frame for every camera whose `CameraRenderGraph` is set to it,
+/// with the camera's [`CurrentView`](bevy::render::renderer::CurrentView)
+/// available through the [`ViewQuery`] system parameter.
 pub mod graph {
-    use bevy::render::render_graph::{RenderLabel, RenderSubGraph};
+    use bevy::ecs::schedule::{Schedule, ScheduleLabel};
 
-    #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderSubGraph)]
+    /// Schedule label of the shine camera pipeline.
+    ///
+    /// Use it on a camera: `CameraRenderGraph::new(ShineRenderGraph)`.
+    #[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash, Default)]
     pub struct ShineRenderGraph;
 
-    #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-    pub enum ShineRenderNode {
-        OneNode,
-        // Prepass,
-        // LightPass,
-        // OverlayPass,
+    impl ShineRenderGraph {
+        pub fn base_schedule() -> Schedule {
+            Schedule::new(Self)
+        }
     }
 }
 
@@ -72,8 +71,6 @@ pub struct ShinePlugin;
 
 impl Plugin for ShinePlugin {
     fn build(&self, app: &mut App) {
-        // app.add_plugins(PrepassPlugin);
-
         embedded_asset!(app, "shaders/shader.wgsl");
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
@@ -84,38 +81,18 @@ impl Plugin for ShinePlugin {
             .init_resource::<DrawFunctions<ShinePhase>>()
             .init_resource::<SpecializedRenderPipelines<ShinePipeline>>()
             .init_resource::<ViewBinnedRenderPhases<ShinePhase>>()
+            .init_resource::<PendingShineQueues>()
             .add_render_command::<ShinePhase, DrawShineCustom>()
+            .add_systems(ExtractSchedule, extract_shine_phases)
             .add_systems(
                 Render,
-                prepare_shine_phase_item_buffers.in_set(RenderSystems::Prepare),
+                (
+                    prepare_shine_phase_item_buffers.in_set(RenderSystems::Prepare),
+                    queue_shine_phase_item.in_set(RenderSystems::QueueMeshes),
+                ),
             )
-            .add_systems(ExtractSchedule, extract_shine_phases)
-            .add_systems(Render, queue_shine_phase_item.in_set(RenderSystems::Queue));
-
-        render_app
-            .add_render_sub_graph(graph::ShineRenderGraph)
-            .add_render_graph_node::<ViewNodeRunner<ShineNode>>(
-                graph::ShineRenderGraph,
-                graph::ShineRenderNode::OneNode,
-            );
-
-        // render_app.add_render_graph_node::<ViewNodeRunner<LightPassNode>>(
-        //     graph::ShineRenderGraph,
-        //     graph::ShineRenderNode::LightPass,
-        // );
-        // render_app.add_render_graph_node::<ViewNodeRunner<OverlayPassNode>>(
-        //     graph::ShineRenderGraph,
-        //     graph::ShineRenderNode::OverlayPass,
-        // );
-
-        render_app.add_render_graph_edges(
-            ShineRenderGraph,
-            (
-                ShineRenderNode::OneNode,
-                // ShineRenderNode::LightPass,
-                // ShineRenderNode::OverlayPass,
-            ),
-        );
+            .add_schedule(ShineRenderGraph::base_schedule())
+            .add_systems(ShineRenderGraph, render_shine_system);
     }
 
     fn finish(&self, app: &mut App) {
@@ -128,98 +105,108 @@ impl Plugin for ShinePlugin {
     }
 }
 
-/// A render-world system that enqueues the entity with custom rendering into
-/// the shine render phases of each view
+/// A render-world system that enqueues visible meshes into the shine render
+/// phases of each view.
 ///
-/// For each view, iterates over all the meshes visible from that view and adds
-/// them to [`BinnedRenderPhase`]s as appropriate.
-/// [0.15] refer queue_material_meshes
-/// [0.15] refer example custom_shader_instancing::queue_custom
-/// [0.15] refer example custom_phase_item::queue_custom_phase_item
+/// For each view we iterate over the mesh entities that became newly visible /
+/// need re-queueing this frame and add them to
+/// [`ViewBinnedRenderPhases`]`<ShinePhase>`, while removing the ones that
+/// disappeared from the view.
+///
+/// [0.19] refer example custom_phase_item::queue_custom_phase_item
+#[allow(clippy::too_many_arguments)]
 pub fn queue_shine_phase_item(
     pipeline_cache: Res<PipelineCache>,
     shine_pipeline: Res<ShinePipeline>,
     mut shine_phases: ResMut<ViewBinnedRenderPhases<ShinePhase>>,
     shine_draw_functions: Res<DrawFunctions<ShinePhase>>,
     mut specialized_render_pipelines: ResMut<SpecializedRenderPipelines<ShinePipeline>>,
-    // views: Query<(&ExtractedView, &RenderVisibleEntities, &Msaa)>,
     views: Query<(&ExtractedView, &RenderVisibleEntities)>,
-    mut next_tick: Local<Tick>,
+    dirty_specializations: Res<DirtySpecializations>,
+    mut pending_shine_queues: ResMut<PendingShineQueues>,
 ) {
     debug!("queue shine phase item");
 
     let draw_shine_function = shine_draw_functions.read().id::<DrawShineCustom>();
 
-    // Render phases are pre-view, so we nned to iterate over all views so that
-    // the entity appears in them. (In this example, we have only one view, but
-    // it's good practice to loop over all views anyway.)
-    // for (view, view_visible_entities, msaa) in views.iter() {
     for (view, view_visible_entities) in views.iter() {
-        debug!("view is {:?}", view.retained_view_entity);
         let Some(shine_phase) = shine_phases.get_mut(&view.retained_view_entity) else {
-            debug!("view {:?} skip ", view.retained_view_entity);
             continue;
         };
 
-        debug!("view_visiable_entity is {:?}", view_visible_entities);
+        let Some(render_visible_mesh_entities) = view_visible_entities.get::<Mesh3d>() else {
+            continue;
+        };
 
-        // for &entity in view_visible_entities.iter::<With<Mesh3d>>() {
-        for &entity in view_visible_entities.iter::<Mesh3d>() {
-            debug!("entity add shine phase: {:?}", entity);
+        let view_pending_queues =
+            pending_shine_queues.prepare_for_new_frame(view.retained_view_entity);
 
+        // First, remove meshes that need to be re-specialized, and those that
+        // were removed, from the bins.
+        for &main_entity in dirty_specializations
+            .iter_to_dequeue(view.retained_view_entity, render_visible_mesh_entities)
+        {
+            shine_phase.remove(main_entity);
+        }
+
+        for (render_entity, main_entity) in dirty_specializations.iter_to_queue(
+            view.retained_view_entity,
+            render_visible_mesh_entities,
+            &view_pending_queues.prev_frame,
+        ) {
             // Ordinarily, the [`SpecializedRenderPipeline::Key`] would contain
-            // some per-view settings, such as whether the view is HDR, but for
-            // simplicity's sake we simply hard-code the view's characteristics,
-            // with the exception of number of MSAA samples.
+            // some per-view settings, but for simplicity's sake we hard-code
+            // the view's characteristics here.
             let pipeline_id = specialized_render_pipelines.specialize(
                 &pipeline_cache,
                 &shine_pipeline,
                 Msaa::Off,
             );
 
-            // Bump the change tick in order to force Bevy to rebuild the bin
-            let this_tick = next_tick.get() + 1;
-            next_tick.set(this_tick);
-
-            let batch_set_key = ShineBatchSetKey {
-                pipeline: pipeline_id,
-                draw_function: draw_shine_function,
-                index_slab: None,
-            };
-
             // Add the custom render item. We use the
             // [`BinnedRenderPhaseType::NonMesh`] type to skip the special
-            // handleing that Bevy has for meshes (preprocessing, indirect draws, etc.)
+            // handling that Bevy has for meshes (preprocessing, indirect draws, etc.)
             //
-            // The asset ID is arbitrary; we simply use [`AssetId::invalid`,
-            // but you can use anything you lik. Note that the asset ID need
-            // not be the ID of a [`Mesh`]
-            debug!("add shine_phase for visible entity");
+            // The asset ID is arbitrary; we simply use [`AssetId::invalid`],
+            // but you can use anything you like. Note that the asset ID need
+            // not be the ID of a [`Mesh`].
             shine_phase.add(
-                batch_set_key,
+                ShineBatchSetKey {
+                    pipeline: pipeline_id,
+                    draw_function: draw_shine_function,
+                    slabs: MeshSlabs::default(),
+                },
                 ShineBinKey {
                     asset_id: AssetId::<Mesh>::invalid().untyped(),
                 },
-                entity,
+                (*render_entity, *main_entity),
                 InputUniformIndex::default(),
                 BinnedRenderPhaseType::NonMesh,
-                // BinnedRenderPhaseType::MultidrawableMesh,
-                *next_tick,
-            )
+            );
         }
     }
 }
 
-/// extract the shine phase
-/// [0.15] refer opaque_3d phase and node
-/// [0.16] refer extract_core_3d_camera_phases
+/// A resource that holds entities that couldn't be queued yet because their
+/// dependent assets haven't loaded.
+///
+/// See the documentation of [`PendingQueues`] for more information.
+#[derive(Default, Deref, DerefMut, Resource)]
+pub struct PendingShineQueues(pub PendingQueues);
+
+/// Extract the shine phase for every active 3D camera.
+///
+/// [0.19] refer core_3d::extract_core_3d_camera_phases
+#[allow(clippy::type_complexity)]
 pub fn extract_shine_phases(
     mut shine_phases: ResMut<ViewBinnedRenderPhases<ShinePhase>>,
     cameras_3d: Extract<Query<(Entity, &Camera, Has<NoIndirectDrawing>), With<Camera3d>>>,
+    mut live_entities: Local<HashSet<RetainedViewEntity>>,
     gpu_preprocessing_support: Res<GpuPreprocessingSupport>,
 ) {
+    live_entities.clear();
+
     for (entity, camera, no_indirect_drawing) in &cameras_3d {
-        debug!("extract main_entity {:?}", entity);
         if !camera.is_active {
             continue;
         }
@@ -232,26 +219,18 @@ pub fn extract_shine_phases(
             GpuPreprocessingMode::PreprocessingOnly
         });
 
+        // This is the main camera, so we use the first subview index (0).
         let retained_view_entity = RetainedViewEntity::new(entity.into(), None, 0);
 
-        debug!(
-            "extract shine phases for entity: {:?}",
-            retained_view_entity
-        );
         shine_phases.prepare_for_new_frame(retained_view_entity, gpu_preprocessing_mode);
+        live_entities.insert(retained_view_entity);
     }
+
+    // Clear out all dead views.
+    shine_phases.retain(|view_entity, _| live_entities.contains(view_entity));
 }
 
-// /// The ShinePlugin Data trasfer to GPU
-// #[derive(Component, ShaderType, Clone, Copy, ExtractComponent)]
-// pub struct ShineUniform {
-//     width: u32,
-//     height: u32,
-//     padding_a: u32,
-//     padding_b: u32,
-// }
-
-/// The CPU-side structure that describes some fake data
+/// The CPU-side structure that describes some fake data transferred to GPU.
 #[derive(Clone, Copy, Pod, Zeroable, ShaderType)]
 #[repr(C)]
 struct ShineProp {
@@ -261,18 +240,17 @@ struct ShineProp {
     pad_b: u32,
 }
 
-/// The GPU data for shine phase item
+/// The GPU data for the shine phase.
 #[derive(Resource)]
 pub struct ShineUniformBuffers {
-    /// The property for shine config
-    /// transfer data to GPU.
+    /// The property for shine config, transferred to the GPU.
     property: RawBufferVec<ShineProp>,
 }
 
 /// Create the [`ShineUniformBuffers`] resource.
 ///
-/// This mut be done in a startup system because it needs the [`RenderDevice`]
-/// and [`RenderQueue`] to exist, and they don't until [`App::run`] is called.
+/// This must be done after [`App::run`] has started, because it needs the
+/// [`RenderDevice`] and [`RenderQueue`] to exist.
 fn prepare_shine_phase_item_buffers(mut commands: Commands) {
     commands.init_resource::<ShineUniformBuffers>();
 }
@@ -301,7 +279,7 @@ impl FromWorld for ShineUniformBuffers {
 #[derive(Resource)]
 pub struct ShinePipeline {
     shader: Handle<Shader>,
-    bind_group_layout: BindGroupLayout,
+    bind_group_layout: BindGroupLayoutDescriptor,
 }
 
 #[derive(Resource)]
@@ -312,13 +290,17 @@ pub struct ShineBindGroup {
 fn prepare_shine_bind_group(
     mut commands: Commands,
     shine_pipeline: Res<ShinePipeline>,
+    pipeline_cache: Res<PipelineCache>,
     render_device: Res<RenderDevice>,
     buffers: Res<ShineUniformBuffers>,
 ) {
     if let Some(binding) = buffers.property.binding() {
+        // 0.19 resolves actual `BindGroupLayout`s from the descriptors stored
+        // on the pipeline via the pipeline cache.
+        let layout = pipeline_cache.get_bind_group_layout(&shine_pipeline.bind_group_layout);
         let bindgroup = render_device.create_bind_group(
             "shine bindgroup",
-            &shine_pipeline.bind_group_layout,
+            &layout,
             &BindGroupEntries::single(binding),
         );
 
@@ -328,15 +310,11 @@ fn prepare_shine_bind_group(
 
 impl FromWorld for ShinePipeline {
     fn from_world(world: &mut World) -> Self {
-        let render_device = world.resource::<RenderDevice>();
+        let entries =
+            BindGroupLayoutEntries::single(ShaderStages::all(), uniform_buffer::<ShineProp>(false));
 
-        let bind_group_layout = render_device.create_bind_group_layout(
-            "shine uniform bindgroup layout",
-            &BindGroupLayoutEntries::single(
-                ShaderStages::all(),
-                uniform_buffer::<ShineProp>(false),
-            ),
-        );
+        let bind_group_layout =
+            BindGroupLayoutDescriptor::new("shine uniform bindgroup layout", &entries);
 
         ShinePipeline {
             shader: load_embedded_asset!(world, "shaders/shader.wgsl"),
@@ -354,7 +332,7 @@ impl SpecializedRenderPipeline for ShinePipeline {
         RenderPipelineDescriptor {
             label: Some("shine render pipeline".into()),
             layout,
-            push_constant_ranges: vec![],
+            immediate_size: 0,
             vertex: VertexState {
                 shader: self.shader.clone(),
                 shader_defs: vec![],
@@ -366,7 +344,7 @@ impl SpecializedRenderPipeline for ShinePipeline {
                 shader_defs: vec![],
                 entry_point: Some("fragment".into()),
                 targets: vec![Some(ColorTargetState {
-                    // todo: check HDR format
+                    // todo: derive from the actual view output format
                     format: TextureFormat::Bgra8UnormSrgb,
                     blend: None,
                     write_mask: ColorWrites::ALL,
@@ -384,25 +362,24 @@ impl SpecializedRenderPipeline for ShinePipeline {
     }
 }
 
-/// [0.16] refer ShaownBatchSetKey
+/// [0.19] refer Opaque3dBatchSetKey / custom_phase_item
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ShineBatchSetKey {
-    /// The identifier of the render pipeline
+    /// The identifier of the render pipeline.
     pub pipeline: CachedRenderPipelineId,
 
-    /// The function used to draw
+    /// The function used to draw.
     pub draw_function: DrawFunctionId,
 
-    /// The ID of the slab of GPU Memory that contains vertex data.
+    /// The ID of the slab of GPU memory that contains vertex data.
     ///
-    /// For non-mesh items, you can fill this with 0 if your items can be
-    /// multi-drawn, or with a unique value if they can't
-    pub index_slab: Option<SlabId>,
+    /// For non-mesh items you can leave this at the default value.
+    pub slabs: MeshSlabs,
 }
 
 impl PhaseItemBatchSetKey for ShineBatchSetKey {
     fn indexed(&self) -> bool {
-        self.index_slab.is_some()
+        false
     }
 }
 
@@ -411,27 +388,27 @@ pub struct ShineBinKey {
     pub asset_id: UntypedAssetId,
 }
 
-/// [0.16] refer ShadowPhase
+/// A binned phase item rendered by the shine pipeline.
+///
+/// [0.19] refer Opaque3d / custom_phase_item
 pub struct ShinePhase {
-    ///Determines which objects can be placed into a *batch set*.
-    ///
-    /// Objects in a single batch set can potentially be multi-drawn together,
-    /// if it's enabled and the current platform supports it.
+    /// Determines which objects can be placed into a *batch set*.
     pub batch_set_key: ShineBatchSetKey,
 
     /// The key, which determines which can be batched.
     pub bin_key: ShineBinKey,
-    /// An entity from which data will be fetched, including the mesh if
-    /// applicable.
+
+    /// An entity from which data will be fetched.
     pub representative_entity: (Entity, MainEntity),
+
     /// The ranges of instances.
     pub batch_range: Range<u32>,
+
     /// An extra index, which is either a dynamic offset or an index in the
     /// indirect parameters list.
     pub extra_index: PhaseItemExtraIndex,
 }
 
-/// [0.16] refer Shadow
 impl PhaseItem for ShinePhase {
     #[inline]
     fn entity(&self) -> Entity {
@@ -501,108 +478,82 @@ type DrawShineCustom = (SetItemPipeline, DrawShine);
 struct DrawShine;
 
 impl<P: PhaseItem> RenderCommand<P> for DrawShine {
-    type Param = (
-        SRes<ShineBindGroup>,
-        SRes<RenderAssets<RenderMesh>>,
-        SRes<RenderMeshInstances>,
-    );
+    type Param = SRes<ShineBindGroup>;
     type ViewQuery = ();
     type ItemQuery = ();
 
     #[inline]
     fn render<'w>(
-        item: &P,
-        _view: ROQueryItem<'w, '_, Self::ViewQuery>,
-        _entity: Option<ROQueryItem<'w, '_, Self::ItemQuery>>,
-        (shine_bindgroup, meshes, mesh_instances): bevy::ecs::system::SystemParamItem<
-            'w,
-            '_,
-            Self::Param,
-        >,
+        _item: &P,
+        _view: bevy::ecs::query::ROQueryItem<'w, '_, Self::ViewQuery>,
+        _entity: Option<bevy::ecs::query::ROQueryItem<'w, '_, Self::ItemQuery>>,
+        shine_bindgroup: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let bind_group = &shine_bindgroup.into_inner().bindgroup;
-        pass.set_bind_group(0, &bind_group, &[]);
+        let shine_bind_group = shine_bindgroup.into_inner();
+        pass.set_bind_group(0, &shine_bind_group.bindgroup, &[]);
 
-        let meshes = meshes.into_inner();
-        let mesh_instances = mesh_instances.into_inner();
-
-        // get mesh info, but how to set the
-        if let Some(mesh_instance) = mesh_instances.render_mesh_queue_data(item.main_entity()) {
-            debug!(
-                "get mesh instance success: {:?}",
-                mesh_instance.mesh_asset_id
-            );
-            if let Some(mesh) = meshes.get(mesh_instance.mesh_asset_id) {
-                debug!("get mesh success: {:?}", mesh);
-            }
-        }
-
+        // Draw a full-screen triangle (6 vertices), same as the embedded
+        // shader's `POSITIONS` array expects.
         pass.draw(0..6, 0..1);
         RenderCommandResult::Success
     }
 }
 
-/// Render node used by shine
-#[derive(Default)]
-pub struct ShineNode;
+/// The system that renders the shine phase.
+///
+/// It runs in the [`ShineRenderGraph`] camera schedule and acts as the
+/// replacement for the former render-graph `ShineNode`.
+///
+/// [0.19] refer core_3d::main_opaque_pass_3d / custom_render_phase::custom_draw_system
+fn render_shine_system(
+    world: &World,
+    view: ViewQuery<(&ExtractedCamera, &ExtractedView, &ViewTarget)>,
+    shine_phases: Res<ViewBinnedRenderPhases<ShinePhase>>,
+    mut ctx: RenderContext,
+) {
+    debug!("shine render system run");
 
-impl ViewNode for ShineNode {
-    type ViewQuery = (
-        &'static ExtractedCamera,
-        &'static ExtractedView,
-        &'static ViewTarget,
-        // &'static ShineUniform,
-    );
+    let view_entity = view.entity();
+    let (camera, extracted_view, view_target) = view.into_inner();
 
-    fn run<'w>(
-        &self,
-        graph: &mut bevy::render::render_graph::RenderGraphContext,
-        render_context: &mut bevy::render::renderer::RenderContext<'w>,
-        (camera, view, view_target): QueryItem<'w, '_, Self::ViewQuery>,
-        world: &'w World,
-    ) -> Result<(), NodeRunError> {
-        debug!("shine node debug run");
+    let Some(shine_phase) = shine_phases.get(&extracted_view.retained_view_entity) else {
+        return;
+    };
 
-        let view_entity = graph.view_entity();
+    // In 0.19 the camera output is stored separately from the main textures;
+    // `ViewTarget::out_texture()` now returns an `Option`.
+    let Some(out_texture) = view_target.out_texture() else {
+        return;
+    };
 
-        let Some(shine_phases) = world.get_resource::<ViewBinnedRenderPhases<ShinePhase>>() else {
-            panic!("shine render phases not exists");
-        };
+    let mut render_pass = ctx.begin_tracked_render_pass(RenderPassDescriptor {
+        label: Some("shine node"),
+        color_attachments: &[Some(RenderPassColorAttachment {
+            view: out_texture,
+            depth_slice: None,
+            resolve_target: None,
+            ops: Operations {
+                load: LoadOp::Clear(LinearRgba::BLACK.into()),
+                store: StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
 
-        let Some(shine_phase) = shine_phases.get(&view.retained_view_entity) else {
-            panic!("shine phase not exists");
-        };
-
-        let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-            label: Some("shine node"),
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: &view_target.out_texture(),
-                depth_slice: None,
-                resolve_target: None,
-                ops: Operations {
-                    load: LoadOp::Clear(LinearRgba::BLACK.into()),
-                    store: StoreOp::default(),
-                },
-            })],
-            ..Default::default()
-        });
-
-        if let Some(viewport) = camera.viewport.as_ref() {
-            render_pass.set_camera_viewport(viewport);
-        }
-
-        if !shine_phase.is_empty() {
-            debug!("shine phase render now");
-            if let Err(err) = shine_phase.render(&mut render_pass, world, view_entity) {
-                error!("Error encountered while rendering the shine phase {err:?}");
-            }
-        } else {
-            panic!("shine phase is empty");
-        }
-
-        debug!("shine render done");
-
-        Ok(())
+    if let Some(viewport) = camera.viewport.as_ref() {
+        render_pass.set_camera_viewport(viewport);
     }
+
+    if !shine_phase.is_empty() {
+        debug!("shine phase render now");
+        if let Err(err) = shine_phase.render(&mut render_pass, world, view_entity) {
+            error!("Error encountered while rendering the shine phase {err:?}");
+        }
+    }
+
+    debug!("shine render done");
 }

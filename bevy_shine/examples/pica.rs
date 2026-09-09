@@ -2,12 +2,12 @@ use std::f32::consts::PI;
 
 use bevy::camera::CameraMainTextureUsages;
 use bevy::gltf::GltfMaterialName;
-///! example follow solari
+// example follows the solari reference demo
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
-use bevy::scene::SceneInstanceReady;
 use bevy::solari::pathtracer::{Pathtracer, PathtracingPlugin};
 use bevy::solari::prelude::*;
+use bevy::world_serialization::WorldInstanceReady;
 
 fn main() {
     App::new()
@@ -52,6 +52,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     ));
 }
 
+#[allow(dead_code)]
 fn get_camera_position(camera: Single<&Transform, With<Camera3d>>) {
     let transform = *camera;
     println!(
@@ -61,10 +62,11 @@ fn get_camera_position(camera: Single<&Transform, With<Camera3d>>) {
 }
 
 #[derive(Resource)]
+#[allow(dead_code)]
 struct RobotLightMaterial(Handle<StandardMaterial>);
 
 fn add_raytracing_meshes_on_scene_load(
-    scene_ready: On<SceneInstanceReady>,
+    scene_ready: On<WorldInstanceReady>,
     children: Query<&Children>,
     mesh_query: Query<(
         &Mesh3d,
@@ -83,7 +85,7 @@ fn add_raytracing_meshes_on_scene_load(
                 .entity(descendant)
                 .insert(RaytracingMesh3d(mesh_handle.clone()));
 
-            let mesh = meshes.get_mut(mesh_handle).unwrap();
+            let mut mesh = meshes.get_mut(mesh_handle).unwrap();
             if !mesh.contains_attribute(Mesh::ATTRIBUTE_UV_0) {
                 let vertex_count = mesh.count_vertices();
                 mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 0.0]; vertex_count]);
@@ -104,11 +106,11 @@ fn add_raytracing_meshes_on_scene_load(
             commands.entity(descendant).remove::<Mesh3d>();
 
             if material_name.map(|s| s.0.as_str()) == Some("material") {
-                let material = materials.get_mut(material_handle).unwrap();
+                let mut material = materials.get_mut(material_handle).unwrap();
                 material.emissive = LinearRgba::BLACK;
             }
             if material_name.map(|s| s.0.as_str()) == Some("Lights") {
-                let material = materials.get_mut(material_handle).unwrap();
+                let mut material = materials.get_mut(material_handle).unwrap();
                 material.emissive =
                     LinearRgba::from(Color::srgb(0.941, 0.714, 0.043)) * 1_000_000.0;
                 material.alpha_mode = AlphaMode::Opaque;
@@ -117,7 +119,7 @@ fn add_raytracing_meshes_on_scene_load(
                 commands.insert_resource(RobotLightMaterial(material_handle.clone()));
             }
             if material_name.map(|s| s.0.as_str()) == Some("Glass_Dark_01") {
-                let material = materials.get_mut(material_handle).unwrap();
+                let mut material = materials.get_mut(material_handle).unwrap();
                 material.alpha_mode = AlphaMode::Opaque;
                 material.specular_transmission = 0.0;
             }

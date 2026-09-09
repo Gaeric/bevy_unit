@@ -1,4 +1,4 @@
-///! An example for comparison with Solari-generated images
+//! An example for comparison with Solari-generated images
 use bevy::prelude::*;
 use bevy_shine::ShinePlugin;
 use std::f32::consts::PI;

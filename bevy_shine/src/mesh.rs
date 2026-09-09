@@ -1,44 +1,37 @@
+#![allow(dead_code)]
+
 use bevy::{
     mesh::{PrimitiveTopology, VertexAttributeValues},
     prelude::*,
-    render::render_resource::ShaderType,
 };
 use itertools::Itertools;
 
-/// The mesh vertex on Gpu
-#[derive(Debug, ShaderType, Clone, Copy)]
+/// The mesh vertex on the CPU side, before it gets uploaded to the GPU.
+///
+/// TODO: upload triangle soups through a storage buffer; the runtime-sized
+/// `#[size(runtime)] Vec` `ShaderType` layout used before 0.19 is no longer
+/// accepted by the current `ShaderType` derive.
+#[derive(Debug, Clone, Copy)]
 pub struct GpuVertex {
     pub position: Vec3,
     pub normal: Vec3,
     pub uv: Vec2,
 }
 
-#[derive(Default, Debug, ShaderType)]
+#[derive(Debug, Default)]
 pub struct GpuVertexBuffer {
-    #[size(runtime)]
     pub data: Vec<GpuVertex>,
 }
 
-// #[derive(Debug)]
-// pub struct GpuMesh {
-//     pub vertices: Vec<GpuVertex>,
-// }
-
-#[derive(Debug, ShaderType)]
+#[derive(Debug)]
 pub struct GpuTriangle {
     pub triangle: [GpuVertex; 3],
 }
 
-#[derive(Debug, Default, ShaderType)]
+#[derive(Debug, Default)]
 pub struct GpuTriangles {
-    #[size(runtime)]
     pub triangles: Vec<GpuTriangle>,
 }
-
-// #[derive(Default, Resource)]
-// pub struct ShineTriangleAssets {
-//     pub trangle_buffer: StorageBuffer<GpuTriangles>,
-// }
 
 #[derive(Debug)]
 pub enum ExtractMeshResult {
@@ -48,13 +41,14 @@ pub enum ExtractMeshResult {
     IncompatiblePrimitiveTopology,
 }
 
+/// Placeholder plugin for collecting meshes into GPU triangle buffers.
+///
+/// Not registered by [`crate::ShinePlugin`] yet.
 pub struct ShineMeshPlugin;
 
 impl Plugin for ShineMeshPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, collect_mesh_triangles);
-        // let render_app = app.sub_app_mut(RenderApp);
-        // render_app.add_systems(Render, extract_mesh_assets.in_set(RenderSet::PrepareAssets));
     }
 }
 
@@ -130,6 +124,7 @@ impl GpuTriangles {
     }
 }
 
+#[allow(clippy::single_match)]
 fn collect_mesh_triangles(mut events: MessageReader<AssetEvent<Mesh>>, assets: Res<Assets<Mesh>>) {
     for event in events.read() {
         info!("mesh event: {:?}", event);
