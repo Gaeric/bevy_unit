@@ -12,10 +12,10 @@ mod atmosphere;
 mod camera;
 mod character;
 mod control;
+mod gp;
 mod level_switch;
 mod perf;
 mod utils;
-mod gp;
 
 use camera::WaltzCamera;
 use character::WaltzPlayer;

@@ -1,0 +1,76 @@
+## 🔴 1. 速度被乘了两遍（最严重）
+
+`bevy_waltz/src/control/character_ctrl.rs` 里你喂的是：
+
+```rust
+controller.basis = TnuaBuiltinWalk {
+    desired_motion: direction * motion_config.speed,  // speed = 15
+    desired_forward: Dir3::new(-direction.f32()).ok(),
+};
+```
+
+而 v0.32 的 `TnuaBuiltinWalk` 已经不再自带速度字段（只剩 `desired_motion` / `desired_forward`），真正的速度在 `TnuaBuiltinWalkConfig.speed` 里，而且 **`apply` 里会再乘一次**（`../bevy-tnua/src/builtins/walk.rs`）：
+
+```rust
+let desired_velocity = self.desired_motion * config.speed;
+```
+
+你的 `WaltzTnuaCtrlSchemeConfig::default()` 里的 `basis: TnuaBuiltinWalkConfig { float_height: 0.01, ... }` **没有设 `speed`**，用的是默认值 `20.0`。所以你实际期望速度是 `15 × 20 = 300 m/s`（斜向还可能是 300√2），几乎会瞬移。
+
+**正确做法（二选一）：**
+- 喂方向向量（长度 ≤1），把速度放进 basis config：`basis: TnuaBuiltinWalkConfig { speed: <你的速度>, .. }`（参考 demo 只喂 `direction`、速度走 config）；或
+- 保留 `desired_motion = direction * speed`，但把 basis config 的 `speed` 设成 `1.0`。
+
+> 注意：键盘 Cardinal 输入对角时如果没有归一化，配合这个乘数还会导致斜向更快。demo 在喂之前有 `clamp_length_max(1.0)`。
+
+## 🔴 2. 松开按键后角色不会停（输入层问题，但直接表现为角色乱跑）
+
+`AccumulatedInput.last_move` 只在 `On<Fire<Move>>` 时被覆盖（`character_ctrl.rs` 的 `accumulate_movement`），而增强输入里 `Fire` 只在 action 处于 `Fired` 时每帧触发；松开所有键会走 `Cancel/Complete`，**不会来一个值为 0 的 `Fire`**。因此 `last_move` 永远是最后一次有输入的方向，`apply_tnua_ctrl` 里那个 `length_squared() <= 0.005` 的判断永远为 false。
+
+你其实写好了 `clear_accumulated_input`，但注册它的代码被注释掉了：
+
+```rust
+// clear_accumulated_input.run_if(did_fixed_update_happen),
+```
+
+而且即使打开，这个“固定步后清空”的思路也会和 Update 里每帧喂 basis 打架。
+
+**建议：不要在 observer 里“累加”，改成每帧在 `TnuaUserControlsSystems` 里轮询 action 的当前值**（demo 就是这么做的），没输入就把 `desired_motion` 置零；或者加 `On<Cancel<Move>>`/`On<Complete<Move>>` 把 `last_move` 清空。
+
+---
+
+## ?? 3. `desired_forward` 方向很可能反了
+
+tnua 的语义是“把角色 **-Z** 转到 `desired_forward`”。demo 里模型朝移动方向走时喂的是 `Dir3::new(direction)`；你喂的是 `Dir3::new(-direction)`。如果你 W 是往远离相机方向走（`last_move = (0,0,-1)`），那么 `desired_forward = (0,0,1)` 会让模型面朝相机、倒着走。
+
+当前用的是对称胶囊看不出，但换真人模型后就会露馅。先确认你模型的正面是 -Z 还是 +Z，再定符号；shooter 玩法通常更合适让它始终面向相机前方而不是移动方向。
+
+## ?? 4. `float_height = 0.01` 与你当前 demo 角色（原点在中心的胶囊）不匹配
+
+`setup_demo_player` 把胶囊以原点为中心生成，`Collider::capsule(0.5, 1.0)` 底部在原点下方 **1.0**，但你的 basis config `float_height = 0.01`（这个值只适合 `setup_player` 那种脚底在原点的 gltf）。后果：
+
+- 角色会一直被地面顶到 collider 不穿透（中心 ≈ 地面 +1.0），和 tnua 弹簧想要把它压到 0.01 互相打架；
+- 地面探测 cast 距离 = `float_height + cling_distance ≈ 1.01`，从中心往下只差 0.01 就够不到地面，起跳/落地判断会很临界、抖动。
+
+若用这个居中胶囊演示，`float_height` 至少要 ≈ `1.05`；另外胶囊视觉（`Capsule3d::new(0.5, 1.0)`，总高 3.0）和 collider（avian `capsule(radius=0.5, length=1.0)`，总高 2.0，注意 avian 参数是 `radius, length`，且 length 不含半球）也不一致，视觉会沉 0.5。
+
+---
+
+## ?? 5. 用 `On<Fire<Jump>>` observer 喂 action 比较脆弱
+
+tnua 的设计是“每个 Tnua 管线步内、在 `TnuaUserControlsSystems` 里持续喂 action”。你现在：
+- basis 在 `Update` 喂；
+- jump 在 `PreUpdate`（enhanced input `add_input_context` 默认注册到 PreUpdate）的事件 observer 里喂；
+- air counter 由 `TnuaAirActionsPlugin` 在 `FixedUpdate` 更新。
+
+在 v0.32 里 `action()` 有个断言 `Feeding action without invoking initiate_action_feeding()`。你的 `initiate_action_feeding()` 只在 `apply_tnua_ctrl`（Update）里调用，flag 又会被每个 FixedUpdate 逻辑步消费/复位。目前大多数帧能靠“上一帧 Update 留下的 true”兜住，但启动第一帧/输入时序不巧时会断言 panic；而且 `count_for` 决定 `allow_in_air` 的时刻比 FixedUpdate 里的空中状态落后一拍，落地/离台边缘偶尔会按错一次。
+
+**建议：把“输入 → 设 basis → 决定并喂 jump”合并成一个每帧轮询系统放进 `TnuaUserControlsSystems`**（照 `demos/src/character_control_systems/platformer_control_systems.rs` 写），别用 observer 喂 action。这样也能顺手解决上面 #2。
+
+---
+
+## 🟡 6. 几个 trait/scheme 实现是误导性的“僵尸代码”
+
+- `TnuaAirActionDefinition for WaltzTnuaCtrlScheme` 的 `is_air_action` 全部返回 `false`（`character/mod.rs`）。新 API 的 `TnuaActionsCounter`/`TnuaActionSlots` **根本不读它**，它只被废弃的 `TnuaSimpleAirActionsCounter` 使用，所以现在是死代码——但建议删掉或补回 demo 那种正确匹配，避免以后误用。
+- `TnuaHasTargetEntity` 全返回 `None`：同样现在没人调用（你也没调 `TnuaBlipReuseAvoidance::update`）。等以后启用 wallslide/walljump/climb + blip reuse 时，要像 demo 那样对 `WallSlide(_, entity)` / `Climb(_, entity, _)` 返回 `Some(entity)`，否则爬墙时会把你正扒着的墙也标记为“避免复用”。
+- 空槽定义 `WaltzAirActionSlots` 只给 `Jump` 建了槽。以后若启用 Dash，记得加 `#[slots(Dash)] dash: usize`，否则 Dash 永远 `count_for == 0`、等于无限次。
