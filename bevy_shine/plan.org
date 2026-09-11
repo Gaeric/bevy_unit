@@ -17,8 +17,9 @@
     2. **BVH 改为标准 GPU LBVH 路线**：
        =Morton Code= → =GPU Radix Sort= → =Karras LBVH Topology= → =Atomic Bottom-Up AABB Refit=，
        全部 compute shader 在 GPU 上构建，替换 hikari 的 =bvh= crate（CPU =BVH::build= + =flatten_custom=）。
-  - 现状：=bevy_shine= 可 =cargo check= 通过；=light.rs= / =prepass.rs= / =overlay.rs= 是占位；
-    活着的只有「自定义 camera schedule + 自定义 binned phase item 画全屏三角形」的骨架（=src/lib.rs=）。
+  - 现状（M0 前的基线，供对照）：=bevy_shine= 只有「自定义 camera schedule + 自定义 binned phase item
+    画全屏三角形」的骨架；=light.rs= / =prepass.rs= / =overlay.rs= 是占位。
+    **这些已在 M0 期间全部删除**，当前结构见第 3 节。
   - 注释使用英文，且使用小写开头，倾向于随意自由的风格
 
 * 1. 关键前提：自定义 schedule 到底能复用 Bevy 的什么（已逐条核实）
@@ -119,73 +120,117 @@
      顺序天然正确，无需跨 schedule 同步。
    - 备选：放进 =ShineRenderGraph=，方便「每帧、每相机」调试与 readback；单相机原型阶段二者等价。
 
-* 3. 模块与文件结构（建议）
+* 3. 模块与文件结构
+   M0 结束后的**实际**结构是扁平的（只有 =src/shaders/= 一个子目录）：
+
    #+begin_src text
    bevy_shine/
      plan.org
      src/
-       lib.rs                  <- 插件入口：保留 ShinePlugin；新增 ShineRtPlugin
-       graph/
-         mod.rs                <- ShineRenderGraph（保留）
-         sets.rs               <- ShineSystems { Prepass, Trace, Composite }
-       phase.rs                <- 现有 ShinePhase 相关代码（legacy；新路径不再需要 phase item）
-       rt/
-         mod.rs                <- ShineRtPlugin：schedule/系统注册
-         extract.rs            <- main world -> render world
-         prepare.rs            <- 纹理/buffer/uniform 分配
-         geometry.rs           <- 三角形 soup 收集 + 上传
-         camera.rs             <- 相机 uniform
-         bvh/
-           mod.rs              <- RtBuildSystems + 资源容器
-           resources.rs        <- 各阶段 buffer 与 ping-pong
-           build.rs            <- compute kernel dispatch（自管 encoder/submit）
-           ref.rs              <- CPU 参考实现（Morton / LBVH / refit），同时供单元测试
-         trace/
-           mod.rs              <- RT compute pass dispatch
-           composite.rs        <- 写 out_texture()
-         verify.rs             <- GPU readback + 与 CPU 参考对比
-       shaders/rt/
-         rt_types.wgsl         <- 共享结构：Triangle / LbvhNode / Ray / Hit / Material / RtCamera
+       lib.rs               <- ShinePlugin：只做组合（ExtractResourcePlugin + CompositePlugin）
+       graph.rs             <- ShineRenderGraph / ShineSystems / ensure_shine_schedule
+       view_mode.rs         <- RtViewMode / CompositeUniformData / cycle_view_mode
+       composite.rs         <- CompositePlugin / CompositePipeline / CompositeUniform /
+                               CompositeBindGroup / write_composite_uniform /
+                               prepare_composite_bind_group / rt_composite
+       shaders/
+         composite.wgsl
+     examples/
+       minimal.rs           <- M0~M6 的验收场景（与 hikari minimal 对照）
+       cornell-box.rs       <- 纯 PBR 参考图；ShinePlugin 对它无副作用
+       pica.rs              <- Solari 对照
+   #+end_src
+
+   M1 起按需新增（继续扁平，除非某个文件真的膨胀到需要子目录）：
+
+   #+begin_src text
+     src/
+       camera.rs            <- M1: RT 相机 uniform
+       geometry.rs          <- M2: 三角形 soup 收集 + 上传
+       bvh.rs               <- M3~M5: GPU LBVH 构建（膨胀后再拆 src/bvh/）
+       bvh_ref.rs           <- M3: CPU 参考实现 + 单元测试
+       trace.rs             <- M6: 遍历 + 着色
+       verify.rs            <- M3: GPU readback + 与 CPU 参考比对
+       shaders/
+         trace.wgsl
          morton.wgsl
          radix_histogram.wgsl
          radix_scan.wgsl
          radix_scatter.wgsl
          lbvh_topology.wgsl
          lbvh_refit.wgsl
-         trace.wgsl
-         composite.wgsl
-     examples/
-       rt-cornell.rs           <- 新原型入口（Camera3d + CameraRenderGraph::new(ShineRenderGraph) + prepass 组件）
-       rt-verify.rs            <- readback 校验入口（可选）
    #+end_src
+
+** 3.1 命名约束：shader 必须和 =embedded_asset!= 调用点同目录层级
+   =embedded_asset!= / =load_embedded_asset!= 的 asset path 由 =file!()= 推导（找第一个 =src= 前缀，
+   再拼上 file 所在目录）。所以：
+
+   - =src/composite.rs= + ="shaders/composite.wgsl"= ⇒ 文件在 =src/shaders/=，asset path
+     =bevy_shine/shaders/composite.wgsl=。✓
+   - 一旦拆出 =src/bvh/build.rs=，shader 就必须放 =src/bvh/shaders/=，否则 asset path 变成
+     =bevy_shine/bvh/shaders/...=，且 =load_embedded_asset!= 必须从同目录的文件里调用。
+
+   **结论：扁平放 =src/shaders/= 最省事；一旦嵌套，shader 目录要跟着嵌套。**
 
 * 4. 关键设计细节
 ** 4.1 相机与插件接线
-   - 例子里的相机（**注意：显式用 =ShineRenderGraph=，并且必须 =Msaa::Off=**）：
+   - 例子里的相机（见 =examples/minimal.rs=；**显式用 =ShineRenderGraph=，并且必须 =Msaa::Off=**）：
      #+begin_src rust
      commands.spawn((
          Camera3d::default(),
          CameraRenderGraph::new(ShineRenderGraph),   // 完全独立的管线
-         Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() },
          Msaa::Off,                                  // prepass 纹理 sample_count 跟随 Msaa，必须关
          DepthPrepass,
          NormalPrepass,
          MotionVectorPrepass,
-         Transform::from_xyz(-278.0, 273.0, 800.0).looking_at(Vec3::ZERO, Vec3::Y),
+         Transform::from_xyz(0.0, 0.0, 1.0).looking_at(Vec3::ZERO, Vec3::Y),
      ));
      #+end_src
-   - 插件接线（示意）：
+
+   - 插件接线（M0 实际写法）：=ShinePlugin= 只是组合子，实际接线在 =CompositePlugin=。
      #+begin_src rust
-     render_app
-         .add_schedule(ShineRenderGraph::base_schedule())
-         .configure_sets(ShineRenderGraph,
-             (ShineSystems::Prepass, ShineSystems::Trace, ShineSystems::Composite).chain())
-         .add_systems(ShineRenderGraph, (
-             early_prepass.in_set(ShineSystems::Prepass),   // ← 复用 Bevy prepass
-             rt_trace     .in_set(ShineSystems::Trace),
-             rt_composite .in_set(ShineSystems::Composite),
-         ));
+     // src/lib.rs
+     impl Plugin for ShinePlugin {
+         fn build(&self, app: &mut App) {
+             app.init_resource::<RtViewMode>()
+                 .add_plugins(ExtractResourcePlugin::<RtViewMode>::default())
+                 .add_plugins(CompositePlugin);
+         }
+     }
+
+     // src/composite.rs
+     impl Plugin for CompositePlugin {
+         fn build(&self, app: &mut App) {
+             embedded_asset!(app, "shaders/composite.wgsl");
+             let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
+
+             ensure_shine_schedule(render_app);      // init_schedule + configure_sets(chain)
+             render_app
+                 .init_resource::<CompositeUniform>()
+                 .init_resource::<SpecializedRenderPipelines<CompositePipeline>>()
+                 .add_systems(Render, (write_composite_uniform, prepare_composite_bind_group)
+                     .chain().in_set(RenderSystems::PrepareBindGroups))
+                 .add_systems(ShineRenderGraph, (
+                     early_prepass.in_set(ShineSystems::Prepass),   // ← 复用 Bevy prepass
+                     rt_composite .in_set(ShineSystems::Composite),
+                 ).chain());
+         }
+
+         fn finish(&self, app: &mut App) {
+             // 需要 AssetServer，所以必须在所有 build 之后
+             app.sub_app_mut(RenderApp).init_resource::<CompositePipeline>();
+         }
+     }
      #+end_src
+
+   - *接线要点*：
+     - =ensure_shine_schedule= 用 =init_schedule= 而不是 =add_schedule=。后者是**覆盖式**的
+       （源码注释："overwriting any existing schedule with the same label"），多个插件都调会互相清空系统。
+     - =SpecializedRenderPipelines= 的 prepare 系统放在 =RenderSystems::PrepareBindGroups=：
+       它明确排在 =PrepareResources= 之后，所以 =prepare_prepass_textures= 建好的
+       =ViewPrepassTextures= 一定已经存在。
+     - =CompositePlugin::finish= 不能合并进 =build=：=load_embedded_asset!= 需要 =AssetServer=，
+       而它由 =DefaultPlugins= 里的 =AssetPlugin= 在 =build= 阶段插入；=finish= 保证在所有 =build= 之后运行。
    - =late_prepass= 只在启用 =OcclusionCulling= 时才需要，原型阶段不注册。
 
 ** 4.2 三角形 soup（几何输入）
@@ -204,7 +249,8 @@
    - 收集（M2 先最简）：=ExtractSchedule= 里
      =Extract<Query<(Entity, &Mesh3d, &GlobalTransform, &MeshMaterial3d<StandardMaterial>)>>= → render world，
      配合 =Extract<Res<Assets<Mesh>>>= 展平三角形并做世界变换。
-   - 可直接复用 =src/mesh.rs= 的 =GpuTriangles::from_mesh=（要求 position/normal/uv 齐全）。
+   - =src/mesh.rs= 的 =GpuTriangles::from_mesh= 在 M0 重构时被删掉了；M2 需要时从 git 历史
+     =3d3058d= 取回，或按下面的字段重新写一份（要求 position / normal / uv 齐全）。
    - 优点：与 Bevy mesh allocator 解耦，易调试。缺点：CPU gather。M9 改成 GPU 反索引化。
    - 演进：mesh 集合变化 → 重建整棵树；只变 transform → 走 refit only（M8）。
 
@@ -319,94 +365,131 @@
      =unpack_*= 约定解析（可拿到 base_color/roughness/metallic/emissive）。
 
 ** 4.9 输出与后处理
-   - *M0–M6（完全独立）*：composite 全屏三角形直接写 =ViewTarget::out_texture()=，
-     像素格式用 =ViewTarget::out_texture_view_format()= 决定（不要学现有代码硬编码 =Bgra8UnormSrgb=），
-     shader 里做简易 tonemap（Reinhard/ACES）。零外部依赖。
+   - *必须走 =out_texture_color_attachment()=，不能手搓 =RenderPassColorAttachment=。*
+
+     =OutputColorAttachment= 用内部 =is_first_call= 原子标记「被写过」：
+     #+begin_src rust
+     pub fn get_attachment(&self, clear_color: Option<LinearRgba>) -> RenderPassColorAttachment<'_> {
+         let first_call = self.is_first_call.fetch_and(false, Ordering::SeqCst);   // ← 一次性令牌
+         ...
+     }
+     /// Returns `true` if this attachment has been written to by a render pass.
+     pub fn needs_present(&self) -> bool { !self.is_first_call.load(Ordering::SeqCst) }
+     #+end_src
+     而 =render_system= 的 present 逻辑是 =if view_needs_present || window.needs_initial_present=，
+     其中 =needs_initial_present= 只兜第一帧。手搓 attachment 会绕开 =get_attachment()= ⇒
+     标志位永远是 true ⇒ **窗口只在第一帧 present 一次，之后永远冻结** ⇒
+     表现为「日志全绿（pipeline/bind group/draw 全部成功）+ 屏幕全黑」。
+
+     #+begin_src rust
+     let Some(color_attachment) =
+         view_target.out_texture_color_attachment(Some(LinearRgba::BLACK))
+     else { return; };
+     #+end_src
+
+   - 像素格式用 =view_target.out_texture_view_format()= 决定（不要硬编码 =Bgra8UnormSrgb=）。
+   - *M0–M6（完全独立）*：composite 直接写 =out_texture()=，shader 里做简易 tonemap。零外部依赖。
    - *M7（可选复用）*：把 =tonemapping= + =upscaling= 注册进 =ShineRenderGraph=：
      composite 改为写 =post_process_write().destination=，然后 =tonemapping= → =upscaling= 链路。
-     需要相机加 =Hdr=。这两个 system 与它们的 pipeline 都是全局准备好的，可直接复用。
-   - 注意 =upscaling= 才是最终 blit 到 =out_texture= 的那一步；不注册它就得自己在 composite 里写 out_texture。
+     需要相机加 =Hdr=；这两个 system 与它们的 pipeline 都是全局准备好的，可直接复用。
+   - 注意 =upscaling= 才是最终 blit 到 =out_texture= 的那一步。
+   - *通用规律*：同一资源同时提供「裸 view」和「带簿记的 attachment」两个入口时，一定用后者 ——
+     =out_texture()= / =out_texture_color_attachment()=、=main_texture_view()= / =post_process_write()=。
 
 * 5. 里程碑
-   原则：先「能出图」，再逐步换成正确的 GPU 算法；每个里程碑都要在 =rt-cornell= 里目视验收 + readback/单测兜底。
+   原则：先「能出图」，再逐步换成正确的 GPU 算法；M0~M6 的目视验收都在 =examples/minimal.rs= 里做
+   （场景与 hikari minimal 对照），readback / 单元测试兜底。
 
-** TODO M0 — 独立管线打通：ShineRenderGraph + 复用 prepass 可视化
-   - 新建 =ShineSystems= + =ShineRtPlugin=；把 =early_prepass= 注册进 =ShineRenderGraph=。
-   - 新建 =examples/rt-cornell.rs=：=Camera3d= + =CameraRenderGraph::new(ShineRenderGraph)= + =Msaa::Off=
-     + =DepthPrepass= / =NormalPrepass= / =MotionVectorPrepass=（不加 =Hdr=，暂不用 Bevy tonemapping）。
-   - 先做 debug composite：把 depth/normal 直接可视化到 =out_texture()=。
-   - 交付物：=src/rt/{mod.rs,prepare.rs,composite.rs}=、=src/graph/sets.rs=、=shaders/rt/composite.wgsl=、
-     =examples/rt-cornell.rs=。
-   - 验收：
-     - [ ] =cargo run -p bevy_shine --example rt-cornell= 能显示 CornellBox，画面不是黑屏。
-     - [ ] 开关切换后能看到 depth / normal 可视化，且与几何对齐。
-     - [ ] log 中确认 =ViewPrepassTextures= 存在、尺寸正确、=depth/normal/motion= 均 =Some=。
-     - [ ] 确认 PBR 主通道**没有**运行（独立管线），画面完全由我们控制。
-   - 命令：=cargo check -p bevy_shine= / =cargo run -p bevy_shine --example rt-cornell=
+** DONE M0 — 独立管线打通：ShineRenderGraph + 复用 prepass 可视化
+   :LOGBOOK:
+   - State "DONE"       from "TODO"       [2026-09-11 Fri] \\
+     独立 camera schedule + 复用 Bevy prepass 已跑通；四档 debug 视图可切换。
+   :END:
+   - 交付物（实际）：=src/lib.rs=、=src/graph.rs=、=src/view_mode.rs=、=src/composite.rs=、
+     =src/shaders/composite.wgsl=。
+   - 验收结果：
+     - [X] =cargo run -p bevy_shine --example minimal= 有画面；空格在
+       =prepass depth / prepass normal / prepass motion / solid= 四档间切换。
+     - [X] depth 视图与几何对齐（白底 + 深色球体，reverse-Z）。
+     - [X] log 确认 =ViewPrepassTextures= 存在、size 正确、=depth/normal/motion= 均 =Some=。
+     - [X] 确认 PBR 主通道**没有**运行（=solid= 档整屏只有我们的纯色）。
+     - [X] =cargo check -p bevy_shine --all-targets= 零 warning。
+   - 与原计划的偏差（以第 3 / 4 节为准）：
+     - 目录：原计划 =src/rt/= + =src/graph/=，实际**扁平**为 =src/*.rs=。
+     - 命名：=ShineRtPlugin= / =RtDebugMode= → =ShinePlugin= / =RtViewMode=；
+       =CompositePlugin= 自己实现 =Plugin=，而不是 =composite::build/finish= 自由函数
+       （自由函数的写法把 =Plugin::finish= 的时序保证交给了「代码顺序」这个人为约定）。
+     - 验收场景：不新建 =rt-cornell.rs=，直接用 =minimal.rs=。
+     - legacy 代码与其 shader 已全部删除（=src/{light,overlay,prepass}.rs=、
+       =src/shaders/{shader,prepass,light,overlay}.wgsl=），=src/mesh.rs= 也一并删除
+       （M2 需要时从 git 历史 =3d3058d= 取回 =GpuTriangles::from_mesh=）。
+   - 两个非显而易见的坑（详见 4.9 与第 7 节）：
+     1. =encase= 的 uniform 结构里不能放元素 stride 不是 16 倍数的数组（[u32; 3] 会 panic）。
+     2. 往最终输出写必须走 =out_texture_color_attachment()=，否则窗口只 present 一次。
 
 ** TODO M1 — 相机光线生成 + 与 prepass depth 对齐
    - 自研相机 uniform（=inverse_view_proj= 等）；compute 输出「解析求交深度 vs prepass 深度」的差值。
    - 用解析几何（无限平面 + 球）先钉死坐标系与 ray 约定。
-   - 交付物：=src/rt/camera.rs=、=shaders/rt/trace.wgsl=（解析版）。
+   - 交付物：=src/camera.rs=、=src/shaders/trace.wgsl=（解析版）。
    - 验收：
      - [ ] 反投影世界坐标与解析求交命中点误差 < 1e-3。
      - [ ] viewport / 非方形窗口下仍对齐（注意 =physical_target_size= 与 viewport 的关系）。
-   - 命令：=cargo run -p bevy_shine --example rt-cornell=
+   - 命令：=cargo run -p bevy_shine --example minimal=
 
 ** TODO M2 — 三角形 soup 收集与上传
    - 生成 =Vec<GpuTriangle>= 上传 storage buffer；计算 =scene_aabb= 与三角形总数。
-   - 交付物：=src/rt/{geometry.rs,extract.rs}=。
+   - 交付物：=src/geometry.rs=（含 main world -> render world 的 extract）。
    - 验收：
      - [ ] 三角形总数与网格统计一致。
      - [ ] 场景 AABB 与 CPU 计算一致（log 打印）。
      - [ ] 用「线性扫描全部三角形」求最近命中，几何轮廓正确（此时还没有 BVH）。
-   - 命令：=cargo run -p bevy_shine --example rt-cornell=
+   - 命令：=cargo run -p bevy_shine --example minimal=
 
 ** TODO M3 — Morton code + GPU Radix Sort
-   - 先写 CPU 参考（=rt/bvh/ref.rs=），再写 GPU kernel，readback 逐位比对。
+   - 先写 CPU 参考（=src/bvh_ref.rs=），再写 GPU kernel，readback 逐位比对。
    - 拆成：M3a 只跑 =morton.wgsl= 并比对；M3b 小规模 bitonic sort 打通通路；M3c 替换为标准 radix sort。
-   - 交付物：=shaders/rt/{morton,radix_histogram,radix_scan,radix_scatter}.wgsl=、
-     =src/rt/bvh/{resources.rs,build.rs,ref.rs}=、=src/rt/verify.rs=。
+   - 交付物：=src/shaders/{morton,radix_histogram,radix_scan,radix_scatter}.wgsl=、
+     =src/bvh.rs=、=src/bvh_ref.rs=、=src/verify.rs=。
    - 验收：
      - [ ] GPU Morton codes 与 CPU 参考逐位一致。
      - [ ] GPU 排序结果与 CPU =sort_unstable_by_key= 的 (key,id) 序列一致。
      - [ ] 尾块 / 非整齐规模不出错。
-   - 命令：=cargo test -p bevy_shine= / =cargo run -p bevy_shine --example rt-cornell= -- --verify
+   - 命令：=cargo test -p bevy_shine= / =cargo run -p bevy_shine --example minimal= -- --verify
 
 ** TODO M4 — Karras LBVH Topology
    - 实现 4.5（=delta= / 倍增二分 / =first-last-split= / 子节点不变式 / =atomicMin(parent)= / 求根）。
-   - 交付物：=shaders/rt/lbvh_topology.wgsl= + CPU 参考对应函数。
+   - 交付物：=src/shaders/lbvh_topology.wgsl= + CPU 参考对应函数。
    - 验收：
      - [ ] GPU =child_a/child_b/parent= 与 CPU 参考逐节点一致。
      - [ ] 从根 DFS 恰好访问每个叶子一次；无环、无孤儿。
      - [ ] =N= = 1/2/3 边界正确（N=1 时无内部节点，根就是唯一叶子）。
-   - 命令：=cargo test -p bevy_shine= / =cargo run --example rt-cornell -- --verify
+   - 命令：=cargo test -p bevy_shine= / =cargo run -p bevy_shine --example minimal -- --verify
 
 ** TODO M5 — Atomic Bottom-Up AABB Refit
    - 实现 4.6（=f32_to_ordered= / R1 / R2）。
-   - 交付物：=shaders/rt/lbvh_refit.wgsl=。
+   - 交付物：=src/shaders/lbvh_refit.wgsl=。
    - 验收：
      - [ ] 根 AABB 与场景 AABB 误差 < 1e-4。
      - [ ] 随机抽查内部节点：AABB == 两子节点 AABB 并集。
      - [ ] 重复跑一次 refit，结果不变（幂等）。
-   - 命令：=cargo test -p bevy_shine= / =cargo run --example rt-cornell -- --verify
+   - 命令：=cargo test -p bevy_shine= / =cargo run -p bevy_shine --example minimal -- --verify
 
 ** TODO M6 — LBVH 遍历 + 着色（1~2 次弹射）
    - 把 M2 的线性扫描替换为 4.7 的显式栈遍历；加材质表（先标量 base_color/emissive/roughness/metallic）、
      方向光 + 阴影光线 + 1 次间接弹射。
-   - 交付物：=shaders/rt/{rt_types,trace}.wgsl=、材质提取。
+   - 交付物：=src/trace.rs=、=src/shaders/{rt_types,trace}.wgsl=、材质提取。
    - 验收：
      - [ ] Cornell box 可见红/绿墙 color bleeding（间接弹射生效）。
      - [ ] 硬阴影正确；自发光灯面明亮。
      - [ ] 与 M2 线性扫描版画面基本一致（差异只来自浮点求和顺序）。
      - [ ] 关闭间接弹射后画面明显变暗（开关生效）。
-   - 命令：=cargo run -p bevy_shine --example rt-cornell=
+   - 命令：=cargo run -p bevy_shine --example minimal=
 
 ** TODO M7 —（可选）复用 Bevy 后处理 + 时间累积
    - 把 =tonemapping= + =upscaling= 注册进 =ShineRenderGraph=；composite 改走 =post_process_write()=；相机加 =Hdr=。
    - 时间累积：用 =motion_vectors_view()= 做上一帧 UV 重投影，用 depth/normal 做校验（h ikari 的
      =|Δ position.w|>0.001 / dot(normal)<0.866= 思路），累积缓冲 ping-pong，加简单双边滤波 / EMA。
-   - 交付物：=src/rt/trace/composite.rs= 更新、累积 buffer + kernel、蓝噪声/hash 噪声采样。
+   - 交付物：=src/composite.rs= 更新、累积 buffer + kernel、蓝噪声/hash 噪声采样。
    - 验收：
      - [ ] 静止相机下噪点显著减少、逐步收敛。
      - [ ] 相机移动时无明显鬼影（重投影校验生效）。
@@ -415,11 +498,11 @@
 
 ** TODO M8 — 动态场景与增量更新
    - 三角形数量不变 → 只上传新顶点 + R1/R2 refit；数量变化 → 重建整棵树。
-   - 交付物：=geometry.rs= 的 dirty 分支、=RtBuildSystems= 条件执行。
+   - 交付物：=src/geometry.rs= 的 dirty 分支、BVH 构建系统集的按需执行。
    - 验收：
      - [ ] 移动/旋转物体无破面、无残留阴影。
      - [ ] 只有 transform 变化时，readback 确认排序/拓扑 buffer 未被重写。
-   - 命令：=cargo run -p bevy_shine --example rt-cornell=
+   - 命令：=cargo run -p bevy_shine --example minimal=
 
 ** TODO M9 — 进阶（可选）
    - [ ] =DeferredPrepass= + 从 deferred gbuffer 复用 Bevy 已算好的材质（=unpack_*=）。
@@ -429,11 +512,10 @@
    - [ ] 更优遍历：有序子节点访问 / 无栈跳转。
    - [ ] 更优排序：OneSweep / 16-bit digit / 只排 30 bit。
    - [ ] ReSTIR DI/GI（h ikari =light.wgsl= 的 reservoir 结构）。
-   - [ ] 清理 legacy phase item 代码（=src/phase.rs=），新路径不再需要。
 
 * 6. 验证方法
 ** 6.1 CPU 参考实现 + 单元测试
-   - =src/rt/bvh/ref.rs= 用纯 CPU 实现 Morton / 排序 / Karras LBVH / refit，逻辑与 WGSL 一一对应。
+   - =src/bvh_ref.rs= 用纯 CPU 实现 Morton / 排序 / Karras LBVH / refit，逻辑与 WGSL 一一对应。
    - 单测：Morton 手算样例；LBVH 不变式（区间/父子/根）；Refit（内部节点 = 子节点并集）。
    - 命令：=cargo test -p bevy_shine -- --nocapture=。
 
@@ -441,7 +523,7 @@
    - =verify.rs=：=RenderDevice::create_buffer_with_data= 建 =MAP_READ= 缓冲 → =copy_buffer_to_buffer= →
      =BufferSlice::map_async(MapMode::Read, cb)= + =RenderDevice::poll(PollType::Wait)= → 与 CPU 比对。
      （=bevy_render/src/gpu_readback.rs= 是完整参考；=MapMode/PollType= 在 =bevy::render::render_resource=。）
-   - 例子开关（=cargo run --example rt-cornell -- --verify= 或环境变量）每次 BVH 重建后打印差异报告。
+   - 例子开关（=cargo run -p bevy_shine --example minimal -- --verify= 或环境变量）每次 BVH 重建后打印差异报告。
    - 构建放在全局 =Render= schedule 时，可直接 =render_queue.submit([encoder.finish()])=，不需要 =RenderContext=。
 
 ** 6.3 视觉验收
@@ -454,9 +536,12 @@
    | prepass 纹理不可 storage 绑定                         | 已确认；只读采样。RT 输出用自己的 storage 纹理。                          |
    | =Msaa= 默认 Sample4，prepass 纹理是 multisampled      | 已确认；RT 相机强制 =Msaa::Off=。                                        |
    | 复用 prepass 需要哪些前置                            | 已确认：全部在全局 schedule；只需注册 =early_prepass= 进自定义 schedule。  |
-   | =early_prepass= 依赖 =ViewDepthTexture= / =ViewPrepassTextures= | 由全局系统创建；若缺失则静默不画 → M0 用 log 确认组件都在。 |
+   | =early_prepass= 依赖 =ViewDepthTexture= / =ViewPrepassTextures= | 已确认可用（由全局系统创建）；若缺失则静默不画 → 排查靠 log 打点。 |
    | =ViewPrepassTextures= 只有在 prepass phase 非空时创建  | 相机必须带 prepass 组件且场景里有 opaque mesh。                          |
    | =out_texture()= 像素格式不一定是 sRGB                 | 用 =out_texture_view_format()= 决定 shader 是否手动 gamma，别硬编码。      |
+   | **手搓 =RenderPassColorAttachment= 会丢 present**      | 已确认并修复；必须用 =out_texture_color_attachment()=（详见 4.9）。         |
+   | uniform 结构里数组的元素 stride 必须是 16 的倍数       | 已确认；=encase= 的 =assert_uniform_compat= 会直接 panic。padding 用独立标量字段。 |
+   | uniform 里嵌套 struct / array 字段必须 16 字节对齐     | 用 =#[shader(align(16))]=，或给前置字段加 =#[shader(size(16))]=。           |
    | 0.19 没有现成 GPU sort/scan 可抄                      | 自研；参考 =cluster_allocate.wgsl= 的 workgroup scan。                    |
    | =atomicMin/Max= 无 float 版本                         | =f32_to_ordered= 单调映射到 u32 再原子。                                  |
    | refit 与 trace 两种视图下的 buffer 对齐               | =array<vec4<f32>>= / 平铺 =array<atomic<u32>>=，16 字节对齐天然一致。      |
@@ -485,6 +570,12 @@
 * 遗留问题
   composite.wgsl为什么用switch case格式
   - ai分析uniform match没有额外性能负担
+  - 已确认（M0）：uniform 分支在 wave 内一致，硬件整波跳过未取分支，约等于免费；
+    真正的成本是「编译期无法 DCE，所有 arm 都留在二进制里」。M6 起把正式 resolve 与
+    AOV viewer 拆成两条管线，届时不需再纠结（见 4.9）。
   
   看到这个奇怪的表达，应该有更好的方式
   [[file:src/lib.rs::composite::build(app);]]
+  - 已解决（M0）：改用 =src/composite.rs= 里的 =CompositePlugin= 实现 =Plugin=，
+    =ShinePlugin= 只做 =add_plugins=。这样 =build= / =finish= 的时序由 Bevy 保证，
+    不再依赖「先写 build 再写 finish」这个人为约定（见 4.1 的「接线要点」）。
