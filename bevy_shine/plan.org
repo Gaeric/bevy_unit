@@ -1,0 +1,490 @@
+#+title: bevy_shine 光线追踪原型实施计划（GPU LBVH）
+#+startup: content
+#+author: Gaeric
+#+OPTIONS: ^:{}
+
+本文档描述 =bevy_shine= 光线追踪原型的实施计划。
+
+*原则（按优先级）*：
+1. **渲染管线完全独立**：沿用 =ShineRenderGraph= 这条自定义 camera schedule，不接入 =Core3d=。
+2. **在独立的前提下尽量复用**：只把 Bevy 现成的 *system* 注册进我们自己的 schedule，不接管它的 schedule 所有权。
+
+* 0. 目标与位置
+  - 学习/开发工程：=bevy_unit/bevy_shine=（workspace 成员，Bevy 0.19，本地 patch 到 =../bevy_engines/bevy_0.19/=）。
+  - 参考工程：=../bevy-hikari=（Bevy 0.13 时代；CPU 建 BVH + compute shader 2 次弹射的 ReSTIR 风格 GI）。
+  - 与 hikari 的两点核心差异：
+    1. **复用 Bevy 的 prepass / post-processing**，不再自己画 position / normal / instance_material / velocity G-Buffer。
+    2. **BVH 改为标准 GPU LBVH 路线**：
+       =Morton Code= → =GPU Radix Sort= → =Karras LBVH Topology= → =Atomic Bottom-Up AABB Refit=，
+       全部 compute shader 在 GPU 上构建，替换 hikari 的 =bvh= crate（CPU =BVH::build= + =flatten_custom=）。
+  - 现状：=bevy_shine= 可 =cargo check= 通过；=light.rs= / =prepass.rs= / =overlay.rs= 是占位；
+    活着的只有「自定义 camera schedule + 自定义 binned phase item 画全屏三角形」的骨架（=src/lib.rs=）。
+  - 注释使用英文，且使用小写开头，倾向于随意自由的风格
+
+* 1. 关键前提：自定义 schedule 到底能复用 Bevy 的什么（已逐条核实）
+  这是整个方案的可行性基础，必须先钉死。
+
+** 1.1 Bevy 0.19 的 prepass 由哪些部分组成，分别注册在哪里
+   | 阶段                                            | 系统                                                | 注册位置                          | 是否依赖 render graph |
+   |-------------------------------------------------+-----------------------------------------------------+-----------------------------------+-----------------------|
+   | 相机是否要 prepass / 准备 phase                  | =extract_camera_prepass_phase=                       | =ExtractSchedule=（全局）          | 否（只查 =Camera3d= + 组件） |
+   | 创建 =ViewDepthTexture=                          | =prepare_core_3d_depth_textures=                     | =Render/RenderSystems::PrepareResources= | 否 |
+   | 创建 =ViewPrepassTextures=（depth/normal/motion）| =prepare_prepass_textures=                           | =Render/RenderSystems::PrepareResources= | 否 |
+   | prepass mesh 排队                                | =queue_prepass_material_meshes=                      | =Render/RenderSystems::QueueMeshes=  | 否 |
+   | prepass 管线特化                                 | =specialize_prepass_material_meshes=                 | =Render/RenderSystems::PrepareMeshes= | 否 |
+   | prepass batching / 排序 / buffer                 | =BinnedRenderPhasePlugin::<Opaque3dPrepass, MeshPipeline>= 等 | =Render/...=                | 否 |
+   | **真正画 prepass**                               | =early_prepass= / =late_prepass=                      | **=Core3d= schedule**（=Core3dSystems::Prepass=） | 是 |
+   | tonemapping                                      | =tonemapping=                                        | **=Core3d=**（=Core3dSystems::PostProcess=） | 是 |
+   | upscaling（main texture → out_texture + present）| =upscaling=                                          | **=Core3d=**                       | 是 |
+
+   **结论**：prepass 的「准备/排队/特化/纹理创建/batching」**全部在全局 schedule**，只要相机上有 =DepthPrepass= /
+   =NormalPrepass= / =MotionVectorPrepass= 组件就会自动跑，与相机用哪个 =CameraRenderGraph= 无关。
+   **只有「画 prepass」这一条在 =Core3d= 里。**
+
+   而这些函数都是 pub 的，可以直接注册到我们自己的 schedule：
+   #+begin_src rust
+   bevy::core_pipeline::prepass::node::{early_prepass, late_prepass}      // pub fn
+   bevy::core_pipeline::tonemapping::tonemapping                          // pub fn
+   bevy::core_pipeline::upscaling::upscaling                              // pub fn
+   #+end_src
+   （=bevy_core_pipeline/src/lib.rs= 里 =pub mod prepass; pub mod tonemapping; pub mod upscaling;=）
+
+** 1.2 其它全局准备（同样与 render graph 无关）
+   - =prepare_view_targets= → =Render/RenderSystems::PrepareViews=（提供 =ViewTarget= / =out_texture()= / ping-pong）。
+   - =prepare_view_uniforms= → =Render/RenderSystems::PrepareResources=（提供 =ViewUniformOffset= / =ExtractedView=）。
+   - =TonemappingPlugin=、=UpscalingPlugin= 的 pipeline 准备也在全局；所以只要把 =tonemapping= / =upscaling= 这两个 *system*
+     注册进我们的 schedule，就能拿到完整的 Bevy 后处理（前提：相机带 =Hdr=）。
+
+** 1.3 由此得出的方案
+   - **保留并强化 =ShineRenderGraph=**（自定义 camera schedule），**不接入 =Core3d=**。
+   - 复用 prepass：把 =early_prepass= 注册进 =ShineRenderGraph=。
+   - 复用后处理：M0–M6 先自己写 composite 直接写 =out_texture()=（完全独立、零依赖）；
+     M7 再（可选）把 Bevy 的 =tonemapping= + =upscaling= 注册进 =ShineRenderGraph=。
+   - 因为不跑 =Core3d=，Bevy 的 PBR 主通道也不会跑 —— 没有「渲染一遍再覆盖」的浪费，正符合「独立管线」的目标。
+
+** 1.4 仍然成立的硬约束（已核实）
+   - =ViewPrepassTextures=（=bevy::core_pipeline::prepass=）：=depth=(Depth32Float) / =normal=(Rgb10a2Unorm) /
+     =motion_vectors=(Rg16Float) / =deferred=(Rgba32Uint)；提供 =depth_view()/normal_view()/motion_vectors_view()=。
+   - 这些纹理 usage 只有 =RENDER_ATTACHMENT | TEXTURE_BINDING=，**没有 =STORAGE_BINDING=**
+     → compute 只能只读采样 / =textureLoad=，不能当 storage 写。
+   - 它们的 =sample_count= 跟随 =Msaa=，默认 =Msaa::Sample4= → **RT 相机必须 =Msaa::Off=**。
+   - normal prepass 写的是 =vec4(in.world_normal * 0.5 + vec3(0.5), 1.0)= → 世界空间法线，解码 =n*2-1=。
+   - =early_prepass= 的 =ViewQuery= 需要视图上有 =ExtractedCamera / ExtractedView / ViewDepthTexture /
+     ViewPrepassTextures / ViewUniformOffset=（都由全局系统准备，见 1.1）。
+   - =ViewTarget::post_process_write()= 会翻转 main texture 并返回 ={source, destination}=（约定「source 写到 destination」）。
+   - 引擎内**没有**可复用的 GPU radix sort / prefix sum；唯一可参考的是
+     =bevy_pbr/src/cluster/cluster_allocate.wgsl=（workgroup 内 Hillis-Steele scan + 跨块传播）。
+   - =bevy_solari= 的 BLAS/TLAS 用 wgpu **硬件光追 API**（=create_blas/create_tlas=），不是 compute 建树，
+     对「compute 建 LBVH」没有直接复用价值；但 =realtime/node.rs= 是「compute 只读 =ViewPrepassTextures=」的最佳范例。
+
+* 2. 总体架构
+** 2.1 渲染流程
+   #+begin_src text
+   ExtractSchedule (main -> render)
+     extract_rt_scene        : 收集 mesh / 实例 transform / 材质 / RT 开关
+
+   Render (全局，每帧一次；BVH 与相机无关)
+     RenderSystems::PrepareResources
+       prepare_rt_targets     : 分配 RT storage texture、LBVH 各阶段 buffer、uniform
+       prepare_triangle_soup  : 上传三角形 soup（CPU gather）
+     RenderSystems::PrepareBindGroups
+       prepare_rt_bind_groups
+     <RtBuildSystems::Build>  : 自己 encoder + render_queue.submit(...)
+       bvh_morton -> bvh_radix_sort(x4) -> bvh_topology -> bvh_refit
+
+   ShineRenderGraph (自定义 camera schedule，每个用它的相机跑一次)
+     ShineSystems::Prepass       : early_prepass  ← Bevy 的 prepass（只注册 system，不接 Core3d）
+     ShineSystems::BvhBuild      : （可选）把构建放到这里以便每相机同步，见 2.3
+     ShineSystems::Trace         : compute 光线追踪 → RT storage texture
+     ShineSystems::Composite     : 写 out_texture()（M7 后可换成 post_process_write + Bevy tonemapping/upscaling）
+   #+end_src
+
+** 2.2 复用清单（明确「复用」与「自研」的边界）
+   | 能力                     | 来源            | 我们做什么                                                |
+   |--------------------------+-----------------+-----------------------------------------------------------|
+   | depth / normal / motion  | Bevy prepass    | 只在 =ShineRenderGraph= 注册 =early_prepass=；其余全自动。 |
+   | ViewTarget / present      | Bevy 全局        | 直接用 =ViewTarget{}::out_texture()=。                     |
+   | tonemapping / upscaling  | Bevy（可选）     | M7 后把两个 system 注册进 =ShineRenderGraph=。             |
+   | 相机 uniform             | 自研（简洁）     | =inverse_view_proj / camera_position / frame_index ...=   |
+   | 材质                     | 自研             | 先从 =StandardMaterial= 抽成 =GpuMaterial=（先只用标量）。 |
+   | 三角形 soup              | 自研（CPU 侧）   | 从 =Assets<Mesh> + =GlobalTransform= 展平并上传。          |
+   | BVH（LBVH）              | 自研（本次重点） | Morton / Radix Sort / Karras Topology / Refit 全 GPU。     |
+   | 遍历 + 着色              | 自研             | 显式栈遍历 + Möller–Trumbore + 直接光/一次间接弹射。        |
+
+** 2.3 BVH 构建放哪里
+   - 首选：放在全局 =Render= schedule 的自定义 set（=RtBuildSystems::Build=），
+     用 =RenderContext= 或直接 =render_queue.submit([encoder.finish()])= 提交（=bevy_solari::scene::blas= 就是在
+     =RenderSystems::PrepareAssets= 里这么干的）。
+   - 好处：与相机数量无关，且全局 =Render= 一定早于 =RenderGraph=（camera_driver）运行，
+     顺序天然正确，无需跨 schedule 同步。
+   - 备选：放进 =ShineRenderGraph=，方便「每帧、每相机」调试与 readback；单相机原型阶段二者等价。
+
+* 3. 模块与文件结构（建议）
+   #+begin_src text
+   bevy_shine/
+     plan.org
+     src/
+       lib.rs                  <- 插件入口：保留 ShinePlugin；新增 ShineRtPlugin
+       graph/
+         mod.rs                <- ShineRenderGraph（保留）
+         sets.rs               <- ShineSystems { Prepass, Trace, Composite }
+       phase.rs                <- 现有 ShinePhase 相关代码（legacy；新路径不再需要 phase item）
+       rt/
+         mod.rs                <- ShineRtPlugin：schedule/系统注册
+         extract.rs            <- main world -> render world
+         prepare.rs            <- 纹理/buffer/uniform 分配
+         geometry.rs           <- 三角形 soup 收集 + 上传
+         camera.rs             <- 相机 uniform
+         bvh/
+           mod.rs              <- RtBuildSystems + 资源容器
+           resources.rs        <- 各阶段 buffer 与 ping-pong
+           build.rs            <- compute kernel dispatch（自管 encoder/submit）
+           ref.rs              <- CPU 参考实现（Morton / LBVH / refit），同时供单元测试
+         trace/
+           mod.rs              <- RT compute pass dispatch
+           composite.rs        <- 写 out_texture()
+         verify.rs             <- GPU readback + 与 CPU 参考对比
+       shaders/rt/
+         rt_types.wgsl         <- 共享结构：Triangle / LbvhNode / Ray / Hit / Material / RtCamera
+         morton.wgsl
+         radix_histogram.wgsl
+         radix_scan.wgsl
+         radix_scatter.wgsl
+         lbvh_topology.wgsl
+         lbvh_refit.wgsl
+         trace.wgsl
+         composite.wgsl
+     examples/
+       rt-cornell.rs           <- 新原型入口（Camera3d + CameraRenderGraph::new(ShineRenderGraph) + prepass 组件）
+       rt-verify.rs            <- readback 校验入口（可选）
+   #+end_src
+
+* 4. 关键设计细节
+** 4.1 相机与插件接线
+   - 例子里的相机（**注意：显式用 =ShineRenderGraph=，并且必须 =Msaa::Off=**）：
+     #+begin_src rust
+     commands.spawn((
+         Camera3d::default(),
+         CameraRenderGraph::new(ShineRenderGraph),   // 完全独立的管线
+         Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() },
+         Msaa::Off,                                  // prepass 纹理 sample_count 跟随 Msaa，必须关
+         DepthPrepass,
+         NormalPrepass,
+         MotionVectorPrepass,
+         Transform::from_xyz(-278.0, 273.0, 800.0).looking_at(Vec3::ZERO, Vec3::Y),
+     ));
+     #+end_src
+   - 插件接线（示意）：
+     #+begin_src rust
+     render_app
+         .add_schedule(ShineRenderGraph::base_schedule())
+         .configure_sets(ShineRenderGraph,
+             (ShineSystems::Prepass, ShineSystems::Trace, ShineSystems::Composite).chain())
+         .add_systems(ShineRenderGraph, (
+             early_prepass.in_set(ShineSystems::Prepass),   // ← 复用 Bevy prepass
+             rt_trace     .in_set(ShineSystems::Trace),
+             rt_composite .in_set(ShineSystems::Composite),
+         ));
+     #+end_src
+   - =late_prepass= 只在启用 =OcclusionCulling= 时才需要，原型阶段不注册。
+
+** 4.2 三角形 soup（几何输入）
+   #+begin_src rust
+   #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, ShaderType)]
+   #[repr(C)]
+   pub struct GpuTriangle {
+       pub p0: Vec3, pub p1: Vec3, pub p2: Vec3,
+       pub n0: Vec3, pub n1: Vec3, pub n2: Vec3,
+       pub uv0: Vec2, pub uv1: Vec2, pub uv2: Vec2,
+       pub material: u32,
+       pub instance: u32,
+       pub _pad: [u32; 2],
+   }
+   #+end_src
+   - 收集（M2 先最简）：=ExtractSchedule= 里
+     =Extract<Query<(Entity, &Mesh3d, &GlobalTransform, &MeshMaterial3d<StandardMaterial>)>>= → render world，
+     配合 =Extract<Res<Assets<Mesh>>>= 展平三角形并做世界变换。
+   - 可直接复用 =src/mesh.rs= 的 =GpuTriangles::from_mesh=（要求 position/normal/uv 齐全）。
+   - 优点：与 Bevy mesh allocator 解耦，易调试。缺点：CPU gather。M9 改成 GPU 反索引化。
+   - 演进：mesh 集合变化 → 重建整棵树；只变 transform → 走 refit only（M8）。
+
+** 4.3 Morton Code（30-bit）
+   - 先 reduce 求全场景 AABB。三角形取重心 =c=，归一化 =t=(c-min)/(max-min)=，clamp [0,1)。
+   - 量化 =q_i = min((u32)(t_i*1024.0), 1023u)=（每轴 10 bit）。
+   #+begin_src wgsl
+   fn expand_bits(v: u32) -> u32 {          // 10-bit -> 30-bit interleave
+       var x = v & 0x3FFu;
+       x = (x | (x << 16u)) & 0x030000FFu;
+       x = (x | (x <<  8u)) & 0x0300F00Fu;
+       x = (x | (x <<  4u)) & 0x030C30C3u;
+       x = (x | (x <<  2u)) & 0x09249249u;
+       return x;
+   }
+   fn morton3(qx: u32, qy: u32, qz: u32) -> u32 {
+       return expand_bits(qx) | (expand_bits(qy) << 1u) | (expand_bits(qz) << 2u);
+   }
+   #+end_src
+   - 输出 =mortons: array<u32>= 与 =triangle_ids: array<u32>=。CPU 参考实现必须逐位一致。
+
+** 4.4 GPU Radix Sort（LSD，4 pass × 8 bit）
+   - 4 个 pass，每 pass 处理 8 bit；每 pass 三个 kernel：
+     1. =radix_histogram.wgsl=：workgroup（256 线程）处理 =256*ITEMS= 个元素（=ITEMS≈16=），
+        共享内存统计 256 桶，写 =block_histograms[block*256+bin]=。
+     2. =radix_scan.wgsl=：按 bin 做 exclusive scan：先 workgroup 内 scan（256 bin = 256 线程），
+        再跨 workgroup 累加（原型阶段 block 少，可单 workgroup 串行；或做 chained scan）。
+        输出 =block_offsets[block*256+bin]=。
+     3. =radix_scatter.wgsl=：重读 chunk，共享内存重算 local rank，写 =out_keys/out_ids=。
+   - 双缓冲 ping-pong（=keys_a/keys_b=、=ids_a/ids_b=），4 pass 后固定回 A。
+   - 尾块要处理（=min(n, chunk_end)=）。
+   - 规模假设：≤ 2^20 三角形。可先写一个「小规模 bitonic sort」把通路跑通，再替换成 radix。
+
+** 4.5 Karras LBVH Topology（internal node i = LCA(leaf i, leaf i+1)）
+   - 约定：叶子下标 = =N-1+k=；内部节点下标 = =0..N-1=；总节点 = =2N-1=。
+   - =delta(i,j)= = Morton key i、j 的最长公共前缀；越界返回 -1。
+   - 每个内部节点 i：=d= 由 =delta(i,i+1)= 与 =delta(i,i-1)= 比较得出；倍增 + 二分求 =j=；再二分求 split；
+     得 =first=min(i,j)=、=last=max(i,j)=、=split=。
+   - 子节点编号（本方案的核心不变式）：
+     #+begin_src text
+     左子 = (split > first)     ? 内部节点 first   : 叶子 N-1+first
+     右子 = (last  > split+1)   ? 内部节点 split+1 : 叶子 N-1+(split+1)
+     因为节点 i 定义为 LCA(leaf i, leaf i+1)，所以区间 [a,b] 的内部节点号就是 a。
+     #+end_src
+   - =atomicMin(parent[child], i)= 写父子关系；=parent= 初始 =0xFFFFFFFF=。
+     - 根 = 唯一 =parent == 0xFFFFFFFF= 的内部节点（**不是**恒为 0，必须显式求）。
+   - 输出 =node_links: array<vec4<u32>>=，每节点 =[child_a, child_b, parent, flags]=；
+     =flags & 1= 表示叶子，此时 =child_a= = 三角形下标。
+
+** 4.6 Atomic Bottom-Up AABB Refit
+   - 布局（避开 WGSL 对齐坑）：
+     #+begin_src text
+     node_bounds : array<vec4<f32>>  // 每节点 2 个: [min.xyz, pad] / [max.xyz, pad]
+     node_links  : array<vec4<u32>>  // 每节点 1 个: [child_a, child_b, parent, flags]
+     #+end_src
+   - Refit 时把 =node_bounds= 以 =array<atomic<u32>>= 重新绑定（同一 buffer、另一种视图；
+     =vec4<f32>= 16 字节对齐，平铺 u32 也是 4 字/16 字节，布局安全）。
+   - R1：每个叶子算三角形 AABB，直接写 =node_bounds[N-1+k]=（一对一，无需原子）。
+   - R2：每个叶子从 =parent= 走到根，对每个祖先 =atomicMin/atomicMax=。
+     - 原子 min/max 满足交换律/结合律 → 顺序无关、天然正确。
+     - **不要**用「按下标倒序、每节点 atomic 到父节点」的单 pass 写法（有竞态）。
+   - float 原子比较必须用单调映射（WGSL 无 float 原子）：
+     #+begin_src wgsl
+     fn f32_to_ordered(x: f32) -> u32 {
+         let b = bitcast<u32>(x);
+         return select(b | 0x80000000u, ~b, (b & 0x80000000u) != 0u);
+     }
+     fn ordered_to_f32(k: u32) -> f32 {
+         let b = select(k & 0x7FFFFFFFu, ~k, (k & 0x80000000u) == 0u);
+         return bitcast<f32>(b);
+     }
+     #+end_src
+   - 增量（M8）：只更新变化叶子 → 只跑 R1+R2（拓扑不变）= refit only。
+
+** 4.7 光线遍历与着色（=trace.wgsl=）
+   - 相机 uniform（自研，简洁）：=inverse_view_proj / view_proj / camera_position / frame_index / light_dir / light_radiance=。
+   - 主光线：像素 → uv → ndc → =inverse_view_proj= 反投影（近/远平面两点做 ray）。
+   - 天空判定：先读 prepass depth，=depth==1.0=（反向 Z 时 ==0）视为无几何（可直接输出背景/环境光）。
+   - 遍历（显式定长栈，比 hikari 的无栈跳转更好调试）：
+     #+begin_src wgsl
+     var stack: array<u32, 64>;
+     var sp = 0u; stack[0] = root; sp = 1u;
+     loop {
+         if (sp == 0u) { break; }
+         sp -= 1u;
+         let node = stack[sp];
+         if (intersect_aabb(ray, node_bounds[node]) >= hit_dist) { continue; }
+         let link = node_links[node];
+         if ((link.w & 1u) != 0u) {           // 叶子
+             test_triangle(link.x);           // Möller–Trumbore，更新最近命中
+         } else {
+             stack[sp] = link.x; sp += 1u;     // 可选：按距离排序压栈以提高 early-out
+             stack[sp] = link.y; sp += 1u;
+         }
+     }
+     #+end_src
+   - 命中后：重心插值 UV/法线，查材质，着色。
+   - 着色（参照 hikari 但简化）：方向光 + 太阳圆盘（=cos(SOLAR_ANGLE)=）+ 阴影光线；
+     自发光面 =emissive*255=；余弦半球采样 1 次间接弹射（共 2 次弹射，保留开关）；
+     BRDF 先 Lambert + Fresnel，逐步替换为 Filament 风格。
+   - 输出 RT storage texture（=Rgba16Float=，线性 HDR，**不乘 exposure**）。
+
+** 4.8 复用 prepass 的绑定
+   #+begin_src rust
+   texture_depth_2d(),                                          // ViewPrepassTextures::depth_view()
+   texture_2d(TextureSampleType::Float { filterable: false }),  // normal_view()  (Rgb10a2Unorm)
+   texture_2d(TextureSampleType::Float { filterable: true }),   // motion_vectors_view() (Rg16Float)
+   #+end_src
+   - WGSL：=var t_depth: texture_depth_2d;= / =var t_normal: texture_2d<f32>;= / =var t_motion: texture_2d<f32>;=，
+     =textureLoad(t, coords, 0)=；normal 解码 =normalize(t_normal*2.0-1.0)=。
+   - 若以后启用 =DeferredPrepass=：=texture_2d<u32>= + =textureLoad=，按 =pbr_deferred_functions.wgsl= 的
+     =unpack_*= 约定解析（可拿到 base_color/roughness/metallic/emissive）。
+
+** 4.9 输出与后处理
+   - *M0–M6（完全独立）*：composite 全屏三角形直接写 =ViewTarget::out_texture()=，
+     像素格式用 =ViewTarget::out_texture_view_format()= 决定（不要学现有代码硬编码 =Bgra8UnormSrgb=），
+     shader 里做简易 tonemap（Reinhard/ACES）。零外部依赖。
+   - *M7（可选复用）*：把 =tonemapping= + =upscaling= 注册进 =ShineRenderGraph=：
+     composite 改为写 =post_process_write().destination=，然后 =tonemapping= → =upscaling= 链路。
+     需要相机加 =Hdr=。这两个 system 与它们的 pipeline 都是全局准备好的，可直接复用。
+   - 注意 =upscaling= 才是最终 blit 到 =out_texture= 的那一步；不注册它就得自己在 composite 里写 out_texture。
+
+* 5. 里程碑
+   原则：先「能出图」，再逐步换成正确的 GPU 算法；每个里程碑都要在 =rt-cornell= 里目视验收 + readback/单测兜底。
+
+** TODO M0 — 独立管线打通：ShineRenderGraph + 复用 prepass 可视化
+   - 新建 =ShineSystems= + =ShineRtPlugin=；把 =early_prepass= 注册进 =ShineRenderGraph=。
+   - 新建 =examples/rt-cornell.rs=：=Camera3d= + =CameraRenderGraph::new(ShineRenderGraph)= + =Msaa::Off=
+     + =DepthPrepass= / =NormalPrepass= / =MotionVectorPrepass=（不加 =Hdr=，暂不用 Bevy tonemapping）。
+   - 先做 debug composite：把 depth/normal 直接可视化到 =out_texture()=。
+   - 交付物：=src/rt/{mod.rs,prepare.rs,composite.rs}=、=src/graph/sets.rs=、=shaders/rt/composite.wgsl=、
+     =examples/rt-cornell.rs=。
+   - 验收：
+     - [ ] =cargo run -p bevy_shine --example rt-cornell= 能显示 CornellBox，画面不是黑屏。
+     - [ ] 开关切换后能看到 depth / normal 可视化，且与几何对齐。
+     - [ ] log 中确认 =ViewPrepassTextures= 存在、尺寸正确、=depth/normal/motion= 均 =Some=。
+     - [ ] 确认 PBR 主通道**没有**运行（独立管线），画面完全由我们控制。
+   - 命令：=cargo check -p bevy_shine= / =cargo run -p bevy_shine --example rt-cornell=
+
+** TODO M1 — 相机光线生成 + 与 prepass depth 对齐
+   - 自研相机 uniform（=inverse_view_proj= 等）；compute 输出「解析求交深度 vs prepass 深度」的差值。
+   - 用解析几何（无限平面 + 球）先钉死坐标系与 ray 约定。
+   - 交付物：=src/rt/camera.rs=、=shaders/rt/trace.wgsl=（解析版）。
+   - 验收：
+     - [ ] 反投影世界坐标与解析求交命中点误差 < 1e-3。
+     - [ ] viewport / 非方形窗口下仍对齐（注意 =physical_target_size= 与 viewport 的关系）。
+   - 命令：=cargo run -p bevy_shine --example rt-cornell=
+
+** TODO M2 — 三角形 soup 收集与上传
+   - 生成 =Vec<GpuTriangle>= 上传 storage buffer；计算 =scene_aabb= 与三角形总数。
+   - 交付物：=src/rt/{geometry.rs,extract.rs}=。
+   - 验收：
+     - [ ] 三角形总数与网格统计一致。
+     - [ ] 场景 AABB 与 CPU 计算一致（log 打印）。
+     - [ ] 用「线性扫描全部三角形」求最近命中，几何轮廓正确（此时还没有 BVH）。
+   - 命令：=cargo run -p bevy_shine --example rt-cornell=
+
+** TODO M3 — Morton code + GPU Radix Sort
+   - 先写 CPU 参考（=rt/bvh/ref.rs=），再写 GPU kernel，readback 逐位比对。
+   - 拆成：M3a 只跑 =morton.wgsl= 并比对；M3b 小规模 bitonic sort 打通通路；M3c 替换为标准 radix sort。
+   - 交付物：=shaders/rt/{morton,radix_histogram,radix_scan,radix_scatter}.wgsl=、
+     =src/rt/bvh/{resources.rs,build.rs,ref.rs}=、=src/rt/verify.rs=。
+   - 验收：
+     - [ ] GPU Morton codes 与 CPU 参考逐位一致。
+     - [ ] GPU 排序结果与 CPU =sort_unstable_by_key= 的 (key,id) 序列一致。
+     - [ ] 尾块 / 非整齐规模不出错。
+   - 命令：=cargo test -p bevy_shine= / =cargo run -p bevy_shine --example rt-cornell= -- --verify
+
+** TODO M4 — Karras LBVH Topology
+   - 实现 4.5（=delta= / 倍增二分 / =first-last-split= / 子节点不变式 / =atomicMin(parent)= / 求根）。
+   - 交付物：=shaders/rt/lbvh_topology.wgsl= + CPU 参考对应函数。
+   - 验收：
+     - [ ] GPU =child_a/child_b/parent= 与 CPU 参考逐节点一致。
+     - [ ] 从根 DFS 恰好访问每个叶子一次；无环、无孤儿。
+     - [ ] =N= = 1/2/3 边界正确（N=1 时无内部节点，根就是唯一叶子）。
+   - 命令：=cargo test -p bevy_shine= / =cargo run --example rt-cornell -- --verify
+
+** TODO M5 — Atomic Bottom-Up AABB Refit
+   - 实现 4.6（=f32_to_ordered= / R1 / R2）。
+   - 交付物：=shaders/rt/lbvh_refit.wgsl=。
+   - 验收：
+     - [ ] 根 AABB 与场景 AABB 误差 < 1e-4。
+     - [ ] 随机抽查内部节点：AABB == 两子节点 AABB 并集。
+     - [ ] 重复跑一次 refit，结果不变（幂等）。
+   - 命令：=cargo test -p bevy_shine= / =cargo run --example rt-cornell -- --verify
+
+** TODO M6 — LBVH 遍历 + 着色（1~2 次弹射）
+   - 把 M2 的线性扫描替换为 4.7 的显式栈遍历；加材质表（先标量 base_color/emissive/roughness/metallic）、
+     方向光 + 阴影光线 + 1 次间接弹射。
+   - 交付物：=shaders/rt/{rt_types,trace}.wgsl=、材质提取。
+   - 验收：
+     - [ ] Cornell box 可见红/绿墙 color bleeding（间接弹射生效）。
+     - [ ] 硬阴影正确；自发光灯面明亮。
+     - [ ] 与 M2 线性扫描版画面基本一致（差异只来自浮点求和顺序）。
+     - [ ] 关闭间接弹射后画面明显变暗（开关生效）。
+   - 命令：=cargo run -p bevy_shine --example rt-cornell=
+
+** TODO M7 —（可选）复用 Bevy 后处理 + 时间累积
+   - 把 =tonemapping= + =upscaling= 注册进 =ShineRenderGraph=；composite 改走 =post_process_write()=；相机加 =Hdr=。
+   - 时间累积：用 =motion_vectors_view()= 做上一帧 UV 重投影，用 depth/normal 做校验（h ikari 的
+     =|Δ position.w|>0.001 / dot(normal)<0.866= 思路），累积缓冲 ping-pong，加简单双边滤波 / EMA。
+   - 交付物：=src/rt/trace/composite.rs= 更新、累积 buffer + kernel、蓝噪声/hash 噪声采样。
+   - 验收：
+     - [ ] 静止相机下噪点显著减少、逐步收敛。
+     - [ ] 相机移动时无明显鬼影（重投影校验生效）。
+     - [ ] 对比「关闭 tonemapping」与「开启」的差异，证明复用链路生效。
+   - 回退：若复用有问题，保留 M0–M6 的「自写 tonemap 到 out_texture」作为兜底。
+
+** TODO M8 — 动态场景与增量更新
+   - 三角形数量不变 → 只上传新顶点 + R1/R2 refit；数量变化 → 重建整棵树。
+   - 交付物：=geometry.rs= 的 dirty 分支、=RtBuildSystems= 条件执行。
+   - 验收：
+     - [ ] 移动/旋转物体无破面、无残留阴影。
+     - [ ] 只有 transform 变化时，readback 确认排序/拓扑 buffer 未被重写。
+   - 命令：=cargo run -p bevy_shine --example rt-cornell=
+
+** TODO M9 — 进阶（可选）
+   - [ ] =DeferredPrepass= + 从 deferred gbuffer 复用 Bevy 已算好的材质（=unpack_*=）。
+   - [ ] 去掉 CPU gather：从 =MeshAllocator= 的 GPU buffer 拷贝 + compute 反索引化。
+   - [ ] 两级加速结构：每 mesh 一个 LBVH（BLAS）+ 实例 TLAS。
+   - [ ] 材质纹理：=binding_array<texture_2d<f32>>= + =binding_array<sampler>=（h ikari 做法）。
+   - [ ] 更优遍历：有序子节点访问 / 无栈跳转。
+   - [ ] 更优排序：OneSweep / 16-bit digit / 只排 30 bit。
+   - [ ] ReSTIR DI/GI（h ikari =light.wgsl= 的 reservoir 结构）。
+   - [ ] 清理 legacy phase item 代码（=src/phase.rs=），新路径不再需要。
+
+* 6. 验证方法
+** 6.1 CPU 参考实现 + 单元测试
+   - =src/rt/bvh/ref.rs= 用纯 CPU 实现 Morton / 排序 / Karras LBVH / refit，逻辑与 WGSL 一一对应。
+   - 单测：Morton 手算样例；LBVH 不变式（区间/父子/根）；Refit（内部节点 = 子节点并集）。
+   - 命令：=cargo test -p bevy_shine -- --nocapture=。
+
+** 6.2 GPU readback 校验
+   - =verify.rs=：=RenderDevice::create_buffer_with_data= 建 =MAP_READ= 缓冲 → =copy_buffer_to_buffer= →
+     =BufferSlice::map_async(MapMode::Read, cb)= + =RenderDevice::poll(PollType::Wait)= → 与 CPU 比对。
+     （=bevy_render/src/gpu_readback.rs= 是完整参考；=MapMode/PollType= 在 =bevy::render::render_resource=。）
+   - 例子开关（=cargo run --example rt-cornell -- --verify= 或环境变量）每次 BVH 重建后打印差异报告。
+   - 构建放在全局 =Render= schedule 时，可直接 =render_queue.submit([encoder.finish()])=，不需要 =RenderContext=。
+
+** 6.3 视觉验收
+   - debug 视图开关：d=depth、n=normal、m=motion、b=遍历步数热力图、t=直接光/间接光分离。
+   - 基准场景：=bevy_shine/assets/CornellBox.glb=。
+
+* 7. 风险与待验证
+   | 风险 / 待确认                                        | 处理方式                                                                 |
+   |------------------------------------------------------+--------------------------------------------------------------------------|
+   | prepass 纹理不可 storage 绑定                         | 已确认；只读采样。RT 输出用自己的 storage 纹理。                          |
+   | =Msaa= 默认 Sample4，prepass 纹理是 multisampled      | 已确认；RT 相机强制 =Msaa::Off=。                                        |
+   | 复用 prepass 需要哪些前置                            | 已确认：全部在全局 schedule；只需注册 =early_prepass= 进自定义 schedule。  |
+   | =early_prepass= 依赖 =ViewDepthTexture= / =ViewPrepassTextures= | 由全局系统创建；若缺失则静默不画 → M0 用 log 确认组件都在。 |
+   | =ViewPrepassTextures= 只有在 prepass phase 非空时创建  | 相机必须带 prepass 组件且场景里有 opaque mesh。                          |
+   | =out_texture()= 像素格式不一定是 sRGB                 | 用 =out_texture_view_format()= 决定 shader 是否手动 gamma，别硬编码。      |
+   | 0.19 没有现成 GPU sort/scan 可抄                      | 自研；参考 =cluster_allocate.wgsl= 的 workgroup scan。                    |
+   | =atomicMin/Max= 无 float 版本                         | =f32_to_ordered= 单调映射到 u32 再原子。                                  |
+   | refit 与 trace 两种视图下的 buffer 对齐               | =array<vec4<f32>>= / 平铺 =array<atomic<u32>>=，16 字节对齐天然一致。      |
+   | LBVH「倒序 atomic 到父节点」有竞态                    | 改用「叶子→根逐级原子」。                                                 |
+   | 根节点不恒为 0                                        | 用 =parent == 0xFFFFFFFF= 显式求根。                                      |
+   | radix sort 尾块处理                                   | histogram/scatter 都用 =min(n, chunk_end)= 保护。                         |
+   | 单个 compute dispatch 的 storage 写可见性             | WebGPU 保证同一 encoder 内 dispatch 之间有隐式同步；kernel 间不要依赖顺序之外的假设。 |
+   | CPU gather 大场景是瓶颈                               | 原型接受；M9 改 GPU 反索引化。                                            |
+   | =delta()= 的 -1 / 越界语义易写错                      | CPU 参考 + 边界测试（N=1/2/3）钉死。                                      |
+
+* 8. 参考资料
+   - 参考工程：=../bevy-hikari=（=src/mesh_material/mod.rs= 的 CPU BVH；=src/shaders/light.wgsl= 的遍历 + ReSTIR；
+     =src/light.rs= 的 compute dispatch）。
+   - Karras, "Maximizing Parallelism in the Construction of BVHs, Octrees, and k-d Trees"（4.5）。
+   - Merrill & Garland / GPU Gems 3 的 histogram-scan-scatter（4.4）。
+   - =Ray Tracing Gems I/II=、=Ray Tracing in One Weekend= 系列（见 =somenotes.org=）。
+   - 引擎内范例：
+     - =bevy_core_pipeline/src/prepass/node.rs=（=early_prepass= 的 ViewQuery 与实现）
+     - =bevy_core_pipeline/src/core_3d/mod.rs=（=prepare_prepass_textures= / =extract_camera_prepass_phase=）
+     - =bevy_pbr/src/prepass/mod.rs=（prepass 排队与 batching，全在全局 Render）
+     - =bevy_solari/src/realtime/node.rs=（compute 只读 prepass/deferred 的绑定范例）
+     - =bevy_solari/src/scene/blas.rs=（在全局 Render schedule 里自己 submit command buffer）
+     - =bevy_pbr/src/cluster/cluster_allocate.wgsl=（workgroup scan）
+     - =bevy_render/src/gpu_readback.rs=（GPU→CPU readback）
+   - 既有笔记：=somenotes.org=、=readme.org=。
+* 遗留问题
+  composite.wgsl为什么用switch case格式
+  - ai分析uniform match没有额外性能负担
+  
+  看到这个奇怪的表达，应该有更好的方式
+  [[file:src/lib.rs::composite::build(app);]]

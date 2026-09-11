@@ -1,11 +1,16 @@
-use bevy::{prelude::*, render::camera::CameraRenderGraph};
-use bevy_shine::{ShinePlugin, graph::ShineRenderGraph};
+use bevy::{
+    core_pipeline::prepass::{DepthPrepass, MotionVectorPrepass, NormalPrepass},
+    prelude::*,
+    render::camera::CameraRenderGraph,
+};
+use bevy_shine::{ShinePlugin, cycle_view_mode, graph::ShineRenderGraph};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(ShinePlugin)
         .add_systems(Startup, setup)
+        .add_systems(Update, cycle_view_mode)
         .run();
 }
 
@@ -14,22 +19,6 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Plane
-    // commands.spawn((
-    //     Mesh3d(meshes.add(Plane3d::default().mesh().size(5.0, 5.0))),
-    //     // MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
-    //     MeshMaterial3d(materials.add(Color::srgb(0.0, 0.0, 0.0))),
-    //     Visibility::default(),
-    // ));
-
-    // Cube
-    // commands.spawn((
-    //     Mesh3d(meshes.add(Cuboid::default())),
-    //     // MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-    //     MeshMaterial3d(materials.add(Color::srgb(0.1, 0.1, 0.1))),
-    //     Transform::from_xyz(0.0, 0.5, 0.0),
-    //     Visibility::default(),
-    // ));
 
     commands.spawn((
         Mesh3d(meshes.add(Sphere { radius: 0.5 })),
@@ -62,6 +51,9 @@ fn setup(
         CameraRenderGraph::new(ShineRenderGraph),
         Transform::from_xyz(0.0, 0.0, 1.0).looking_at(Vec3::ZERO, Vec3::Y),
         // Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3 { x: 0.0, y: 0.0, z: 100.0 }, Vec3::Y),
-        Msaa::default(),
+        Msaa::Off,
+        DepthPrepass,
+        NormalPrepass,
+        MotionVectorPrepass,
     ));
 }
