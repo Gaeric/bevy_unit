@@ -20,6 +20,10 @@ pub struct ShineRenderGraph;
 /// submission order equals the system execution order.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ShineSystems {
+    /// gpu mesh preprocessing. produces the batch sets and `MeshUniform`s that
+    /// the prepass draws consume. ABevy registers these systems on `Core3d`; a
+    /// custom camera schedule must bring them along.
+    Preprocess,
     /// Reuses Bevy's built-in prepass (depth / normal / motion vectors).
     Prepass,
     /// Ray tracing compute
@@ -40,6 +44,7 @@ pub fn ensure_shine_schedule(render_app: &mut SubApp) {
         .edit_schedule(ShineRenderGraph, |schedule| {
             schedule.configure_sets(
                 (
+                    ShineSystems::Preprocess,
                     ShineSystems::Prepass,
                     ShineSystems::Trace,
                     ShineSystems::Composite,

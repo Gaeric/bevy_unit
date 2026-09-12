@@ -78,6 +78,46 @@
    - =bevy_solari= 的 BLAS/TLAS 用 wgpu **硬件光追 API**（=create_blas/create_tlas=），不是 compute 建树，
      对「compute 建 LBVH」没有直接复用价值；但 =realtime/node.rs= 是「compute 只读 =ViewPrepassTextures=」的最佳范例。
 
+** 1.5 通用规律：引擎把每个 pass 拆成「全局 Prepare」+「Core3d 里的执行」
+   这是自建 camera schedule 时**最容易漏**的一类问题，M0 阶段已经踩了两次。
+
+   模式是：与相机无关的资源 / 数据准备放在全局 =Render= / =ExtractSchedule=；
+   真正推进 GPU 状态的那一步（draw / compute dispatch）放在 =Core3d=。
+   所以**复用某个 pass 时，必须去 grep 它在 =Core3d= 里注册了哪些 system，并把它们搬进自己的 schedule。**
+
+   | pass 部分 | 系统 | 引擎注册位置 | 自建 schedule 要做什么 |
+   |-----------+------+--------------+------------------------|
+   | prepass 绘制 | =early_prepass= / =late_prepass= | =Core3d= | 搬（见 1.1） |
+   | GPU mesh preprocessing | =clear_indirect_parameters_metadata= / =unpack_bins= / =early_gpu_preprocess= / =early_prepass_build_indirect_parameters= | =Core3d=（=gpu_preprocess.rs:436=，排 =early_prepass= 之前） | **搬** |
+   | GPU occlusion culling 的 late 部分 | =late_gpu_preprocess= / =late_prepass_build_indirect_parameters= | =Core3d= | 启用 =OcclusionCulling= 时才需要 |
+   | main pass 的 indirect 参数 | =main_build_indirect_parameters= | =Core3d= | 我们没有 main pass，暂不需要 |
+   | tonemapping / upscaling | =tonemapping= / =upscaling= | =Core3d= | M7 可选搬（见 4.9） |
+
+   源码（=bevy_pbr/src/render/gpu_preprocess.rs:436=）：
+   #+begin_src rust
+   .add_systems(Core3d, (
+       (clear_indirect_parameters_metadata, unpack_bins, early_gpu_preprocess,
+        early_prepass_build_indirect_parameters.run_if(...))
+           .chain()
+           .before(early_prepass),        // ← 必须排在 prepass 之前
+       ...
+   ));
+   #+end_src
+   这些函数都能通过 =bevy::pbr::*= 访问（=bevy_pbr/src/lib.rs:84= 有 =pub use render::*=，
+   =render/mod.rs= 有 =pub use gpu_preprocess::*=），所以不需要 fork 引擎。
+
+   *为什么漏了会「静默不出图」*：GPU preprocessing 是**设备级**的全局选择
+   （=MeshRenderPlugin::build= 依 adapter / device 能力决定，无法按相机关闭）。
+   设备支持时 phase 处于 =GpuPreprocessingMode::Culling=，此时 phase 的 batch set 是由
+   GPU 剔除 + =unpack_bins= 产生的。而 =RenderVisibleEntities<Mesh3d>= 走的是 CPU 可见性路径（有内容），
+   所以 =queue_prepass_material_meshes= 会「成功排队」，日志完全看不出问题 ——
+   但 =unpack_bins= 没跑 ⇒ phase 里没有实际实例 ⇒ **一个像素都没画出来**，
+   表现为全部 prepass 贴图为 0：depth 纯白、normal 均匀灰、motion 均匀灰。
+
+   排查手段：日志只说明「排了队」，看不出「没画」。要么直接对照上面的系统清单，
+   要么给相机临时加 =NoIndirectDrawing= 看症状是否改变（phase 会降到 =PreprocessingOnly=，
+   走直接绘制；**这不是修法**，只是方向确认）。
+
 * 2. 总体架构
 ** 2.1 渲染流程
    #+begin_src text
@@ -94,8 +134,8 @@
        bvh_morton -> bvh_radix_sort(x4) -> bvh_topology -> bvh_refit
 
    ShineRenderGraph (自定义 camera schedule，每个用它的相机跑一次)
+     ShineSystems::Preprocess    : GPU mesh preprocessing（从 Core3d 搬来的 4 个 system，见 1.5）
      ShineSystems::Prepass       : early_prepass  ← Bevy 的 prepass（只注册 system，不接 Core3d）
-     ShineSystems::BvhBuild      : （可选）把构建放到这里以便每相机同步，见 2.3
      ShineSystems::Trace         : compute 光线追踪 → RT storage texture
      ShineSystems::Composite     : 写 out_texture()（M7 后可换成 post_process_write + Bevy tonemapping/upscaling）
    #+end_src
@@ -104,7 +144,8 @@
    | 能力                     | 来源            | 我们做什么                                                |
    |--------------------------+-----------------+-----------------------------------------------------------|
    | depth / normal / motion  | Bevy prepass    | 只在 =ShineRenderGraph= 注册 =early_prepass=；其余全自动。 |
-   | ViewTarget / present      | Bevy 全局        | 直接用 =ViewTarget{}::out_texture()=。                     |
+   | GPU mesh preprocessing   | Bevy（=Core3d=） | **必须搬 4 个 system 进 =ShineSystems::Preprocess=**（见 1.5）。 |
+   | ViewTarget / present      | Bevy 全局        | 用 =ViewTarget::out_texture_color_attachment()=（见 4.9）。 |
    | tonemapping / upscaling  | Bevy（可选）     | M7 后把两个 system 注册进 =ShineRenderGraph=。             |
    | 相机 uniform             | 自研（简洁）     | =inverse_view_proj / camera_position / frame_index ...=   |
    | 材质                     | 自研             | 先从 =StandardMaterial= 抽成 =GpuMaterial=（先只用标量）。 |
@@ -211,6 +252,17 @@
                  .add_systems(Render, (write_composite_uniform, prepare_composite_bind_group)
                      .chain().in_set(RenderSystems::PrepareBindGroups))
                  .add_systems(ShineRenderGraph, (
+                     // Bevy registers these on Core3d. Without them the prepass
+                     // phase has no instances at all, and every view renders
+                     // empty (zeros) textures. See 1.5.
+                     (
+                         clear_indirect_parameters_metadata,
+                         unpack_bins,
+                         early_gpu_preprocess,
+                         early_prepass_build_indirect_parameters,
+                     )
+                         .chain()
+                         .in_set(ShineSystems::Preprocess),
                      early_prepass.in_set(ShineSystems::Prepass),   // ← 复用 Bevy prepass
                      rt_composite .in_set(ShineSystems::Composite),
                  ).chain());
@@ -224,6 +276,8 @@
      #+end_src
 
    - *接线要点*：
+     - =ShineSystems::Preprocess= 里的 4 个 system 是**必须**的，不是可选优化：漏了就会
+       「队列排成功、一个像素都不画」（见 1.5）。
      - =ensure_shine_schedule= 用 =init_schedule= 而不是 =add_schedule=。后者是**覆盖式**的
        （源码注释："overwriting any existing schedule with the same label"），多个插件都调会互相清空系统。
      - =SpecializedRenderPipelines= 的 prepare 系统放在 =RenderSystems::PrepareBindGroups=：
@@ -410,10 +464,12 @@
    - 验收结果：
      - [X] =cargo run -p bevy_shine --example minimal= 有画面；空格在
        =prepass depth / prepass normal / prepass motion / solid= 四档间切换。
-     - [X] depth 视图与几何对齐（白底 + 深色球体，reverse-Z）。
      - [X] log 确认 =ViewPrepassTextures= 存在、size 正确、=depth/normal/motion= 均 =Some=。
      - [X] 确认 PBR 主通道**没有**运行（=solid= 档整屏只有我们的纯色）。
      - [X] =cargo check -p bevy_shine --all-targets= 零 warning。
+     - [X] *present 通路*：必须用 =out_texture_color_attachment()=，否则窗口只 present 一次（见 4.9）。
+     - [ ] **depth 视图与几何对齐**：首次验收时四档全是单色，根因是漏搬 GPU preprocessing 的
+       4 个 system（见 1.5）。**搬完之后这一条才算真正通过。**
    - 与原计划的偏差（以第 3 / 4 节为准）：
      - 目录：原计划 =src/rt/= + =src/graph/=，实际**扁平**为 =src/*.rs=。
      - 命名：=ShineRtPlugin= / =RtDebugMode= → =ShinePlugin= / =RtViewMode=；
@@ -423,9 +479,10 @@
      - legacy 代码与其 shader 已全部删除（=src/{light,overlay,prepass}.rs=、
        =src/shaders/{shader,prepass,light,overlay}.wgsl=），=src/mesh.rs= 也一并删除
        （M2 需要时从 git 历史 =3d3058d= 取回 =GpuTriangles::from_mesh=）。
-   - 两个非显而易见的坑（详见 4.9 与第 7 节）：
+   - 三个非显而易见的坑（详见 1.5 / 4.9 / 第 7 节）：
      1. =encase= 的 uniform 结构里不能放元素 stride 不是 16 倍数的数组（[u32; 3] 会 panic）。
      2. 往最终输出写必须走 =out_texture_color_attachment()=，否则窗口只 present 一次。
+     3. 引擎把每个 pass 拆成「全局 Prepare + =Core3d= 里的执行」，漏搬后者会**静默不出图**（见 1.5）。
 
 ** TODO M1 — 相机光线生成 + 与 prepass depth 对齐
    - 自研相机 uniform（=inverse_view_proj= 等）；compute 输出「解析求交深度 vs prepass 深度」的差值。
@@ -540,6 +597,7 @@
    | =ViewPrepassTextures= 只有在 prepass phase 非空时创建  | 相机必须带 prepass 组件且场景里有 opaque mesh。                          |
    | =out_texture()= 像素格式不一定是 sRGB                 | 用 =out_texture_view_format()= 决定 shader 是否手动 gamma，别硬编码。      |
    | **手搓 =RenderPassColorAttachment= 会丢 present**      | 已确认并修复；必须用 =out_texture_color_attachment()=（详见 4.9）。         |
+   | **引擎 pass 拆成「全局 Prepare + =Core3d= 执行」**     | 复用任何 pass 都要 grep 它在 =Core3d= 里注册的 system 并搬过来（见 1.5）。   |
    | uniform 结构里数组的元素 stride 必须是 16 的倍数       | 已确认；=encase= 的 =assert_uniform_compat= 会直接 panic。padding 用独立标量字段。 |
    | uniform 里嵌套 struct / array 字段必须 16 字节对齐     | 用 =#[shader(align(16))]=，或给前置字段加 =#[shader(size(16))]=。           |
    | 0.19 没有现成 GPU sort/scan 可抄                      | 自研；参考 =cluster_allocate.wgsl= 的 workgroup scan。                    |

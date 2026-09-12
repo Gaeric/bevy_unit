@@ -26,13 +26,15 @@ fn vertex(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
 @fragment
 fn fragment(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32>
 {
-
   let coords = vec2<i32>(frag_coord.xy);
   var color = vec3<f32>(0.10, 0.04, 0.16);
 
   switch composite.view_mode {
     case VIEW_PREPASS_DEPTH: {
-      color = vec3<f32>(1.0 - textureLoad(depth_tex, coords, 0));
+      // same as `bevy_dev_tools::debug_overlay`'s DEBUG_DEPTH arm: bevy's reverse-z
+      // depth is already "1.0 at the near plane .. 0.0 at infinite far", so it is
+      // shown as-is instead of being linearized into a distance.
+      color = vec3<f32>(textureLoad(depth_tex, coords, 0));
     }
     case VIEW_PREPASS_NORMAL: {
       let normal = normalize(textureLoad(normal_tex, coords, 0).xyz * 2.0 - 1.0);

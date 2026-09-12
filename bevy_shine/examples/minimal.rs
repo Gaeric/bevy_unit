@@ -19,7 +19,6 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-
     commands.spawn((
         Mesh3d(meshes.add(Sphere { radius: 0.5 })),
         MeshMaterial3d(materials.add(Color::srgb(0.1, 0.1, 0.1))),

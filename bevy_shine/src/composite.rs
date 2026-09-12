@@ -3,18 +3,20 @@
 use bevy::{
     asset::{embedded_asset, load_embedded_asset},
     core_pipeline::prepass::{ViewPrepassTextures, node::early_prepass},
-    prelude::*,
-    render::render_resource::{
-        BindGroupLayoutDescriptor, FragmentState, RenderPipelineDescriptor, VertexState,
+    pbr::{
+        clear_indirect_parameters_metadata, early_gpu_preprocess,
+        early_prepass_build_indirect_parameters, unpack_bins,
     },
+    prelude::*,
     render::{
         Render, RenderApp, RenderSystems,
         camera::ExtractedCamera,
         render_resource::{
-            BindGroup, BindGroupEntries, BindGroupLayoutEntries, ColorTargetState, ColorWrites,
-            MultisampleState, PipelineCache, PrimitiveState, RenderPassDescriptor, ShaderStages,
+            BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
+            ColorTargetState, ColorWrites, FragmentState, MultisampleState, PipelineCache,
+            PrimitiveState, RenderPassDescriptor, RenderPipelineDescriptor, ShaderStages,
             SpecializedRenderPipeline, SpecializedRenderPipelines, TextureFormat,
-            TextureSampleType, UniformBuffer,
+            TextureSampleType, UniformBuffer, VertexState,
             binding_types::{texture_2d, texture_depth_2d, uniform_buffer},
         },
         renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery},
@@ -227,6 +229,14 @@ impl Plugin for CompositePlugin {
             .add_systems(
                 ShineRenderGraph,
                 (
+                    (
+                        clear_indirect_parameters_metadata,
+                        unpack_bins,
+                        early_gpu_preprocess,
+                        early_prepass_build_indirect_parameters,
+                    )
+                        .chain()
+                        .in_set(ShineSystems::Preprocess),
                     early_prepass.in_set(ShineSystems::Prepass),
                     rt_composite.in_set(ShineSystems::Composite),
                 )
