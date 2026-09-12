@@ -626,14 +626,27 @@
      - =bevy_render/src/gpu_readback.rs=（GPU→CPU readback）
    - 既有笔记：=somenotes.org=、=readme.org=。
 * 遗留问题
-  composite.wgsl为什么用switch case格式
-  - ai分析uniform match没有额外性能负担
-  - 已确认（M0）：uniform 分支在 wave 内一致，硬件整波跳过未取分支，约等于免费；
-    真正的成本是「编译期无法 DCE，所有 arm 都留在二进制里」。M6 起把正式 resolve 与
-    AOV viewer 拆成两条管线，届时不需再纠结（见 4.9）。
-  
-  看到这个奇怪的表达，应该有更好的方式
-  [[file:src/lib.rs::composite::build(app);]]
-  - 已解决（M0）：改用 =src/composite.rs= 里的 =CompositePlugin= 实现 =Plugin=，
-    =ShinePlugin= 只做 =add_plugins=。这样 =build= / =finish= 的时序由 Bevy 保证，
-    不再依赖「先写 build 再写 finish」这个人为约定（见 4.1 的「接线要点」）。
+  prepare_shine_cameras中的参数转换关系理解
+
+
+  viewport.zw取的是什么？
+    let viewport = view.viewport.zw;
+
+    if viewport.x == 0 || viewport.y == 0 {
+        return;
+    }
+
+    let mut pass = ctx
+        .command_encoder()
+        .begin_compute_pass(&ComputePassDescriptor {
+            label: Some("shine trace"),
+            timestamp_writes: None,
+        });
+
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, &bind_group.0, &[]);
+    pass.dispatch_workgroups(
+        viewport.x.div_ceil(WORKGROUP_SIZE),
+        viewport.y.div_ceil(WORKGROUP_SIZE),
+        1,
+    );

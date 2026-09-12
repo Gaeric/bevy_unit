@@ -4,8 +4,10 @@ use bevy::render::extract_resource::ExtractResourcePlugin;
 use crate::composite::CompositePlugin;
 use crate::view_mode::RtViewMode;
 
+mod camera;
 mod composite;
 pub mod graph;
+mod trace;
 mod view_mode;
 
 pub struct ShinePlugin;
