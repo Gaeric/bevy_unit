@@ -52,3 +52,10 @@
    - Markov Chain Mixture Models for Real-Time Direct Illumination
      paper: https://onlinelibrary.wiley.com/doi/10.1111/cgf.14881
      demo: https://github.com/theascone/mcmm-falcor
+** note
+*** denoise
+    nrc: https://github.com/AdamYuan/VkNRC
+
+    nrd: https://github.com/NVIDIA-RTX/NRD
+
+    ReBLUR/ReLAX
