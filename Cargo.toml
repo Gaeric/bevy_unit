@@ -7,8 +7,8 @@ edition = "2024"
 members = [
         "bevy_shine",
         "bevy_waltz",
+        "bevy_cloth",
         "units/animation_blending",
-        "units/bevy_cloth",
         "units/bone_attachments",
         "units/modular_character",
         "units/tps_camera",
