@@ -4,6 +4,12 @@ const VIEW_PREPASS_DEPTH: u32 = 0u;
 const VIEW_PREPASS_NORMAL: u32 = 1u;
 const VIEW_PREPASS_MOTION: u32 = 2u;
 const VIEW_SOLID: u32 = 3u;
+const VIEW_TRACE_DEPTH: u32 = 4u;
+const VIEW_TRACE_DIFF: u32 = 5u;
+
+const BACKGROUND: vec3<f32> = vec3<f32>(0.10, 0.04, 0.16);
+const TRACE_DEPTH_RANGE: f32 = 5.0;
+const TRACE_DIFF_SCALE: f32 = 20.0;
 
 struct CompositeUniform {
    view_mode: u32, 
@@ -16,6 +22,7 @@ struct CompositeUniform {
 @group(0) @binding(1) var depth_tex: texture_depth_2d;
 @group(0) @binding(2) var normal_tex: texture_2d<f32>;
 @group(0) @binding(3) var motion_vectors_tex: texture_2d<f32>;
+@group(0) @binding(4) var trace_tex: texture_2d<f32>;
 
 @vertex
 fn vertex(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
@@ -46,6 +53,23 @@ fn fragment(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32>
     }
     case VIEW_SOLID: {
       color = vec3<f32>(0.10, 0.04, 0.16);
+    }
+    case VIEW_TRACE_DEPTH: {
+      let t = textureLoad(trace_tex, coords, 0).g;
+      color = select(BACKGROUND, vec3<f32>(1.0 - saturate(t / TRACE_DEPTH_RANGE)), t > 0.0);
+    }
+    case VIEW_TRACE_DIFF: {
+      let trace = textureLoad(trace_tex, coords, 0).rg;
+      let analytic_hit = trace.r > 0.0;
+      let prepass_hit = trace.g > 0.0;
+
+      if (analytic_hit && prepass_hit) {
+        color = vec3<f32>(saturate(abs(trace.r - trace.g) * TRACE_DIFF_SCALE));
+      } else if (analytic_hit != prepass_hit) {
+        color = vec3<f32>(1.0, 0.0, 1.0);
+      } else {
+        color = BACKGROUND;
+      }
     }
     default: {}
   }

@@ -650,3 +650,30 @@
         viewport.y.div_ceil(WORKGROUP_SIZE),
         1,
     );
+
+    这个1e30是不是有点问题？
+    const FAR_T: f32 = 1e30;
+
+
+    为什么要声明sphere位置和半径，有什么意义？
+    /// the analytic scene mirrors `examples/minimal.rs`.
+    const SPHERE_CENTER: vec3<f32> = vec3<f32>(0.0, 0.0, -1.0);
+    const SPHERE_RADIUS: f32 = 0.5;
+   
+    这段代码在哪个space中，没有理解viewport.z和viewport.w会什么是world space
+    if (gid.x > camera.viewport.z || gid.y >= camera.viewport.w) {
+    return;
+    }
+
+    这个转换的具体过程没有看懂
+    let pixel = vec2<i32>(camera.viewport.xy + gid.xy);
+
+    忘记公式的原理了：
+    let oc = ray.origin - center;
+    let b = dot(oc, ray.direction);
+    let c = dot(oc, oc) - raidus * radius;
+    let disc = b * b - c;
+
+    if (disc < 0.0) {
+    return FAR_T;
+    }

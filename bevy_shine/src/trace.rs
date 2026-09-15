@@ -40,7 +40,6 @@ pub struct TraceBindGroup(pub BindGroup);
 
 #[derive(Resource)]
 pub struct TracePipeline {
-    pub shader: Handle<Shader>,
     pub bind_group_layout: BindGroupLayoutDescriptor,
     pub pipeline: CachedComputePipelineId,
 }
@@ -75,7 +74,6 @@ impl FromWorld for TracePipeline {
                 });
 
         Self {
-            shader,
             bind_group_layout,
             pipeline,
         }

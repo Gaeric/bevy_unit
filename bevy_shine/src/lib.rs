@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResourcePlugin;
 
+use crate::camera::ShineCameraPlugin;
 use crate::composite::CompositePlugin;
+use crate::trace::TracePlugin;
 use crate::view_mode::RtViewMode;
 
 mod camera;
@@ -18,6 +20,8 @@ impl Plugin for ShinePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RtViewMode>()
             .add_plugins(ExtractResourcePlugin::<RtViewMode>::default())
-            .add_plugins(CompositePlugin);
+            .add_plugins(CompositePlugin)
+            .add_plugins(ShineCameraPlugin)
+            .add_plugins(TracePlugin);
     }
 }

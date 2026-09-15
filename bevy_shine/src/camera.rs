@@ -55,8 +55,8 @@ pub fn prepare_shine_cameras(
     }
 }
 
-pub struct CameraPlugin;
-impl Plugin for CameraPlugin {
+pub struct ShineCameraPlugin;
+impl Plugin for ShineCameraPlugin {
     fn build(&self, app: &mut App) {
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;

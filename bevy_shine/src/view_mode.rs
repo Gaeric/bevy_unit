@@ -21,15 +21,20 @@ pub enum RtViewMode {
     PrepassMotion = 2,
     /// flat color
     Solid = 3,
+
+    TraceDepth = 4,
+    TraceDiff = 5,
 }
 
 impl RtViewMode {
     /// selectable modes in cycle order. add new variants here as well.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 6] = [
         Self::PrepassDepth,
         Self::PrepassNormal,
         Self::PrepassMotion,
         Self::Solid,
+        Self::TraceDepth,
+        Self::TraceDiff,
     ];
 
     pub fn as_u32(self) -> u32 {
@@ -42,6 +47,8 @@ impl RtViewMode {
             Self::PrepassNormal => "prepass normal",
             Self::PrepassMotion => "prepass motion",
             Self::Solid => "solid",
+            Self::TraceDepth => "trace depth",
+            Self::TraceDiff => "trace diff",
         }
     }
 

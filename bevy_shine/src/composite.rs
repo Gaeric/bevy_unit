@@ -26,6 +26,7 @@ use bevy::{
 
 use crate::{
     graph::{ShineRenderGraph, ShineSystems, ensure_shine_schedule},
+    trace::TraceOutput,
     view_mode::{CompositeUniformData, RtViewMode},
 };
 
@@ -65,7 +66,7 @@ pub fn prepare_composite_bind_group(
     pipeline_cache: Res<PipelineCache>,
     render_device: Res<RenderDevice>,
     uniform: Res<CompositeUniform>,
-    views: Query<(Entity, &ViewPrepassTextures)>,
+    views: Query<(Entity, &ViewPrepassTextures, &TraceOutput)>,
 ) {
     if uniform.0.binding().is_none() {
         return;
@@ -73,7 +74,7 @@ pub fn prepare_composite_bind_group(
 
     let layout = pipeline_cache.get_bind_group_layout(&pipeline.bind_group_layout);
 
-    for (entity, prepass) in &views {
+    for (entity, prepass, trace) in &views {
         let (Some(depth), Some(normal), Some(motion_vectors)) = (
             prepass.depth_view(),
             prepass.normal_view(),
@@ -89,7 +90,13 @@ pub fn prepare_composite_bind_group(
         let bind_group = render_device.create_bind_group(
             "shine rt composite bind group",
             &layout,
-            &BindGroupEntries::sequential((uniform_binding, depth, normal, motion_vectors)),
+            &BindGroupEntries::sequential((
+                uniform_binding,
+                depth,
+                normal,
+                motion_vectors,
+                &trace.0.default_view,
+            )),
         );
 
         commands
@@ -107,6 +114,8 @@ impl FromWorld for CompositePipeline {
                 uniform_buffer::<CompositeUniformData>(false),
                 texture_depth_2d(),
                 texture_2d(TextureSampleType::Float { filterable: false }),
+                texture_2d(TextureSampleType::Float { filterable: false }),
+                // the trace result
                 texture_2d(TextureSampleType::Float { filterable: false }),
             ),
         );
