@@ -1,6 +1,5 @@
 use bevy::{color::palettes::css::WHITE, prelude::*, window::WindowResized};
-use rand::Rng;
-
+use rand::RngExt;
 // const BOX_WIDTH: f32 = 300.0;
 // const BOX_HEIGHT: f32 = 200.0;
 

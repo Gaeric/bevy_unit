@@ -448,3 +448,6 @@
   - [ ] M5 七个场景补齐（未开始）
   - [ ] M6 WGSL compute 求解器（可选，未开始）
   - [ ] M7 打磨 / DoD（未开始）
+* tips
+  why the indices is this slice?
+  [[file:src/sim/mesh_gen.rs:://todo: what's this indices mean][mesh indices]]
