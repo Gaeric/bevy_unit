@@ -5,6 +5,8 @@ use bevy::{
     render::{extract_resource::ExtractResource, render_resource::ShaderType},
 };
 
+use crate::view_mode::RtViewMode::{TraceDepth, TraceDiff};
+
 /// selects the buffer that the composite pass resolves into `viewtarget`.
 ///
 /// discriminants are part of the shader abi: they must stay in sync with the
@@ -76,7 +78,12 @@ pub struct CompositeUniformData {
 /// examples just add it: `add_systems(Update, cycle_view_mode)`.
 pub fn cycle_view_mode(keys: Res<ButtonInput<KeyCode>>, mut mode: ResMut<RtViewMode>) {
     if keys.just_pressed(KeyCode::Space) {
-        *mode = mode.next();
+        *mode = match *mode {
+            TraceDepth => TraceDiff,
+            TraceDiff => TraceDepth,
+            _ => TraceDepth,
+        };
+
         info!("shine: view mode => {}", mode.label());
     }
 }
