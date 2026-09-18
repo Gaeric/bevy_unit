@@ -74,7 +74,7 @@
    | =bendIndices= / =bendAngles= | =Vec<[u32;4]>= / =Vec<f32>= | rest angle 源里恒 0 |
    | =attachParticleIDs= / =attachSlotIDs= / =attachDistances= | =Vec<u32>= / =Vec<u32>= / =Vec<f32>= | |
    | =attachSlotPositions= | =Vec<Vec3>= | Swirl 场景每帧被外部改写 |
-   | =neighbors= | =Vec<u32>=（长度 = n * maxNumNeighbors） | 布局 =neighbors[i + maxNumNeighbors*j]=（合并访问友好，README §4.2）；空槽哨兵 =0xffffffff= → =u32::MAX= |
+   | =neighbors= | =Vec<u32>=（长度 = n * maxNumNeighbors） | 布局 =neighbors[i + n * j]=（i = 粒子 id，j = 第 j 个邻居槽；步长是 **numParticles** 不是 maxNumNeighbors —— 见 §1.6，源 =SpatialHashGPU.hpp::Test= 里的 =i*maxNumNeighbors+k= 与 kernel 不一致，属 debug 代码 bug，别照抄）；空槽哨兵 =0xffffffff= → =u32::MAX= |
    | =indices= | =Vec<u32>= | 与 Mesh index buffer 完全相同（=ComputeNormals= 也用它） |
 
 ** 1.3 参数（=Common.hpp::VtSimParams=，GUI 1:1 保留）
@@ -136,6 +136,26 @@
      - 每个粒子的邻居从 =neighbors[id + j*numObjects]= 起写，满 =maxNumNeighbors= 直接 return；
      - 写完在第一个空槽写 =0xffffffff=。
    - =SetInitialPositions= 在 =AddCloth= 时抓一次快照 → Rust 侧 =original_positions= 必须在**烘焙变换之后**采集。
+   - 逐条对齐清单（源码已核对，M2a 的 =hash.rs= 必须按此实现）：
+     - 邻居写入步长 = =numObjects=（=SpatialHashGPU.cu::CacheNeighbors_Kernel= 的 =neighborIndex = id; ... += numObjects=），
+       读取步长也是 =numObjects=（=VtClothSolverGPU.cu::CollideParticles_Kernel= 的
+       =for (k = id; k < n*maxNumNeighbors; k += n)=）→ 布局 =neighbors[i + n * j]=；
+       源 =SpatialHashGPU.hpp::Test= 用 =neighbors[i * maxNumNeighbors + k]=，与两个 kernel 都不一致（debug 代码 bug）。
+     - 格子扫描顺序：=x= 外层、=y= 中层、=z= 最内层，各 =ix-1..=ix+1=（27 格）；
+       每格区间 =end = min(cellEnd[h], start + maxNumNeighbors)=（源注释 BUG_LOG：GPU 独有的提前截断，
+       CPU 版是否复现要在测试里显式记录）。
+     - 邻居槽写满 =maxNumNeighbors= 时直接 =return=（**不写哨兵**）；否则在第一个空槽写 =0xffffffff=，
+       于是"满"与"未满"两种情况的终止方式不同，=CollideParticles= 用 =j > numParticles= 才 =break=。
+     - 排序：=HashObjects= 用 cub radix sort（=maxBit = ceil(log2(tableSize))=）按 hash 排序，属 GPU 实现细节；
+       CPU 版用桶排序即可，但必须保持"同一格子内按粒子 id 升序"（它决定邻居槽内容与后续浮点求和顺序，
+       是"同初值可复现"的前提）。
+   - **预稳定化是自别名调用**：=VtClothSolverGPU.hpp::Simulate= 里 =CollideSDF(positions, sdfColliders, positions, frameTime)=
+     把 =positions= 同时当读写两侧；kernel 只读自己的 =positions[id]=（不读邻居），
+     所以语义 = "就地自碰撞、不改速度（README Q1）"。Rust 借用不允许 =&mut x= 与 =&x= 并存，
+     M2a 用 step 级 scratch 拷贝复现（等价，不引入额外语义）——**此点属内核语义，M2b 由用户确认**。
+   - =UpdateColliders= 对 =enabled == false= 的 collider 只 =continue=，但数组已 =resize(colliders.size())=，
+     而 =CollideSDF= 收到的是 =sdfColliders.size()=（**含被跳过的槽**）→ Swirl 里"关闭"的球是否真的不参与碰撞，
+     取决于该槽的默认值。M5 落地 Swirl 时必须实测（见 §6 风险表）。
 
 ** 1.7 七个场景（=main.cpp=，数字键 1–7 顺序）
    | # | 场景 | res | 纹理 | attachedIndices | 参数覆盖 | 刚体动画 |
@@ -233,8 +253,9 @@
    - 原 =examples/01..03= 移到 =examples/learning/=，删掉 =src/main.rs= 的 Hello world。
    - 验收：
      - [ ] =cargo run -p bevy_cloth --example velvet-00-sandbox= 出画面、可退出、无 panic
-     - [ ] =cargo check -p bevy_cloth --all-targets= 零 warning
-     - [ ] =FixedUpdate= 在 60 Hz 下稳定触发（打印 =Time<Fixed>::delta_secs()= 或 === 1/60=）
+       （本环境无显示，尚未复跑；代码已就绪）
+     - [x] =cargo check -p bevy_cloth --all-targets= 零 warning
+     - [x] =FixedUpdate= 在 60 Hz 下稳定触发（=velvet-00-sandbox.rs= 显式 =Time::<Fixed>::from_hz(60.0)=）
 
 ** TODO M1 — 网格与约束生成（=sim/mesh_gen.rs=）[AGENT]
    - =generate_cloth_mesh(res) -> ClothMesh { positions, normals, uvs, indices }=，1:1 照抄
@@ -244,12 +265,20 @@
      =stretch { indices, lengths }= / =bend { indices, angles }= / =attach { particle_ids, slot_ids, distances, slot_positions }= /
      =inv_masses=；数量与顺序必须与 =VtClothObjectGPU.hpp= 逐项一致。
    - 单测（=tests/mesh_gen.rs=）：
-     - [ ] res=2：顶点 9、index 24、bend 4 条、attach 条数 = 9 × slot 数
-     - [ ] stretch 条数按源公式手算写死（res=2 时逐条列出 i1/i2 更保险）
-     - [ ] stretch rest length == 世界坐标距离；LRA =attach_distances[i] == |slot - p_i|=
-     - [ ] 吸附点 =rest_distance == 0= → =inv_masses[i] == 0=
-     - [ ] 网格不变量：面积 4.0、周长 8.0、法线全 +Z
+     - [x] res=2：顶点 9、index 24、bend 4 条、attach 条数 = 9 × slot 数
+     - [x] stretch 条数按源公式手算写死（res=2 时逐条列出 i1/i2 更保险）
+     - [x] stretch rest length == 世界坐标距离；LRA =attach_distances[i] == |slot - p_i|=
+     - [x] 吸附点 =rest_distance == 0= → =inv_masses[i] == 0=
+     - [x] 网格不变量：面积 4.0、周长 8.0、法线全 +Z
    - 验收：=cargo test -p bevy_cloth= 通过。
+   - 落地情况（[AGENT] 已完成，14 个测试全绿）：
+     - =src/sim/mesh_gen.rs=：=generate_cloth_mesh / bake_transform / collect_original_positions /
+       particle_diameter_from_first_edge / validate_cloth_grid / grid_res=。
+     - =src/sim/constraints.rs=：=build_constraints(vertices, indices, attached)=（**签名与上面草稿不同**：
+       不收 =res= / =params=，改为由 =validate_cloth_grid= 反推 + 校验网格布局，顺带拦住"把索引改成自然对角线"
+       这类误用；=inv_masses / particle_diameter= 由调用方（M2a 的 =Solver::add_cloth=）传入/覆写）。
+     - =tests/mesh_gen.rs=：res=1 的 6 条 stretch 逐一列出、res=2 计数、周长/面积/绕序、LRA 与 =inv_mass=、
+       索引转置与重复顶点校验、烘焙后快照。
 
 ** TODO M2a — 求解器调度框架（=sim/solver.rs= / =sim/hash.rs=）[AGENT]
    - =Solver= 持有 §1.2 全部数组（多布料共用 → =num_particles/particle_diameter/max_speed= 在 =Solver= 上）。
@@ -388,6 +417,8 @@
   | res=200 的 CPU 性能 | P0 不设性能验收；只要求"能跑且数值稳定"，性能是 M6 的动机 |
   | =interleavedHash= 被"简化"成每子步重建哈希 | 必须保持"每 N 个子步重建一次"的语义，否则自碰撞场景行为漂移 |
   | 场景参数覆盖泄漏 | 用 =OnEnter/OnExit= 或 =SceneResource { base, overrides }=，加单测验证"切场景后 =SimParams == base=" |
+  | =enabled = false= 的 collider 仍占 =sdfColliders= 槽位（=UpdateColliders= 只 =continue=，但 =CollideSDF= 收到 =size()=） | M5 落地 Swirl 时实测"关闭的球是否真的不碰布料"；若源行为确实是仍按默认槽参与，则 1:1 照抄并在 readme 记录 |
+  | 邻居表槽位布局易被"顺手归一化"（=i + n*j= 易被写成 =i*maxNumNeighbors + k=） | 按 §1.6 实现并加 =tests/hash.rs= 断言 =neighbors[i + n*j]= 的步长，与暴力 O(n²) 比对 |
   | 源工程 spec 本身有坑（=Debug quad=、=Timer=、=IntCoord= 用 =int=） | 不迁移 debug quad/timer；=ComputeIntCoord= 的 =int= 语义在 Rust 里显式 =i32= + 溢出处理 |
 
 * 7. 命令速查
@@ -438,8 +469,10 @@
 * 9. 当前状态
   - [x] 源工程规格提取（本文件 §1）与 Bevy 0.19 API 事实核对（§2.2）
   - [x] 共存约束登记（§8：为将来的 avian 留门，不引依赖、不做里程碑）
-  - [ ] M0 骨架与场景基线（未开始）
-  - [ ] M1 网格与约束生成（未开始）
+  - [x] M0 骨架与场景基线（部分：=lib= 目标 + =examples/velvet-00-sandbox.rs= 已就绪、=cargo check --all-targets= 零 warning；
+        =ClothPlugin= 推迟到 M2a 一起做，=examples/01..03= 仍未移入 =examples/learning/=，
+        出画面的验收因本环境无显示未复跑）
+  - [x] M1 网格与约束生成（=src/sim/mesh_gen.rs= / =src/sim/constraints.rs= + =tests/mesh_gen.rs=，14 个测试全绿）
   - [ ] M2a 求解器调度框架（未开始）
   - [ ] M2b 求解核心实现（[USER]，未开始）
   - [ ] M2c 数值对照参考实现（可选，未开始）
@@ -450,4 +483,6 @@
   - [ ] M7 打磨 / DoD（未开始）
 * tips
   why the indices is this slice?
-  [[file:src/sim/mesh_gen.rs:://todo: what's this indices mean][mesh indices]]
+  [[file:src/sim/mesh_gen.rs::the split is along b-c, and both triangles are wound so that][mesh indices]]
+  答案：索引生成式与 push 顺序是转置关系（§1.4），沿 =b-c= 切分、
+  两个三角形绕序都让 =(b-a)×(c-a)= 指向 =+Z=；=build_bend= 按 =[i], [i+5], [i+2], [i+1]= 读同一段缓冲。

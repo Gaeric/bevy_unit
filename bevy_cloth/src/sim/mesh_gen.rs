@@ -86,6 +86,12 @@ pub fn particle_diameter_from_first_edge(positions: &[Vec3], scalar: f32) -> f32
     (positions[0] - positions[1]).length() * scalar
 }
 
+/// the spatial hash keeps it forever to filter out the particle pairs that
+/// start out touching (`length2(orig - orig_j) > diameter2`).
+pub fn collect_original_positions(positions: &[Vec3]) -> Vec<Vec3> {
+    positions.to_vec()
+}
+
 pub fn grid_res(vertex_count: usize) -> Option<u32> {
     if vertex_count < 4 {
         return None;

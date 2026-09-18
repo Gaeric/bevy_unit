@@ -1,10 +1,12 @@
 //! mesh generation and constraint tables: no bevy, no gpu, no window needed.
 
+use std::collections::HashMap;
+
 use bevy_cloth::sim::{
     ClothError,
     constraints::build_constraints,
     mesh_gen::{
-        ClothMesh, bake_transform, generate_cloth_mesh, grid_res,
+        ClothMesh, bake_transform, collect_original_positions, generate_cloth_mesh, grid_res,
         particle_diameter_from_first_edge, validate_cloth_grid, vertex_index_at,
     },
 };
@@ -24,6 +26,28 @@ fn surface_area(mesh: &ClothMesh) -> f32 {
             let b = mesh.positions[triangle[1] as usize];
             let c = mesh.positions[triangle[2] as usize];
             0.5 * (b - a).cross(c - a).length()
+        })
+        .sum()
+}
+
+/// length of the boundary polyline: the edges claimed by exactly one triangle.
+fn boundary_perimeter(mesh: &ClothMesh) -> f32 {
+    let mut edges: HashMap<[u32; 2], u32> = HashMap::new();
+    for triangle in mesh.indices.as_chunks::<3>().0 {
+        for (a, b) in [
+            (triangle[0], triangle[1]),
+            (triangle[1], triangle[2]),
+            (triangle[2], triangle[0]),
+        ] {
+            *edges.entry([a.min(b), a.max(b)]).or_default() += 1;
+        }
+    }
+
+    edges
+        .iter()
+        .filter(|(_, count)| **count == 1)
+        .map(|(edge, _)| {
+            (mesh.positions[edge[0] as usize] - mesh.positions[edge[1] as usize]).length()
         })
         .sum()
 }
@@ -58,6 +82,11 @@ fn mesh_invariants() {
         assert!(
             approx(surface_area(&mesh), 4.0),
             "cloth covers a 2x2 square"
+        );
+        assert!(
+            approx(boundary_perimeter(&mesh), 8.0),
+            "cloth perimeter is 4 * 2.0, got {}",
+            boundary_perimeter(&mesh)
         );
 
         for triangle in mesh.indices.as_chunks::<3>().0 {
@@ -250,6 +279,28 @@ fn baking_moves_the_mesh_to_world_space() {
     // slots and constraints live in world space
     assert_eq!(world.attach.slot_positions[0], baked[0]);
     assert_ne!(world.attach.slot_positions[0], mesh.positions[0]);
+}
+
+#[test]
+fn original_positions_snapshot_follows_the_bake() {
+    let mesh = generate_cloth_mesh(2);
+
+    let transform = Mat4::from_translation(Vec3::new(0.0, 1.5, 1.0))
+        * Mat4::from_quat(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
+    let mut baked = mesh.positions.clone();
+    bake_transform(&mut baked, transform);
+
+    // the snapshot is the world-space copy the spatial hash filters against
+    let original = collect_original_positions(&baked);
+    assert_eq!(original, baked);
+    assert_ne!(original, mesh.positions);
+
+    // the hash compares length2(orig_i - orig_j) against the diameter squared; a rigid bake
+    // keeps those distances, so the filter decision is identical before and after the bake
+    assert!(approx(
+        (original[0] - original[1]).length(),
+        (mesh.positions[0] - mesh.positions[1]).length()
+    ));
 }
 
 #[test]
