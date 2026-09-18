@@ -51,19 +51,14 @@ pub fn generate_cloth_mesh(res: u32) -> ClothMesh {
         }
     }
 
-    for x in 0..res {
-        for y in 0..res {
-            let a = vertex_index_at(res, x, y);
-            let b = vertex_index_at(res, x + 1, y);
-            let c = vertex_index_at(res, x, y + 1);
-            let d = vertex_index_at(res, x + 1, y + 1);
+    for row in 0..res {
+        for column in 0..res {
+            let a = vertex_index_at(res, row, column);
+            let b = vertex_index_at(res, row + 1, column);
+            let c = vertex_index_at(res, row, column + 1);
+            let d = vertex_index_at(res, row + 1, column + 1);
 
             // one grid cell per iteration, split into two triangles.
-            // watch out: this loop's `x` is the *push* loop's `y`, since `vertex_index_at` is
-            // transposed against the push order -- so `x + 1` steps down (-Y) and `y + 1` steps
-            // right (+X), the opposite of what the letters suggest:
-            //   a = (x, y)         = top-left        c = (x, y + 1)     = top-right
-            //   b = (x + 1, y)     = bottom-left     d = (x + 1, y + 1) = bottom-right
             //
             //     a --- c
             //     |   / |

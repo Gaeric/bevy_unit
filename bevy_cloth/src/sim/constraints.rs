@@ -129,7 +129,7 @@ fn build_attach(
 ) -> Result<AttachConstraints, ClothError> {
     let mut attach = AttachConstraints::default();
 
-    for (slot, &particle) in attached.iter().enumerate() {
+    for (idx, &particle) in attached.iter().enumerate() {
         let Some(&slot_position) = vertices.get(particle as usize) else {
             return Err(ClothError::AttachmentOutOfRange { particle });
         };
@@ -142,7 +142,7 @@ fn build_attach(
             }
 
             attach.particle_ids.push(i as u32);
-            attach.slot_ids.push(slot as u32);
+            attach.slot_ids.push(idx as u32);
             attach.distances.push(distance);
         }
     }

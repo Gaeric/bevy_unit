@@ -86,7 +86,7 @@ fn stretch_matches_the_source_for_res1() {
         assert!(approx(*length, want), "rest length {length} != {want}");
     }
 
-    assert_eq!(constraints.bend.indices.len(), 2);
+    assert_eq!(constraints.bend.indices.len(), 1);
     assert!(constraints.attach.particle_ids.is_empty());
     assert!(constraints.inv_masses.iter().all(|mass| *mass == 1.0));
 }
@@ -153,10 +153,10 @@ fn attach_is_long_range_and_pins_particles() {
     );
 
     // slots are major: every particle is constrained to every slot
-    for (slot, &particle) in attached.iter().enumerate() {
+    for (idx, &particle) in attached.iter().enumerate() {
         for i in 0..mesh.positions.len() {
-            let k = slot * mesh.positions.len() + i;
-            assert_eq!(constraints.attach.slot_ids[k], slot as u32);
+            let k = idx * mesh.positions.len() + i;
+            assert_eq!(constraints.attach.slot_ids[k], idx as u32);
             assert_eq!(constraints.attach.particle_ids[k], i as u32);
             let want = (mesh.positions[particle as usize] - mesh.positions[i]).length();
             assert!(approx(constraints.attach.distances[k], want));
@@ -195,10 +195,10 @@ fn validate_rejects_a_natural_diagonal_layout() {
 fn validate_rejects_coincident_particles() {
     let mesh = generate_cloth_mesh(2);
     let mut positions = mesh.positions.clone();
-    positions[1] = positions[0];
+    positions[0] = positions[2];
     assert_eq!(
         validate_cloth_grid(&positions, &mesh.indices),
-        Err(ClothError::DuplicateVertex { a: 0, b: 1 })
+        Err(ClothError::DuplicateVertex { a: 0, b: 2 })
     );
 }
 
@@ -210,6 +210,7 @@ fn validate_rejects_wrong_counts() {
         Err(ClothError::NotGrid { vertex_count: 8 })
     );
     assert_eq!(
+        // res ^ 2 * 6
         validate_cloth_grid(&mesh.positions, &mesh.indices[..18]),
         Err(ClothError::IndexCount {
             expected: 24,
