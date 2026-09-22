@@ -229,7 +229,7 @@
    | 布料实体 | =Transform::IDENTITY=，线宽/材质用 =StandardMaterial { double_sided: true, cull_mode: None, .. }= |
    | UI | =bevy_egui = "0.40"=（root 已在用 =bevy-inspector-egui 0.37=，其依赖即 =bevy_egui 0.40.1=，已验证与 patched bevy 0.19 兼容） |
    | 诊断 | =FrameTimeDiagnosticsPlugin= / =bevy::dev_tools::fps_overlay::FpsOverlayPlugin=；自研指标用 =Diagnostic=（源的 =Timer= CPU/CUDA profiling 不移植） |
-   | 风格 | root =AGENTS.md=：edition 2024、=prelude::*=、=Single<…>= 唯一实体、observer、导入分组（外部 crate → std → 本地）；注释英文小写 |
+   | 风格 | root =AGENTS.md=：edition 2024、=prelude::*=、=Single<…>= 唯一实体、observer、导入分组（外部 crate → std → 本地）；简单注释，注释英文小写 |
    | 构建 | =cargo run -p bevy_cloth --example velvet-scenes=；不要 =cd= 进子目录（=../bevy_engines/bevy_0.19/= 必须存在） |
 
 ** 2.3 依赖（全部命中 workspace 的 =Cargo.lock= 与本地 cargo 缓存，无需联网拉新包）
@@ -482,7 +482,3 @@
   - [ ] M6 WGSL compute 求解器（可选，未开始）
   - [ ] M7 打磨 / DoD（未开始）
 * tips
-  why the indices is this slice?
-  [[file:src/sim/mesh_gen.rs::the split is along b-c, and both triangles are wound so that][mesh indices]]
-  答案：索引生成式与 push 顺序是转置关系（§1.4），沿 =b-c= 切分、
-  两个三角形绕序都让 =(b-a)×(c-a)= 指向 =+Z=；=build_bend= 按 =[i], [i+5], [i+2], [i+1]= 读同一段缓冲。

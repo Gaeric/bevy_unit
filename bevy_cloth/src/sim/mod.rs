@@ -1,7 +1,12 @@
 //! solver side code
 
+pub mod collide;
 pub mod constraints;
+pub mod hash;
 pub mod mesh_gen;
+pub mod params;
+pub mod solver;
+pub mod stats;
 
 use std::fmt;
 
