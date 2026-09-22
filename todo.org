@@ -1,0 +1,10 @@
+** TODO [#A] compute-based RTPT
+** TODO [#A] cloth simulation
+** TODO [#B] a video showing our research
+** TODO [#B] export hs2 model
+** TODO [#B] export hs2 animation
+** TODO [#B] bind those models to our character
+** TODO [#B] define the minimum viable demo scope
+** TODO [#A] an adjustable facial ui
+** TODO [#B] softbody animation
+** TODO [#C] add dlss support for hs2_head example
