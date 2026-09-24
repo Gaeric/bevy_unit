@@ -379,7 +379,80 @@ pub fn solve_bending(
     params: &SimParams,
     delta_time: f32,
 ) {
-    todo!("M2b [USER]: SolveBending (VtClothSolverGPU.cu:117)")
+    const EPSILON: f32 = 1e-6;
+
+    for (indices, rest_angle) in bend.indices.iter().zip(&bend.angles) {
+        let [idx0, idx1, idx2, idx3] = indices.map(|index| index as usize);
+
+        let p0 = predicted[idx0];
+        let p1 = predicted[idx1];
+        let p2 = predicted[idx2];
+        let p3 = predicted[idx3];
+        let w0 = inv_masses[idx0];
+        let w1 = inv_masses[idx1];
+        let w2 = inv_masses[idx2];
+        let w3 = inv_masses[idx3];
+
+        // The shared edge is p2--p3. Degenerate edges or triangles have no stable angle gradient.
+        let edge = p3 - p2;
+        let edge_length = edge.length();
+        if edge_length < EPSILON {
+            continue;
+        }
+
+        let cross1 = (p2 - p0).cross(p3 - p0);
+        let cross2 = (p3 - p1).cross(p2 - p1);
+        let cross1_length_sq = cross1.length_squared();
+        let cross2_length_sq = cross2.length_squared();
+        if cross1_length_sq < EPSILON || cross2_length_sq < EPSILON {
+            continue;
+        }
+
+        // These are area-scaled normals for the dihedral-angle gradients, not unit normals.
+        let mut n1 = cross1 / cross1_length_sq;
+        let mut n2 = cross2 / cross2_length_sq;
+
+        let d0 = edge_length * n1;
+        let d1 = edge_length * n2;
+        let inv_edge_length = 1.0 / edge_length;
+        let d2 =
+            (p0 - p3).dot(edge) * inv_edge_length * n1 + (p1 - p3).dot(edge) * inv_edge_length * n2;
+        let d3 =
+            (p2 - p0).dot(edge) * inv_edge_length * n1 + (p2 - p1).dot(edge) * inv_edge_length * n2;
+
+        n1 = n1.normalize();
+        n2 = n2.normalize();
+        let cosine = n1.dot(n2).clamp(-1.0, 1.0);
+        let angle = cosine.acos();
+
+        let compliance = if delta_time > 0.0 {
+            params.bend_compliance / (delta_time * delta_time)
+        } else {
+            continue;
+        };
+        let denominator = w0 * d0.length_squared()
+            + w1 * d1.length_squared()
+            + w2 * d2.length_squared()
+            + w3 * d3.length_squared()
+            + compliance;
+        if denominator < EPSILON || !denominator.is_finite() {
+            continue;
+        }
+
+        let mut lambda = (angle - *rest_angle) / denominator;
+        if n1.cross(n2).dot(edge) > 0.0 {
+            lambda = -lambda;
+        }
+
+        deltas[idx0] += -w0 * lambda * d0;
+        deltas[idx1] += -w1 * lambda * d1;
+        deltas[idx2] += -w2 * lambda * d2;
+        deltas[idx3] += -w3 * lambda * d3;
+        delta_counts[idx0] += 1;
+        delta_counts[idx1] += 1;
+        delta_counts[idx2] += 1;
+        delta_counts[idx3] += 1;
+    }
 }
 
 /// `VtClothSolverGPU.cu:253`, `ApplyDeltas`
