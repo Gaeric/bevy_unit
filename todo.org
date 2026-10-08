@@ -8,3 +8,4 @@
 ** TODO [#A] an adjustable facial ui
 ** TODO [#B] softbody animation
 ** TODO [#C] add dlss support for hs2_head example
+   dlss sdk与dlss_wgpu-4.0.0有兼容性问题，等bevy v0.20发布后再进行验证
