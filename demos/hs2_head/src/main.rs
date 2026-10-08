@@ -8,6 +8,7 @@ use bevy::camera::Hdr;
 use bevy::core_pipeline::Skybox;
 use bevy::prelude::*;
 use clap::Parser;
+use std::path::Path;
 
 mod bake;
 mod camera;
@@ -19,6 +20,24 @@ mod sphere;
 
 #[cfg(feature = "dlss")]
 mod dlss;
+
+#[cfg(feature = "dlss")]
+use crate::dlss::DemoDlssPlugin;
+#[cfg(feature = "dlss")]
+use bevy::anti_alias::dlss::DlssProjectId;
+
+/// The shared workspace `assets/` directory.
+///
+/// This crate lives in `demos/hs2_head`, but the GLB/ktx2/dds assets and the
+/// WGSL shaders stay in the workspace root's `assets/`. Bevy resolves asset
+/// paths relative to `CARGO_MANIFEST_DIR`, so we point `AssetPlugin` back at
+/// the shared directory instead of relying on a default `assets/` folder here.
+pub(crate) fn shared_assets_path() -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets")
+        .to_string_lossy()
+        .into_owned()
+}
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -42,13 +61,13 @@ fn main() {
     let args = Args::parse();
 
     #[cfg(feature = "dlss")]
-    app.insert_resource(DlssProjectId(bevy_asset::uuid::uuid!(
+    app.insert_resource(DlssProjectId(bevy::asset::uuid::uuid!(
         "33c8d314-856c-4fc3-9d36-6cfbd95dcde3"
     )));
 
     if args.dlss {
         #[cfg(feature = "dlss")]
-        app.add_plugin(DemoDlssPlugin);
+        app.add_plugins(DemoDlssPlugin);
 
         #[cfg(not(feature = "dlss"))]
         warn!("dlss feature not support");

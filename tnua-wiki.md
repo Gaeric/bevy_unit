@@ -18,7 +18,7 @@
 
 ```sh
 cargo check -p bevy_waltz
-cargo run --example hs2_head   # 或本包 example
+cargo run -p hs2_head   # 或本包 example
 ```
 
 ---

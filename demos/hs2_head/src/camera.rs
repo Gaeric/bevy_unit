@@ -6,7 +6,10 @@ pub struct OrbitCameraPlugin;
 impl Plugin for OrbitCameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FreeCameraPlugin)
-            .add_plugins(DefaultPlugins)
+            .add_plugins(DefaultPlugins.set(AssetPlugin {
+                file_path: crate::shared_assets_path(),
+                ..default()
+            }))
             .add_systems(Update, update_camera_settings)
             .add_observer(added_camera_params);
     }

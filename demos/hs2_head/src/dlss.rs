@@ -1,6 +1,4 @@
-use bevy::anti_alias::dlss::{
-    Dlss, DlssProjectId, DlssRayReconstructionFeature, DlssRayReconstructionSupported,
-};
+use bevy::anti_alias::dlss::{Dlss, DlssRayReconstructionFeature, DlssRayReconstructionSupported};
 
 fn added_camera_dlss_params(
     camera: On<Add, Camera3d>,

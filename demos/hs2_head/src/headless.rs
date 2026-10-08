@@ -425,6 +425,10 @@ impl Plugin for HeadlessPlugin {
             .add_plugins(
                 DefaultPlugins
                     .set(ImagePlugin::default_nearest())
+                    .set(AssetPlugin {
+                        file_path: crate::shared_assets_path(),
+                        ..default()
+                    })
                     .set(WindowPlugin {
                         primary_window: None,
                         exit_condition: ExitCondition::DontExit,
