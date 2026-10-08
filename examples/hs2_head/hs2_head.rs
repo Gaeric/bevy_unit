@@ -17,6 +17,9 @@ mod mat_convert;
 mod raytracing;
 mod sphere;
 
+#[cfg(feature = "dlss")]
+mod dlss;
+
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(short = 'o', long)]
@@ -25,6 +28,10 @@ struct Args {
     light: bool,
     #[arg(short = 'r', long, requires = "bake")]
     raytracing: bool,
+
+    #[arg(short = 'd', long, requires = "raytracing")]
+    dlss: bool,
+
     #[arg(short = 'b', long)]
     bake: bool,
 }
@@ -33,6 +40,20 @@ fn main() {
     let mut app = App::new();
 
     let args = Args::parse();
+
+    #[cfg(feature = "dlss")]
+    app.insert_resource(DlssProjectId(bevy_asset::uuid::uuid!(
+        "33c8d314-856c-4fc3-9d36-6cfbd95dcde3"
+    )));
+
+    if args.dlss {
+        #[cfg(feature = "dlss")]
+        app.add_plugin(DemoDlssPlugin);
+
+        #[cfg(not(feature = "dlss"))]
+        warn!("dlss feature not support");
+    }
+
     if args.orbit {
         app.add_plugins(OrbitCameraPlugin);
     } else {
