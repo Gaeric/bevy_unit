@@ -31,8 +31,4 @@ bone_attachments = { path = "../units/bone_attachments" }
 
 bevy_mod_outline = { git = "https://github.com/komadori/bevy_mod_outline", branch = "master" }
 
-# todo: comment on bevy 0.19
-# frame limit
-# [dependencies.bevy_framepace]
-# git = "https://github.com/aevyrie/bevy_framepace/"
-# branch = "main"
+bevy_framepace = "0.22.0"
