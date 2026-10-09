@@ -11,7 +11,7 @@ use crate::bake::{
 
 const SIZE: UVec2 = UVec2::new(256, 256);
 const EYESHADOW_LABEL: &str = "eyeshadow";
-const EYESHADOW_BAKE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_bake_eyeshadow.wgsl";
+const EYESHADOW_BAKE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_bake_eyeshadow.wesl";
 
 #[derive(Default, Asset, Clone, Reflect, AsBindGroup)]
 pub struct EyeshadowBake {

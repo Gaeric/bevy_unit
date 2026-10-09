@@ -7,7 +7,7 @@ use bevy::shader::ShaderRef;
 
 use crate::ext_mat::MaterialConverter;
 
-const EYESHADOWE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_eyeshadow_material.wgsl";
+const EYESHADOWE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_eyeshadow_material.wesl";
 
 #[derive(Asset, Clone, Reflect, AsBindGroup)]
 #[bindless(index_table(range(70..72), binding(103)))]

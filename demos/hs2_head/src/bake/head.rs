@@ -10,7 +10,7 @@ use crate::bake::{
 
 const SIZE: UVec2 = UVec2::new(2048, 2048);
 const HEAD_LABEL: &str = "head";
-const HEAD_BAKE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_bake_head.wgsl";
+const HEAD_BAKE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_bake_head.wesl";
 
 #[derive(Default, Asset, Clone, Reflect, AsBindGroup)]
 pub struct HeadBake {

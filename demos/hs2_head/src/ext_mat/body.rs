@@ -10,7 +10,7 @@ use bevy::{
 
 use crate::ext_mat::MaterialConverter;
 
-const BODY_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_body_material.wgsl";
+const BODY_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_body_material.wesl";
 
 #[derive(Asset, Clone, Reflect, AsBindGroup)]
 #[bindless(index_table(range(200..202), binding(107)))]

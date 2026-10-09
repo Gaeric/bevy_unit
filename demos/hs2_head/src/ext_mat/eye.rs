@@ -10,7 +10,7 @@ use bevy::shader::ShaderRef;
 
 use crate::ext_mat::MaterialConverter;
 
-const EYE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_eye_material.wgsl";
+const EYE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_eye_material.wesl";
 
 /// The example bindless material extension.
 /// see bevy example extended_material_bindless.rs

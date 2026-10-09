@@ -9,7 +9,7 @@
 // Lighting / post-processing are NOT baked; the output is later sampled as
 // `StandardMaterial::base_color_texture`.
 
-#import bevy_render::color_operations::{hsv_to_rgb, rgb_to_hsv}
+import bevy_render::color_operations::{hsv_to_rgb, rgb_to_hsv};
 
 @group(0) @binding(60) var head_texture: texture_2d<f32>;
 @group(0) @binding(61) var head_sampler: sampler;

@@ -11,7 +11,7 @@ use crate::bake::{
 
 const SIZE: UVec2 = UVec2::new(1024, 1024);
 const EYELASH_LABEL: &str = "eyelash";
-const EYELASH_BAKE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_bake_eyelash.wgsl";
+const EYELASH_BAKE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_bake_eyelash.wesl";
 
 #[derive(Default, Asset, Clone, Reflect, AsBindGroup)]
 pub struct EyelashBake {

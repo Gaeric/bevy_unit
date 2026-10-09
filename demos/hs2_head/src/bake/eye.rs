@@ -15,7 +15,7 @@ use crate::bake::{
 
 const SIZE: UVec2 = UVec2::new(1024, 1024);
 const EYE_LABEL: &str = "eye";
-const EYE_BAKE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_bake_eye.wgsl";
+const EYE_BAKE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_bake_eye.wesl";
 
 /// Per-material params for the eye bake. Currently only the iris tint, the
 /// same value `EyeMaterialExt` exposed on the CPU side.

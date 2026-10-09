@@ -19,7 +19,7 @@ use bevy::{
 };
 
 const EYELASH_LABEL: &str = "eyelash";
-const EYELASH_BAKE_SHADER_PATH: &str = "materials/shaders/hs2_head_bake_eyelash.wgsl";
+const EYELASH_BAKE_SHADER_PATH: &str = "materials/shaders/hs2_head_bake_eyelash.wesl";
 const EYELASH_BAKE_TEXTURE: &str = "materials/uv_checker_bw.png";
 const WORKGROUP_SIZE: u32 = 8;
 const SIZE: UVec2 = UVec2::new(256, 256);
