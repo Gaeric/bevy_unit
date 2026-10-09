@@ -34,7 +34,7 @@
   | 源真相（只读） | =../Velvet/Velvet/*.hpp= / =*.cuh= / =*.cu=；=README.md=（Q1/Q2 等工程技巧）；=doc/solver-notes.md= |
   | **迁移目标** | 本 crate =bevy_unit/bevy_cloth=（workspace 成员），不是 =Velvet= 仓库内的新目录 |
   | 与 =Velvet/AGENTS.md= §6 的偏差 | 该节建议新建 =velvet-bevy/=。我们落在 =bevy_cloth/=；按 §6 要求需在 =../Velvet/AGENTS.md= 记录路径变更（§8 状态一并更新）。 |
-  | 引擎 | Bevy 0.19（root =Cargo.toml= 的 =[patch.crates-io]= 指向 =../bevy_engines/bevy_0.19/=，该 checkout 必须存在），edition 2024 |
+  | 引擎 | Bevy 0.19（root =Cargo.toml= 的 =[patch.crates-io]= 指向 =../bevy_engines/bevy_0.20/=，该 checkout 必须存在），edition 2024 |
   | 不做 | CUDA / OpenGL / 自研引擎（=VtEngine=、=Actor=、=Component=、=Material=、=RenderPipeline=、=VtBuffer= GPU 互操作） |
   | 演示规模 | res ≤ 64（≈4225 粒子）；res = 200（≈40401）为压测目标 |
   | 现有资产 | =src/main.rs= 是 Hello world；=examples/01..03= 是学习用台球例，保留但移入 =examples/learning/=，不参与迁移 |
@@ -218,7 +218,7 @@
    =sim/= 不依赖任何 bevy crate（用 =glam=），保证 =cargo test -p bevy_cloth= 能在无 GPU/window 的环境下跑
    （这也是将来接 avian 的前提，见 §8）。
 
-** 2.2 Bevy 0.19 已核实的 API 事实与坑（本 workspace 源码为准，=../bevy_engines/bevy_0.19/=）
+** 2.2 Bevy 0.19 已核实的 API 事实与坑（本 workspace 源码为准，=../bevy_engines/bevy_0.20/=）
    | 事项 | 结论 |
    |---|---|
    | 固定步长 | =Time<Fixed>::from_hz(60.0)=（=bevy_time/src/fixed.rs:105=）；求解系统放 =FixedUpdate=，取 =time.delta_secs()= 即 =fixedDeltaTime= |
@@ -230,7 +230,7 @@
    | UI | =bevy_egui = "0.40"=（root 已在用 =bevy-inspector-egui 0.37=，其依赖即 =bevy_egui 0.40.1=，已验证与 patched bevy 0.19 兼容） |
    | 诊断 | =FrameTimeDiagnosticsPlugin= / =bevy::dev_tools::fps_overlay::FpsOverlayPlugin=；自研指标用 =Diagnostic=（源的 =Timer= CPU/CUDA profiling 不移植） |
    | 风格 | root =AGENTS.md=：edition 2024、=prelude::*=、=Single<…>= 唯一实体、observer、导入分组（外部 crate → std → 本地）；简单注释，注释英文小写 |
-   | 构建 | =cargo run -p bevy_cloth --example velvet-scenes=；不要 =cd= 进子目录（=../bevy_engines/bevy_0.19/= 必须存在） |
+   | 构建 | =cargo run -p bevy_cloth --example velvet-scenes=；不要 =cd= 进子目录（=../bevy_engines/bevy_0.20/= 必须存在） |
 
 ** 2.3 依赖（全部命中 workspace 的 =Cargo.lock= 与本地 cargo 缓存，无需联网拉新包）
    #+begin_src toml
@@ -423,7 +423,7 @@
 
 * 7. 命令速查
   #+begin_src bash
-    # 前置：../bevy_engines/bevy_0.19/（root Cargo.toml 的 patch 目标）必须存在
+    # 前置：../bevy_engines/bevy_0.20/（root Cargo.toml 的 patch 目标）必须存在
     cargo check -p bevy_cloth --all-targets
     cargo test  -p bevy_cloth                     # sim/ 单测（无需 GPU）
     cargo test  -p bevy_cloth solver_smoke -- --nocapture

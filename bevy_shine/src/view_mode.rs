@@ -2,7 +2,7 @@
 
 use bevy::{
     prelude::*,
-    render::{extract_resource::ExtractResource, render_resource::ShaderType},
+    render::{RenderApp, extract_resource::ExtractResource, render_resource::ShaderType},
 };
 
 use crate::view_mode::RtViewMode::{TraceDepth, TraceDiff};
@@ -12,6 +12,7 @@ use crate::view_mode::RtViewMode::{TraceDepth, TraceDiff};
 /// discriminants are part of the shader abi: they must stay in sync with the
 /// `VIEW_*` constants in `shaders/composite.wgsl`.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq, ExtractResource)]
+#[extract_app(RenderApp)]
 #[repr(u32)]
 pub enum RtViewMode {
     /// prepass depth. bevy use reverse-z: 0 far, 1 near.

@@ -5,7 +5,7 @@
 - Lint: `cargo clippy --workspace --all-targets` · Format: `cargo fmt --all` (verify: `cargo fmt --all --check`)
 - Run example (root package is `bevy_workflow`, Bevy 0.19): `cargo run --example example-bake`; other packages: `cargo run -p bevy_shine --example minimal`; the `hs2_head` demo is its own crate: `cargo run -p hs2_head`
 - Tests: `cargo test --workspace`; single test: `cargo test -p bevy_workflow <test_name> -- --nocapture` (or `cargo test <filter>`)
-- Bevy is patched to a local engine at `../bevy_engines/bevy_0.19/` via `[patch.crates-io]` in the root `Cargo.toml`; that checkout must exist before any build.
+- Bevy is patched to a local engine at `../bevy_engines/bevy_0.20/` via `[patch.crates-io]` in the root `Cargo.toml`; that checkout must exist before any build.
 - Debug perf profiles are preconfigured in root `Cargo.toml` (opt-level 1 for our code, 3 for deps) — don't add per-crate overrides.
 
 ## Style

@@ -1,4 +1,4 @@
-#import bevy_render::view::{position_ndc_to_world, uv_to_ndc};
+import bevy_render::view::{position_ndc_to_world, uv_to_ndc};
 
 const WORKGROUP_SIZE: u32 = 8u;
 const NO_HIT: f32 = -1.0;
@@ -48,8 +48,7 @@ fn pixel_to_ndc(pixel: vec2<u32>) -> vec2<f32> {
 
 fn primary_ray(ndc: vec2<f32>) -> Ray {
   let origin = camera.camera_position.xyz;
-  let near_point = position_ndc_to_world(vec3<f32>(ndc, 1.0),
-camera.world_from_clip);
+  let near_point = position_ndc_to_world(vec3<f32>(ndc, 1.0), camera.world_from_clip);
   return Ray(origin, normalize(near_point - origin));
 }
 

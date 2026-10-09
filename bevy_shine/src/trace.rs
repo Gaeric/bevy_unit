@@ -46,7 +46,7 @@ pub struct TracePipeline {
 
 impl FromWorld for TracePipeline {
     fn from_world(world: &mut World) -> Self {
-        let shader = load_embedded_asset!(world, "shaders/trace.wgsl");
+        let shader = load_embedded_asset!(world, "shaders/trace.wesl");
 
         let bind_group_layout = BindGroupLayoutDescriptor::new(
             "shine trace bind group layout",
@@ -71,6 +71,7 @@ impl FromWorld for TracePipeline {
                     shader_defs: vec![],
                     entry_point: Some("trace".into()),
                     zero_initialize_workgroup_memory: false,
+                    ..default()
                 });
 
         Self {
@@ -128,7 +129,7 @@ pub fn prepare_trace_bind_groups(
     let layout = pipeline_cache.get_bind_group_layout(&pipeline.bind_group_layout);
 
     for (entity, camera, output, prepass) in &views {
-        let Some(depth) = prepass.depth_view() else {
+        let Some(depth) = prepass.depth_only_view() else {
             continue;
         };
 
@@ -184,7 +185,7 @@ pub struct TracePlugin;
 
 impl Plugin for TracePlugin {
     fn build(&self, app: &mut App) {
-        embedded_asset!(app, "shaders/trace.wgsl");
+        embedded_asset!(app, "shaders/trace.wesl");
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;

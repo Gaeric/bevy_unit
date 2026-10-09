@@ -4,8 +4,8 @@ use bevy::{
     asset::{embedded_asset, load_embedded_asset},
     core_pipeline::prepass::{ViewPrepassTextures, node::early_prepass},
     pbr::{
-        clear_indirect_parameters_metadata, early_gpu_preprocess,
-        early_prepass_build_indirect_parameters, unpack_bins,
+        allocate_uniforms, early_gpu_preprocess, early_prepass_build_indirect_parameters,
+        unpack_bins,
     },
     prelude::*,
     render::{
@@ -76,7 +76,7 @@ pub fn prepare_composite_bind_group(
 
     for (entity, prepass, trace) in &views {
         let (Some(depth), Some(normal), Some(motion_vectors)) = (
-            prepass.depth_view(),
+            prepass.depth_only_view(),
             prepass.normal_view(),
             prepass.motion_vectors_view(),
         ) else {
@@ -121,7 +121,7 @@ impl FromWorld for CompositePipeline {
         );
 
         Self {
-            shader: load_embedded_asset!(world, "shaders/composite.wgsl"),
+            shader: load_embedded_asset!(world, "shaders/composite.wesl"),
             bind_group_layout: BindGroupLayoutDescriptor::new(
                 "shine rt composite bind group layout",
                 &entries,
@@ -144,6 +144,7 @@ impl SpecializedRenderPipeline for CompositePipeline {
                 shader_defs: vec![],
                 entry_point: Some("vertex".into()),
                 buffers: vec![],
+                constants: vec![],
             },
             primitive: PrimitiveState::default(),
             depth_stencil: None,
@@ -161,6 +162,7 @@ impl SpecializedRenderPipeline for CompositePipeline {
                     blend: None,
                     write_mask: ColorWrites::ALL,
                 })],
+                constants: vec![],
             }),
             zero_initialize_workgroup_memory: false,
         }
@@ -220,7 +222,7 @@ pub struct CompositePlugin;
 
 impl Plugin for CompositePlugin {
     fn build(&self, app: &mut App) {
-        embedded_asset!(app, "shaders/composite.wgsl");
+        embedded_asset!(app, "shaders/composite.wesl");
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
@@ -239,7 +241,7 @@ impl Plugin for CompositePlugin {
                 ShineRenderGraph,
                 (
                     (
-                        clear_indirect_parameters_metadata,
+                        allocate_uniforms,
                         unpack_bins,
                         early_gpu_preprocess,
                         early_prepass_build_indirect_parameters,

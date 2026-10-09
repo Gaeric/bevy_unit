@@ -14,9 +14,9 @@ fn hash(value: u32) -> u32 {
     var state = value;
     state = state ^ 2747636419u;
     state = state * 2654435769u;
-    state = state ^ state >> 16u;
+    state = state ^ (state >> 16u);
     state = state * 2654435769u;
-    state = state ^ state >> 16u;
+    state = state ^ (state >> 16u);
     state = state * 2654435769u;
     return state;
 }
@@ -49,7 +49,7 @@ fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
 }
 
 // https://en.wikipedia.org/wiki/Halton_sequence#Implementation_in_pseudocode
-fn halton(base: u32, index: u32) -> i32 {
+fn halton(base: u32, index: u32) -> f32 {
     var result = 0.0;
     var f = 1.0;
     for (var id = index; id > 0u; id /= base) {
