@@ -159,7 +159,7 @@ fn setup_render_target(
 }
 
 fn added_render_target(
-    camera: On<Add, Camera3d>,
+    camera: On<Add<Camera3d>>,
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     render_device: Res<RenderDevice>,
@@ -299,7 +299,7 @@ fn receive_image_from_buffer(
         r.recv().expect("Failed to receive the map_async message");
 
         // This could fail on app exit, if Main world clears resources (including receiver) while Render world still renders
-        let _ = sender.send(buffer_slice.get_mapped_range().to_vec());
+        let _ = sender.send(buffer_slice.get_mapped_range().unwrap().to_vec());
 
         // We need to make sure all `BufferView`'s are dropped before we do what we're about
         // to do.

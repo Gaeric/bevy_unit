@@ -82,7 +82,7 @@ fn add_raytracing_meshes_on_scene_load(
     }
 }
 
-fn added_camera_rt_params(camera: On<Add, Camera3d>, mut commands: Commands) {
+fn added_camera_rt_params(camera: On<Add<Camera3d>>, mut commands: Commands) {
     commands.entity(camera.entity).insert((
         Camera {
             clear_color: ClearColorConfig::Custom(Color::BLACK),

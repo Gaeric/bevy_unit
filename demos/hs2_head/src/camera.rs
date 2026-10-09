@@ -15,7 +15,7 @@ impl Plugin for OrbitCameraPlugin {
     }
 }
 
-fn added_camera_params(camera: On<Add, Camera3d>, mut commands: Commands) {
+fn added_camera_params(camera: On<Add<Camera3d>>, mut commands: Commands) {
     commands.entity(camera.entity).insert((
         // This component stores all camera settings and state, which is used by the FreeCameraPlugin to
         // control it. These properties can be changed at runtime, but beware the controller system is

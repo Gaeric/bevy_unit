@@ -125,7 +125,7 @@ fn setup_camera(mut commands: Commands) {
     ));
 }
 
-fn added_lights(camera: On<Add, Camera3d>, mut commands: Commands, asset_server: Res<AssetServer>) {
+fn added_lights(camera: On<Add<Camera3d>>, mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         DirectionalLight {
             illuminance: light_consts::lux::FULL_DAYLIGHT,

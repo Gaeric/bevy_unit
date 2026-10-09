@@ -23,8 +23,11 @@ use bevy::{
         ExtractSchedule, MainWorld, Render, RenderApp, RenderStartup, RenderSystems,
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         gpu_readback::{Readback, ReadbackComplete},
+        material_bind_groups::FallbackBuffer,
+        render_asset::RenderAssets,
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
+        storage::GpuShaderBuffer,
     },
     shader::ShaderRef,
 };
@@ -188,6 +191,7 @@ pub struct RecipeMat<R: BakeRecipe> {
 }
 
 #[derive(Resource, ExtractResource, Clone, Default)]
+#[extract_app(RenderApp)]
 pub struct PendingBakeRequests<R: BakeRecipe> {
     pub items: HashMap<Entity, RecipeMat<R>>,
 }
@@ -475,6 +479,8 @@ fn prepare_bind_group<R: BakeRecipe>(
     pipeline: Res<BakePipeline<R>>,
     pipeline_cache: Res<PipelineCache>,
     mut param: StaticSystemParam<<R as AsBindGroup>::Param>,
+    fallback_buffer: Res<FallbackBuffer>,
+    shader_buffer_assets: Res<RenderAssets<GpuShaderBuffer>>,
     render_device: Res<RenderDevice>,
     progress: Res<BakeProgress<R>>,
 ) {
@@ -492,6 +498,8 @@ fn prepare_bind_group<R: BakeRecipe>(
             &pipeline.layout,
             &render_device,
             &pipeline_cache,
+            &fallback_buffer,
+            &shader_buffer_assets,
             &mut param,
         ) {
             bind_groups.push(BakeBindGroup::<R> {
