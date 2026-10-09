@@ -188,6 +188,115 @@
     如果需要动态加载asset资产，需要同时启用file_watcher和asset_processor，参考：
 
     cargo run --example extended_material --features="file_watcher asset_processor"
+*** dlss 与 dynamic_linking 在 linux 下链接失败
+
+    现象：在 demos/hs2_head 中执行
+    #+begin_example
+      cargo run -p hs2_head --features dlss -- --olr
+    #+end_example
+
+    链接阶段报错（bevy 自身的 solari example 反而可以正常跑）：
+    #+begin_example
+      ld.lld: error: undefined reference: NVSDK_NGX_D3D11_CreateFeature
+              >>> referenced by libbevy_dylib.so (disallowed by --no-allow-shlib-undefined)
+      ld.lld: error: undefined reference: NVSDK_NGX_D3D11_EvaluateFeature_C
+      ld.lld: error: undefined reference: NVSDK_NGX_D3D12_CreateFeature
+      ld.lld: error: undefined reference: NVSDK_NGX_D3D12_EvaluateFeature_C
+    #+end_example
+
+    *根因不在 dlss 本身，而在于同时打开了 dynamic_linking*
+
+    - 本 crate 的 Cargo.toml 中 default = ["dev"]，dev 里包含 bevy/dynamic_linking；
+      bevy_0.20 目录下的 --features="bevy_solari free_camera https dlss" 没有开这个
+      feature（https 只和资源加载有关，与链接无关），所以那边是纯静态链接。
+    - dlss 的 feature 链：bevy/dlss -> bevy_internal/dlss ->
+      bevy_anti_alias/dlss（bevy_solari?/dlss）-> dep:dlss_wgpu。
+    - dlss_wgpu 的 build.rs 用 bindgen 时只 blocklist 了 Vk.* 和 .*Cuda.*，并且开了
+      wrap_static_fns，于是为 NGX 头文件中 *所有* 函数都生成了包装，包括
+      NVSDK_NGX_D3D11_* / NVSDK_NGX_D3D12_*。可以用下面命令看到未定义引用：
+      #+begin_example
+        nm --undefined-only target/debug/build/dlss_wgpu-*/out/*-wrap_static_fns.o | grep ngx
+      #+end_example
+    - 而 linux 的 DLSS SDK 只提供 Vulkan/CUDA 后端，libnvsdk_ngx.a 里根本没有 D3D 符号：
+      #+begin_example
+        nm --defined-only $DLSS_SDK/lib/Linux_x86_64/libnvsdk_ngx.a | grep -c NGX
+        # 只有 NVSDK_NGX_VULKAN_* / NVSDK_NGX_CUDA_* / NVSDK_NGX_Parameter_*
+      #+end_example
+    - 纯静态链接时，这些从未被调用的 D3D 包装会被 --gc-sections 当成死代码丢掉，
+      最终产物里没有悬空引用（可验证 bevy_0.20 的产物：
+      nm --undefined-only target/debug/examples/solari | grep -ci ngx 结果为 0）。
+      但打开 dynamic_linking 后 bevy 被链进 libbevy_dylib.so，引用会留在共享库里
+      （nm -D --undefined-only libbevy_dylib.so 正好能看到这 4 个 U 符号），
+      而 lld 在链接 *可执行文件* 时默认启用 --no-allow-shlib-undefined，
+      于是链接 hs2_head 时被拒绝（GNU ld 默认放行，所以换 ld 也能绕过）。
+
+    这些符号在 linux 上永远不会被调用（wgpu 走 Vulkan 后端），放行该检查是安全的。
+
+    *只放行链接还不够：运行期 dynamic loader 依然会报错*
+
+    只加 --allow-shlib-undefined 能编译通过，但一执行就崩：
+    #+begin_example
+      target/debug/hs2_head: symbol lookup error:
+        .../target/debug/libbevy_dylib.so: undefined symbol: NVSDK_NGX_D3D11_CreateFeature
+    #+end_example
+
+    原因是这两个符号在 libbevy_dylib.so 里是 PLT 重定位：
+    #+begin_example
+      readelf -rW --dyn-syms target/debug/deps/libbevy_dylib.so | grep NGX_D3D1
+      R_X86_64_JUMP_SLOT  NVSDK_NGX_D3D11_CreateFeature
+      ...
+    #+end_example
+    而该 .so 被 rustc 用 -Wl,-z,now 链接（readelf -d 可见 FLAGS: BIND_NOW），
+    加载时会立刻解析全部 PLT 项，解析不到就直接终止进程，根本走不到 main。
+    所以必须让这 4 个符号在运行期能被解析。
+
+    这类“运行期才暴露”的未解析符号可以用下面命令复现/验证：
+    #+begin_example
+      LD_LIBRARY_PATH=target/debug:target/debug/deps LD_BIND_NOW=1 ldd -r target/debug/hs2_head
+    #+end_example
+
+    *临时方案（已落地）*
+
+    demos/hs2_head/build.rs：
+    #+begin_example
+      println!("cargo:rustc-link-arg=-Wl,--allow-shlib-undefined");
+      for symbol in STUBBED_NGX_SYMBOLS {
+          println!("cargo:rustc-link-arg=-Wl,--defsym={symbol}=0");
+      }
+    #+end_example
+
+    - rustc-link-arg 只作用于本 package 的 bin/example/test/bench，不像全局 RUSTFLAGS
+      那样使整个 bevy 依赖图失效重编；
+    - --defsym 把这 4 个符号定义成可执行文件里的绝对符号（nm -D 里是 A 类型），
+      随可执行文件的 .dynsym 一起导出，于是 loader 加载 libbevy_dylib.so 时能把这些
+      PLT 项绑定上去。这些函数在 linux 上永远不会被调用，取 0 无所谓。
+
+    验证方式：
+    #+begin_example
+      cargo build -p hs2_head --features dlss
+      nm -D target/debug/hs2_head | grep NVSDK_NGX    # 应看到 4 个 A 符号
+      LD_LIBRARY_PATH=target/debug:target/debug/deps ./target/debug/hs2_head --help
+    #+end_example
+
+    *其他可选方案*
+
+    - 在工作区根加 .cargo/config.toml，对 [target.x86_64-unknown-linux-gnu] 配置
+      rustflags = ["-C", "link-arg=-Wl,--allow-shlib-undefined"]：全局有效（其他
+      打开 dlss 的 crate 也能受益），但会触发一次全量重编。
+    - 用 dlss 时关掉 dynamic_linking，例如
+      cargo run -p hs2_head --no-default-features --features "dlss,bevy/bevy_solari,bevy/bevy_dev_tools,bevy/bevy_ui_debug"
+      代价是失去 bevy 代码的热重载。
+    - 上游修复（最干净，能同时消掉上面两个 hack）：用 [patch.crates-io] 把
+      dlss_wgpu 指到本地副本（例如 third_party/dlss_wgpu，从 registry 的
+      src/…/dlss_wgpu-6.0.0 拷出来，版本号保持 6.0.0），在它的 build.rs 里对
+      非 Windows 平台加：
+      #+begin_example
+        builder.blocklist_item("NVSDK_NGX_D3D.*")
+               .blocklist_item("NGX_D3D.*");
+      #+end_example
+      这样 bindgen 不会再为 D3D 生成包装（dlss_wgpu 的 Rust 代码本身不引用 D3D，
+      只有 wrapper.h 里的 nvsdk_ngx_helpers_dlssd_d3d.h 会带进来），共享库里就没有
+      悬空符号了，build.rs 和本条记录都可以删除。代价是要重链一次 bevy dylib。
 *** ecs note
     ecs中update函数在对应schedule时一定执行，并不依赖于Query中的查询结果，验证代码如下：
     #+begin_src rust-ts
