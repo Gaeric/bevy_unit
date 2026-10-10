@@ -61,23 +61,19 @@ fn rebuild(positions: &[Vec3], originals: &[Vec3], params: &SimParams) -> Spatia
 
 fn collected(hash: &SpatialHash, i: usize) -> Vec<u32> {
     let mut neighbors: Vec<u32> = hash.neighbors_of(i).collect();
-    println!("neighbors is {:?}", neighbors);
     neighbors.sort_unstable();
     neighbors
 }
 
 #[test]
 fn matches_brute_force() {
-    // spacing = 2, so a 10^3 box holds only a handful of points per cell: neither the cap nor the
-    // per-cell clamp can drop anything
+    // `max_num_neighbors` is far above the expected density, so neither the cap nor the per-cell
+    // clamp can drop anything and the comparison below is a pure layout check
     let params = params(8096, 1.0, 1.0);
     let mut rng = Rng(0x1234_5678);
     let positions = rng.points(20000, 10.0);
     let mut rng = Rng(0x2234_5678);
     let originals = rng.points(20000, 10.0);
-
-    println!("positions: {positions:?}");
-    println!(" originals: {originals:?}");
 
     let hash = rebuild(&positions, &originals, &params);
 
@@ -88,7 +84,12 @@ fn matches_brute_force() {
         hash.spacing,
         params.particle_diameter,
     );
-    assert!(expected.iter().all(|neighbors| neighbors.len() < 64));
+    assert!(
+        expected
+            .iter()
+            .all(|neighbors| neighbors.len() < params.max_num_neighbors as usize),
+        "a full list would drop the sentinel and the comparison would stop being a layout check"
+    );
 
     for (i, want) in expected.iter().enumerate() {
         let mut got = collected(&hash, i);

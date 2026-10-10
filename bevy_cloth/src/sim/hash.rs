@@ -75,8 +75,7 @@ impl SpatialHash {
     pub fn neighbors_of(&self, i: usize) -> impl Iterator<Item = u32> + '_ {
         (0..self.max_num_neighbors).map_while(move |slot| {
             let j = self.neighbors[i + self.num_particles * slot];
-            println!("slot {slot} neighbors: {j}");
-            (j as usize <= self.num_particles).then_some(j)
+            ((j as usize) < self.num_particles).then_some(j)
         })
     }
 
@@ -143,11 +142,6 @@ impl SpatialHash {
         let particle_diameter2 = params.particle_diameter * params.particle_diameter;
         let table_size = self.table_size as i32;
 
-        let a = hash_coords(3, -1, 1, table_size);
-        let b = hash_coords(3, 1, 1, table_size);
-
-        println!("table_size {table_size}, a is {a}, b is {b}");
-
         for id in 0..n {
             let position = positions[id];
             let original = original_positions[id];
@@ -167,9 +161,6 @@ impl SpatialHash {
                         // the source clamps the cell to `maxNumNeighbors` (its own BUG_LOG), so a
                         // dense cell can drop neighbours
                         let end = self.cell_end[cell].min(start + max as u32);
-                        if id == 0 {
-                            println!("for {x}|{y}|{z} cell {cell} start/end {start}/{end}")
-                        }
                         for i in start..end {
                             let other = self.particle_index[i as usize] as usize;
                             if other == id {
@@ -186,9 +177,6 @@ impl SpatialHash {
                             }
 
                             self.neighbors[id + n * slot] = other as u32;
-                            if id == 0 {
-                                println!("id 0 slot {slot} {i} neighbors: {other}");
-                            }
 
                             slot += 1;
                             if slot >= max {

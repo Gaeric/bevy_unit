@@ -140,9 +140,21 @@ impl SdfCollider {
 
                     if min_val > -ROUNDING_MARGIN {
                         let mask = Vec3::new(
-                            if offset.x < 0.0 { Self::sgn(local.x) } else { 0.0 },
-                            if offset.y < 0.0 { Self::sgn(local.y) } else { 0.0 },
-                            if offset.z < 0.0 { Self::sgn(local.z) } else { 0.0 },
+                            if offset.x < 0.0 {
+                                Self::sgn(local.x)
+                            } else {
+                                0.0
+                            },
+                            if offset.y < 0.0 {
+                                Self::sgn(local.y)
+                            } else {
+                                0.0
+                            },
+                            if offset.z < 0.0 {
+                                Self::sgn(local.z)
+                            } else {
+                                0.0
+                            },
                         );
                         let rounded = offset + Vec3::splat(ROUNDING_MARGIN);
                         let len = rounded.length();

@@ -47,11 +47,18 @@ pub fn stretch_error(positions: &[Vec3], stretch: &StretchConstraints) -> (f32, 
 }
 
 /// `Finalize` clamps `(predicted - positions) / dt`; this counts the particles it would clamp.
-pub fn clamped_count(predicted: &[Vec3], positions: &[Vec3], delta_time: f32, max_speed: f32) -> usize {
+pub fn clamped_count(
+    predicted: &[Vec3],
+    positions: &[Vec3],
+    delta_time: f32,
+    max_speed: f32,
+) -> usize {
     predicted
         .iter()
         .zip(positions)
-        .filter(|(predicted, position)| ((**predicted - **position) / delta_time).length() > max_speed)
+        .filter(|(predicted, position)| {
+            ((**predicted - **position) / delta_time).length() > max_speed
+        })
         .count()
 }
 

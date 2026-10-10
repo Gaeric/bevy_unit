@@ -194,11 +194,15 @@ impl Solver {
         for phase in Self::schedule(params) {
             match phase {
                 Phase::StabilizeSdf => {
-                    // the source passes `positions` on both sides of this kernel; only the write
-                    // side is observable, so snapshot the read side (`predicted` is dead here)
-                    self.scratch.copy_from_slice(&self.positions);
-                    collide_sdf(&mut self.predicted, &self.scratch, colliders, params, dt);
-                    self.positions.copy_from_slice(&self.predicted);
+                    // the source aliases `positions` on both sides of this kernel, so the kernel's
+                    // working value starts out equal to the current position; `scratch` keeps that
+                    // read side stable while `predicted` is overwritten
+                    if !colliders.is_empty() {
+                        self.scratch.copy_from_slice(&self.positions);
+                        self.predicted.copy_from_slice(&self.positions);
+                        collide_sdf(&mut self.predicted, &self.scratch, colliders, params, dt);
+                        self.positions.copy_from_slice(&self.predicted);
+                    }
                 }
                 Phase::Predict => predict_positions(
                     &mut self.predicted,
