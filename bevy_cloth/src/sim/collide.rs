@@ -45,6 +45,18 @@ impl Default for SdfCollider {
 impl SdfCollider {
     /// `VtClothSolverGPU.hpp:186`, `UpdateColliders`.
     pub fn from_transform(kind: ColliderKind, transform: Mat4, delta_time: f32) -> Self {
+        Self::with_history(kind, transform, transform, delta_time)
+    }
+
+    /// `from_transform` plus the model matrix of the previous fixed step, which `velocity_at` needs
+    /// to recover the surface velocity (`Collider::FixedUpdate` shifts `lastTransform` forward once
+    /// per step). a fresh collider passes its own matrix, so it starts with zero relative velocity.
+    pub fn with_history(
+        kind: ColliderKind,
+        transform: Mat4,
+        last_transform: Mat4,
+        delta_time: f32,
+    ) -> Self {
         let (scale, _, position) = transform.to_scale_rotation_translation();
         Self {
             kind,
@@ -53,7 +65,7 @@ impl SdfCollider {
             delta_time,
             cur_transform: Mat3::from_mat4(transform),
             inv_cur_transform: transform.inverse(),
-            last_transform: transform,
+            last_transform,
         }
     }
 

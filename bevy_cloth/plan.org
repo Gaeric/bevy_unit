@@ -34,7 +34,7 @@
   | 源真相（只读） | =../Velvet/Velvet/*.hpp= / =*.cuh= / =*.cu=；=README.md=（Q1/Q2 等工程技巧）；=doc/solver-notes.md= |
   | **迁移目标** | 本 crate =bevy_unit/bevy_cloth=（workspace 成员），不是 =Velvet= 仓库内的新目录 |
   | 与 =Velvet/AGENTS.md= §6 的偏差 | 该节建议新建 =velvet-bevy/=。我们落在 =bevy_cloth/=；按 §6 要求需在 =../Velvet/AGENTS.md= 记录路径变更（§8 状态一并更新）。 |
-  | 引擎 | Bevy 0.19（root =Cargo.toml= 的 =[patch.crates-io]= 指向 =../bevy_engines/bevy_0.20/=，该 checkout 必须存在），edition 2024 |
+  | 引擎 | Bevy 0.20（root =Cargo.toml= 的 =[patch.crates-io]= 指向 =../bevy_engines/bevy_0.20/=，该 checkout 必须存在），edition 2024 |
   | 不做 | CUDA / OpenGL / 自研引擎（=VtEngine=、=Actor=、=Component=、=Material=、=RenderPipeline=、=VtBuffer= GPU 互操作） |
   | 演示规模 | res ≤ 64（≈4225 粒子）；res = 200（≈40401）为压测目标 |
   | 现有资产 | =src/main.rs= 是 Hello world；=examples/01..03= 是学习用台球例，保留但移入 =examples/learning/=，不参与迁移 |
@@ -180,7 +180,7 @@
    - 资源文件：=Velvet/Velvet/Assets/Texture/fabric{1,2,3}.jpg=、=wood.png=；=Model/{sphere,cube}.obj= 可用 Bevy 内置
      =Sphere= / =Cuboid= 替代（Shape 更省事，且碰撞是解析 SDF，不依赖模型）。
 
-* 2. 目标结构与 Bevy 0.19 工程约定
+* 2. 目标结构与 Bevy 0.20 工程约定
 
 ** 2.1 crate 结构
    #+begin_src text
@@ -218,11 +218,11 @@
    =sim/= 不依赖任何 bevy crate（用 =glam=），保证 =cargo test -p bevy_cloth= 能在无 GPU/window 的环境下跑
    （这也是将来接 avian 的前提，见 §8）。
 
-** 2.2 Bevy 0.19 已核实的 API 事实与坑（本 workspace 源码为准，=../bevy_engines/bevy_0.20/=）
+** 2.2 Bevy 0.20 已核实的 API 事实与坑（本 workspace 源码为准，=../bevy_engines/bevy_0.20/=）
    | 事项 | 结论 |
    |---|---|
    | 固定步长 | =Time<Fixed>::from_hz(60.0)=（=bevy_time/src/fixed.rs:105=）；求解系统放 =FixedUpdate=，取 =time.delta_secs()= 即 =fixedDeltaTime= |
-   | 事件 | 0.19 里 =Event= 走 observer（=On<T>=），通道式广播是 **Message**：=MessageReader<=…>= / =MessageWriter=。本仓库 =examples/03-billiard.rs= 已在用 =MessageReader<WindowResized>= |
+   | 事件 | 0.20 里 =Event= 走 observer（=On<T>=），通道式广播是 **Message**：=MessageReader<=…>= / =MessageWriter=。本仓库 =examples/03-billiard.rs= 已在用 =MessageReader<WindowResized>= |
    | **Mesh 每帧写回** | 建 mesh 必须显式 =RenderAssetUsages::default()=（含 MAIN_WORLD），否则 =Mesh::attribute_mut= 会 panic：=MESH_EXTRACTED_ERROR="…mesh asset_usage must include MAIN_WORLD"=（=bevy_mesh/src/mesh.rs:41=） |
    | 写回代价 | =Assets<Mesh>::get_mut()= 会标脏 → 每帧重新上传顶点。res=64（4225 点 × pos+normal ≈ 100 KB/帧）可接受；res=200 ≈ 950 KB/帧，列为风险（§6） |
    | 写回时机 | 求解 + 写回都在 =FixedUpdate= 里 =.chain()= 完成（==在渲染 extract 之前），用 =FixedPostUpdate= 也可以，但不要用 =Update= |
@@ -235,8 +235,8 @@
 ** 2.3 依赖（全部命中 workspace 的 =Cargo.lock= 与本地 cargo 缓存，无需联网拉新包）
    #+begin_src toml
      [dependencies]
-     bevy      = { version = "0.19.0" }
-     glam      = "0.32"          # 与 bevy_math 同版本；sim/ 用它，保持无 bevy 依赖
+     bevy      = { version = "0.20.0", features = ["bevy_dev_tools", "render_dev_tools"] }
+     glam      = "0.33"          # 与 bevy_math 0.20 同版本；sim/ 用它，保持无 bevy 依赖
      rayon     = "1.12"          # P0 并行（先单线程跑通，再并行）
      bevy_egui = "0.40"          # SimParams 面板
      rand      = "0.10"          # 已有
@@ -328,6 +328,20 @@
      - [ ] res=16 / 32 / 64 都稳定；球体 =collisionMargin= 生效（布料不穿透）
      - [ ] 布料与地面碰撞后停在 =y ≈ collisionMargin=
    - 命令：=cargo run -p bevy_cloth --example velvet-01-collision=
+   - 落地情况（[AGENT] 代码已完成；=cargo check/clippy/test -p bevy_cloth= 全绿。四条运行时视觉判据
+     待人在显示器前复跑确认）：
+     - =src/demo/render.rs=：=build_cloth_mesh= / =sync_cloth_mesh=（建 mesh 用 =RenderAssetUsages::default()=）。
+     - =src/demo/plugin.rs=：=ClothPlugin= —— 60 Hz =FixedUpdate= + 具名 set
+       =ClothSystems::{Collide, Step, Writeback}=（=.chain()=）；=Collide= 里更新 collider 变换并按
+       =UpdateColliders= 收集 =SdfCollider=，同时维护 =lastTransform= 供摩擦用的表面速度。
+     - =src/demo/scenes.rs=：=SceneClothCollision= 1:1（res=16、fabric2、布料 =(0,2.5,0)= 不旋转、
+       球 r=0.6 沿 =z=-cos(2t)=、attach {0,res}）；材质 =double_sided + cull_mode: None=。
+     - =examples/velvet-01-collision.rs= + =tests/render.rs=（静止网格 + 写回跟随求解器，无 GPU 可测）。
+     - 资源位置：=bevy_cloth/assets/velvet/fabric{1,2,3}.jpg=。**不要放 workspace 根 =assets/=**：
+       Bevy 的 asset root 优先 =BEVY_ASSET_ROOT=，否则 =CARGO_MANIFEST_DIR=
+       （=bevy_asset/src/io/file/mod.rs=），所以 =cargo run -p bevy_cloth= 解析到 =bevy_cloth/assets/=，
+       放根目录会报 =Path not found=。
+     - 还未判定（需运行）：纹理 V 朝向是否要翻（§4-8）、四条视觉判据。
 
 ** TODO M4 — 交互与调试面板 [AGENT]
    - =demo/camera.rs=：轨道相机（中键拖拽旋转、滚轮缩放），初始位姿对齐源 =(0.35,3.3,7.2) / euler(-21,2.25,0)=。
@@ -473,10 +487,16 @@
         =ClothPlugin= 推迟到 M2a 一起做，=examples/01..03= 仍未移入 =examples/learning/=，
         出画面的验收因本环境无显示未复跑）
   - [x] M1 网格与约束生成（=src/sim/mesh_gen.rs= / =src/sim/constraints.rs= + =tests/mesh_gen.rs=，14 个测试全绿）
-  - [ ] M2a 求解器调度框架（未开始）
-  - [ ] M2b 求解核心实现（[USER]，未开始）
+  - [x] M2a 求解器调度框架（=src/sim/solver.rs= 的 =schedule/step= + =src/sim/hash.rs=；
+        =tests/solver_smoke.rs= 的骨架级测试绿）
+  - [x] M2b 求解核心实现（=solver.rs= 的 9 个 kernel 已落地；=tests/solver_smoke.rs= 里 7 条求解验收测试
+        仍标 =#[ignore]=，待启用并逐条判定）
   - [ ] M2c 数值对照参考实现（可选，未开始）
-  - [ ] M3 渲染写回 + Cloth/Collision 跑通（未开始）
+  - [-] M3 渲染写回 + Cloth/Collision 跑通（代码完成：=src/demo/= + =examples/velvet-01-collision.rs= +
+        =tests/render.rs=；四条运行时视觉判据待在显示器前复跑确认，见 M3 的「落地情况」）
+  - 备注（workspace 级）：root =bevy_workflow= 与本 crate 已用 Bevy 0.20；但 =bevy_waltz= 与
+    =units/{animation_blending,bone_attachments,modular_character,tps_camera}= 仍写 =bevy 0.19.0=，
+    因此 =Cargo.lock= 同时存在 =bevy 0.19.1=（crates.io）与 =bevy 0.20.0=（patch 路径）两份引擎。
   - [ ] M4 轨道相机 / egui 面板 / MouseGrabber（未开始）
   - [ ] M5 七个场景补齐（未开始）
   - [ ] M6 WGSL compute 求解器（可选，未开始）
