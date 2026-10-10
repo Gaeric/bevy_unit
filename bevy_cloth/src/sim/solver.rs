@@ -4,7 +4,7 @@ use glam::{Mat4, Vec3};
 
 use crate::sim::{
     ClothError,
-    collide::SdfCollider,
+    collide::{SdfCollider, compute_friction},
     constraints::{
         AttachConstraints, BendConstraints, ClothConstraints, StretchConstraints, build_constraints,
     },
@@ -456,18 +456,23 @@ pub fn solve_bending(
 }
 
 /// `VtClothSolverGPU.cu:253`, `ApplyDeltas`
-#[allow(unused_variables)]
 pub fn apply_deltas(
     predicted: &mut [Vec3],
     deltas: &mut [Vec3],
     delta_counts: &mut [i32],
     params: &SimParams,
 ) {
-    todo!("M2b [USER]: ApplyDeltas (VtClothSolverGPU.cu:253)")
+    for i in 0..params.num_particles as usize {
+        let count = delta_counts[i] as f32;
+        if count > 0.0 {
+            predicted[i] += deltas[i] / count * params.relaxation_factor;
+            deltas[i] = Vec3::ZERO;
+            delta_counts[i] = 0;
+        }
+    }
 }
 
 /// `VtClothSolverGPU.cu:388`, `Finalize`
-#[allow(unused_variables)]
 pub fn finalize(
     velocities: &mut [Vec3],
     positions: &mut [Vec3],
@@ -475,11 +480,23 @@ pub fn finalize(
     params: &SimParams,
     delta_time: f32,
 ) {
-    todo!("M2b [USER]: Finalize (VtClothSolverGPU.cu:388)")
+    for i in 0..params.num_particles as usize {
+        let mut new_pos = predicted[i];
+        let mut raw_velocity = (new_pos - positions[i]) / delta_time;
+        let raw_velocity_length = raw_velocity.length();
+
+        if raw_velocity_length > params.max_speed {
+            raw_velocity = raw_velocity / raw_velocity_length * params.max_speed;
+            new_pos = positions[i] + raw_velocity * delta_time;
+        }
+
+        // note the asymmetry: the stored velocity is damped, the position is not
+        velocities[i] = raw_velocity * (1.0 - params.damping * delta_time);
+        positions[i] = new_pos;
+    }
 }
 
 /// `VtClothSolverGPU.cu:289`, `CollideSDF`. `positions` is the pre-collision state.
-#[allow(unused_variables)]
 pub fn collide_sdf(
     predicted: &mut [Vec3],
     positions: &[Vec3],
@@ -487,11 +504,29 @@ pub fn collide_sdf(
     params: &SimParams,
     delta_time: f32,
 ) {
-    todo!("M2b [USER]: CollideSDF (VtClothSolverGPU.cu:289)")
+    if colliders.is_empty() {
+        return;
+    }
+
+    for i in 0..params.num_particles as usize {
+        let position = positions[i];
+        let mut pred = predicted[i];
+
+        for collider in colliders {
+            let correction = collider.compute_sdf(pred, params.collision_margin);
+            pred += correction;
+
+            if correction.dot(correction) > 0.0 {
+                let relative_velocity = pred - position - collider.velocity_at(pred) * delta_time;
+                pred += compute_friction(correction, relative_velocity, params);
+            }
+        }
+
+        predicted[i] = pred;
+    }
 }
 
 /// `VtClothSolverGPU.cu:329`, `CollideParticles` (the source wrapper also applies the deltas)
-#[allow(unused_variables)]
 pub fn collide_particles(
     deltas: &mut [Vec3],
     delta_counts: &mut [i32],
@@ -501,11 +536,79 @@ pub fn collide_particles(
     positions: &[Vec3],
     params: &SimParams,
 ) {
-    todo!("M2b [USER]: CollideParticles (VtClothSolverGPU.cu:329)")
+    const EPSILON: f32 = 1e-6;
+
+    let num_particles = params.num_particles as usize;
+    let max_num_neighbors = params.max_num_neighbors as usize;
+
+    for i in 0..num_particles {
+        let mut position_delta = Vec3::ZERO;
+        let mut delta_count = 0i32;
+
+        let pred_i = predicted[i];
+        // this is a displacement, not a velocity: the source never divides by dt here
+        let velocity_i = pred_i - positions[i];
+        let w_i = inv_masses[i];
+
+        // `neighbors[i + n * slot]`, walked as the source's `for (k = id; k < n * max; k += n)`
+        for slot in 0..max_num_neighbors {
+            let j = neighbors[i + num_particles * slot];
+            // `EMPTY` is the sentinel; the source compares with `>`, so equal-to-n would not break
+            if j as usize > num_particles {
+                break;
+            }
+            let j = j as usize;
+
+            let w_j = inv_masses[j];
+            let denominator = w_i + w_j;
+            if denominator <= 0.0 {
+                continue;
+            }
+
+            let pred_j = predicted[j];
+            let diff = pred_i - pred_j;
+            let distance = diff.length();
+            if distance >= params.particle_diameter {
+                continue;
+            }
+
+            let gradient = diff / (distance + EPSILON);
+            let lambda = (distance - params.particle_diameter) / denominator;
+            let common = lambda * gradient;
+
+            delta_count += 1;
+            position_delta -= w_i * common;
+
+            let relative_velocity = velocity_i - (pred_j - positions[j]);
+            position_delta += w_i * compute_friction(common, relative_velocity, params);
+        }
+
+        deltas[i] = position_delta;
+        delta_counts[i] = delta_count;
+    }
+
+    apply_deltas(predicted, deltas, delta_counts, params);
 }
 
 /// `VtClothSolverGPU.cu:419` / `:443`, `ComputeNormal`
-#[allow(unused_variables)]
 pub fn compute_normals(normals: &mut [Vec3], positions: &[Vec3], indices: &[u32]) {
-    todo!("M2b [USER]: ComputeNormal (VtClothSolverGPU.cu:419)")
+    normals.fill(Vec3::ZERO);
+
+    for triangle in indices.as_chunks::<3>().0 {
+        let [i1, i2, i3] = triangle.map(|index| index as usize);
+
+        // area scaled: the source accumulates the raw cross product, not a unit normal
+        let normal = (positions[i2] - positions[i1]).cross(positions[i3] - positions[i1]);
+        normals[i1] += normal;
+        normals[i2] += normal;
+        normals[i3] += normal;
+    }
+
+    for normal in normals.iter_mut() {
+        // the source normalizes unguarded; an isolated particle would become NaN
+        let length = normal.length();
+        if length > 0.0 {
+            *normal /= length;
+        }
+    }
 }

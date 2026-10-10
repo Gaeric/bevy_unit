@@ -84,21 +84,110 @@ impl SdfCollider {
         )
     }
 
-    /// `VtClothSolverGPU.cuh:20`, `ComputeSDF`. [USER] body (M2b).
-    #[allow(unused_variables)]
-    pub fn compute_sdf(&self, target: Vec3, collision_margin: f32) -> Vec3 {
-        todo!("M2b [USER]: SDFCollider::ComputeSDF (VtClothSolverGPU.cuh:20)")
+    /// `VtClothSolverGPU.cuh:20`, `sgn`. `f32::signum` is not equivalent: it maps `-0.0` to `-1.0`.
+    fn sgn(value: f32) -> f32 {
+        if value > 0.0 {
+            1.0
+        } else if value < 0.0 {
+            -1.0
+        } else {
+            0.0
+        }
     }
 
-    /// `VtClothSolverGPU.cuh:84`, `VelocityAt`. [USER] body (M2b).
-    #[allow(unused_variables)]
+    /// `VtClothSolverGPU.cuh:22`, `ComputeSDF`. [USER] body (M2b).
+    pub fn compute_sdf(&self, target: Vec3, collision_margin: f32) -> Vec3 {
+        match self.kind {
+            ColliderKind::Plane => {
+                let offset = target.y - (self.position.y + collision_margin);
+                if offset < 0.0 {
+                    Vec3::new(0.0, -offset, 0.0)
+                } else {
+                    Vec3::ZERO
+                }
+            }
+            ColliderKind::Sphere => {
+                let radius = self.scale.x + collision_margin;
+                let diff = target - self.position;
+                let distance = diff.length();
+                let offset = distance - radius;
+                // the source divides by `distance` unguarded; a particle exactly at the center has
+                // no radial direction, so it is left alone instead of turning into NaN
+                if offset < 0.0 && distance > 0.0 {
+                    let direction = diff / distance;
+                    -offset * direction
+                } else {
+                    Vec3::ZERO
+                }
+            }
+            ColliderKind::Cube => {
+                let local = self.inv_cur_transform.transform_point3(target);
+                let cube_size = Vec3::splat(0.5) + collision_margin / self.scale;
+                let offset = local.abs() - cube_size;
+
+                let max_val = offset.x.max(offset.y).max(offset.z);
+                let min_val = offset.x.min(offset.y).min(offset.z);
+                let mid_val = offset.x + offset.y + offset.z - max_val - min_val;
+                let mut scalar = 1.0;
+
+                let mut correction = Vec3::ZERO;
+                if max_val < 0.0 {
+                    // round the cube corners to avoid particle vibration
+                    const ROUNDING_MARGIN: f32 = 0.03;
+                    if mid_val > -ROUNDING_MARGIN {
+                        scalar = 0.2;
+                    }
+
+                    if min_val > -ROUNDING_MARGIN {
+                        let mask = Vec3::new(
+                            if offset.x < 0.0 { Self::sgn(local.x) } else { 0.0 },
+                            if offset.y < 0.0 { Self::sgn(local.y) } else { 0.0 },
+                            if offset.z < 0.0 { Self::sgn(local.z) } else { 0.0 },
+                        );
+                        let rounded = offset + Vec3::splat(ROUNDING_MARGIN);
+                        let len = rounded.length();
+                        if len < ROUNDING_MARGIN && len > 0.0 {
+                            correction = mask * rounded.normalize() * (ROUNDING_MARGIN - len);
+                        }
+                    } else if offset.x == max_val {
+                        correction = Vec3::new((-offset.x).copysign(local.x), 0.0, 0.0);
+                    } else if offset.y == max_val {
+                        correction = Vec3::new(0.0, (-offset.y).copysign(local.y), 0.0);
+                    } else if offset.z == max_val {
+                        correction = Vec3::new(0.0, 0.0, (-offset.z).copysign(local.z));
+                    }
+                }
+
+                self.cur_transform * scalar * correction
+            }
+        }
+    }
+
+    /// `VtClothSolverGPU.cuh:91`, `VelocityAt`. [USER] body (M2b).
     pub fn velocity_at(&self, target: Vec3) -> Vec3 {
-        todo!("M2b [USER]: SDFCollider::VelocityAt (VtClothSolverGPU.cuh:84)")
+        if self.delta_time == 0.0 {
+            return Vec3::ZERO;
+        }
+
+        let last = (self.last_transform * self.inv_cur_transform).transform_point3(target);
+        (target - last) / self.delta_time
     }
 }
 
 /// `VtClothSolverGPU.cu:272`, `ComputeFriction`. [USER] body (M2b).
-#[allow(unused_variables)]
 pub fn compute_friction(correction: Vec3, relative_velocity: Vec3, params: &SimParams) -> Vec3 {
-    todo!("M2b [USER]: ComputeFriction (VtClothSolverGPU.cu:272)")
+    let mut friction = Vec3::ZERO;
+    let correction_length = correction.length();
+
+    if params.friction > 0.0 && correction_length > 0.0 {
+        let normal = correction / correction_length;
+
+        let tangential_velocity = relative_velocity - normal * relative_velocity.dot(normal);
+        let tangential_length = tangential_velocity.length();
+        let max_tangential = correction_length * params.friction;
+
+        friction = -tangential_velocity * (max_tangential / tangential_length).min(1.0);
+    }
+
+    friction
 }
