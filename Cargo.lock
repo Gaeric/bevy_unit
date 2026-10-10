@@ -3917,9 +3917,9 @@ dependencies = [
 name = "bone_attachments"
 version = "0.1.0"
 dependencies = [
- "bevy 0.19.1",
- "bevy_asset 0.19.1",
- "bevy_scene 0.19.1",
+ "bevy 0.20.0",
+ "bevy_asset 0.20.0",
+ "bevy_scene 0.20.0",
  "tracing",
 ]
 
