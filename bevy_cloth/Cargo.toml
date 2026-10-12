@@ -5,7 +5,11 @@ edition = "2024"
 
 [dependencies]
 # fps overlay in the examples; `fps_overlay` is behind bevy_dev_tools' `render` feature in 0.20
-bevy = { version = "0.20.0", features = ["bevy_dev_tools", "render_dev_tools"] }
+bevy = { version = "0.20.0", features = [
+        "bevy_dev_tools",
+        "render_dev_tools",
+        "jpeg",
+] }
 # same version bevy_math use
 glam = "0.33"
 rand = "0.10.0"
