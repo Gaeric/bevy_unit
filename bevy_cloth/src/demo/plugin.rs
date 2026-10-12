@@ -1,5 +1,7 @@
 //! fixed-step driving of the solver and the render writeback (plan.org §1.1 / §4-15).
 
+use std::time::Instant;
+
 use bevy::prelude::*;
 use glam::{Mat4, Vec3};
 
@@ -7,8 +9,9 @@ use crate::{
     demo::{render::sync_cloth_mesh, scenes},
     sim::{
         collide::{ColliderKind, SdfCollider},
-        params::{SimParams, SimTime},
+        params::{SimParams, SimState, SimTime},
         solver::Solver,
+        stats::{StepStats, measure},
     },
 };
 
@@ -35,6 +38,14 @@ pub struct SimClock(pub SimTime);
 /// the analytic colliders collected for the current fixed step.
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct Colliders(pub Vec<SdfCollider>);
+
+/// `VtGameState`: pause / single step / debug view toggles.
+#[derive(Resource, Default, Deref, DerefMut)]
+pub struct SimStateRes(pub SimState);
+
+/// the last fixed step's telemetry (`plan.org` §5.2).
+#[derive(Resource, Default, Deref, DerefMut)]
+pub struct StatsRes(pub StepStats);
 
 /// `FixedUpdate` order. named so that a later move into another physics crate's schedule is one
 /// `.in_set(...)` (plan.org §8-5).
@@ -64,26 +75,35 @@ pub struct ClothCollider {
     /// cube half extents
     pub half_extents: Vec3,
     pub motion: ColliderMotion,
+    /// `Collider::enabled`; a disabled collider still takes its slot (see `collect_colliders`)
+    pub enabled: bool,
 }
 
 impl ClothCollider {
-    /// the source's `transform->scale`: a sphere reads `scale.x` as its radius, and a cube is a
-    /// unit cube scaled by the half extents.
+    /// the source's `transform->scale`.
+    ///
+    /// a sphere reads `scale.x` as its radius. a cube scales a *unit* cube (its mesh spans
+    /// `[-0.5, 0.5]`), so `scale == 2 * half_extent`.
     pub fn size(&self) -> Vec3 {
         match self.kind {
             ColliderKind::Sphere => Vec3::splat(self.radius),
-            ColliderKind::Cube => self.half_extents,
+            ColliderKind::Cube => self.half_extents * 2.0,
             ColliderKind::Plane => Vec3::ONE,
         }
     }
 }
 
-/// how a collider moves, as a function of the fixed clock.
+/// how a collider moves, as a function of the fixed clock (the source's `animationUpdate`).
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColliderMotion {
+    /// `SceneClothAttach` / `Multiple` / `HighResolution`
     Static,
-    /// `SceneClothCollision`: `z = -cos(2t)` at a constant height.
-    OscillateZ,
+    /// `SceneClothCollision`: `z = -cos(2t)` at a constant height
+    SweepZ,
+    /// `SceneClothFriction`: `x = sin(t - 0.5)` once `t > 0.5`, plus a spin about `+Y`
+    FrictionSweep,
+    /// `SceneClothSwirl`: the decorative sphere rides `attach_slot_positions[0]`
+    SwirlSlot,
 }
 
 /// the model matrix of the previous fixed step. `SdfCollider::velocity_at` needs it to recover the
@@ -96,10 +116,21 @@ pub struct ClothPlugin;
 impl Plugin for ClothPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Time::<Fixed>::from_hz(FIXED_HZ))
+            // `AmbientLight` is a *camera* component in 0.20 (`#[require(Camera)]`); the global one
+            // is this resource. spawning the component instead would add a spurious camera.
+            .insert_resource(GlobalAmbientLight {
+                color: Color::WHITE,
+                brightness: 200.0,
+                affects_lightmapped_meshes: true,
+            })
             .init_resource::<SolverRes>()
             .init_resource::<SimParamsRes>()
+            .init_resource::<SimStateRes>()
             .init_resource::<SimClock>()
             .init_resource::<Colliders>()
+            .init_resource::<StatsRes>()
+            .init_resource::<scenes::CurrentScene>()
+            .init_resource::<scenes::PendingScene>()
             .configure_sets(
                 FixedUpdate,
                 (
@@ -113,14 +144,24 @@ impl Plugin for ClothPlugin {
                 FixedUpdate,
                 (advance_clock, animate_colliders, collect_colliders)
                     .chain()
+                    .run_if(simulation_should_run)
                     .in_set(ClothSystems::Collide),
             )
-            .add_systems(FixedUpdate, step_solver.in_set(ClothSystems::Step))
             .add_systems(
                 FixedUpdate,
-                writeback_cloth_mesh.in_set(ClothSystems::Writeback),
+                step_solver
+                    .run_if(simulation_should_run)
+                    .in_set(ClothSystems::Step),
             )
-            .add_systems(Startup, scenes::setup_collision_scene);
+            .add_systems(
+                FixedUpdate,
+                (writeback_cloth_mesh, clear_step_request)
+                    .chain()
+                    .in_set(ClothSystems::Writeback),
+            )
+            // the scene registry owns spawn / switch / reset; `Update` applies pending switches
+            .add_systems(Startup, scenes::setup_initial_scene)
+            .add_systems(Update, scenes::apply_scene_switch);
     }
 }
 
@@ -128,14 +169,46 @@ fn advance_clock(mut clock: ResMut<SimClock>, time: Res<Time<Fixed>>) {
     clock.0.advance(time.delta_secs());
 }
 
-fn animate_colliders(clock: Res<SimClock>, mut colliders: Query<(&ClothCollider, &mut Transform)>) {
+/// `Scene::animationUpdate`: every animated actor moves once per fixed step, before the solver.
+///
+/// `SceneClothSwirl` animates the cloth's attachment slot from here, so the sphere and the slot
+/// always carry the same value (the source sets both in one callback).
+fn animate_colliders(
+    clock: Res<SimClock>,
+    mut solver: ResMut<SolverRes>,
+    mut colliders: Query<(&ClothCollider, &mut Transform)>,
+) {
     let t = clock.0.seconds();
 
     for (collider, mut transform) in &mut colliders {
         match collider.motion {
             ColliderMotion::Static => {}
-            ColliderMotion::OscillateZ => {
+            ColliderMotion::SweepZ => {
                 transform.translation = Vec3::new(0.0, collider.radius, -(t * 2.0).cos());
+            }
+            ColliderMotion::FrictionSweep => {
+                // `SceneClothFriction` offsets the clock by half a second
+                let time = t - 0.5;
+                if time > 0.0 {
+                    transform.translation = Vec3::new(time.sin(), collider.radius, 0.0);
+                }
+
+                // `(int)time % 4 > 1` flips the spin direction every two seconds
+                let spin = if (time as i32) % 4 > 1 {
+                    -time * 180.0
+                } else {
+                    time * 180.0
+                };
+                transform.rotation = Quat::from_rotation_y(spin.to_radians());
+            }
+            ColliderMotion::SwirlSlot => {
+                // `slot0 = (sin 3t, cos 3t + 2, 0)`
+                let position = Vec3::new((t * 3.0).sin(), (t * 3.0).cos() + 2.0, 0.0);
+
+                if let Some(slot) = solver.0.constraints.attach.slot_positions.first_mut() {
+                    *slot = position;
+                }
+                transform.translation = position;
             }
         }
     }
@@ -151,6 +224,13 @@ fn collect_colliders(
     colliders.0.clear();
 
     for (collider, transform, mut history) in &mut query {
+        // `UpdateColliders` `continue`s past disabled colliders, leaving their slots
+        // zero-initialized; the kernel reads that as a tiny sphere at the origin (plan.org §6)
+        if !collider.enabled {
+            colliders.0.push(SdfCollider::disabled());
+            continue;
+        }
+
         let model = transform.to_matrix() * Mat4::from_scale(collider.size());
         colliders.0.push(SdfCollider::with_history(
             collider.kind,
@@ -167,12 +247,34 @@ fn step_solver(
     params: Res<SimParamsRes>,
     colliders: Res<Colliders>,
     mut solver: ResMut<SolverRes>,
+    mut stats: ResMut<StatsRes>,
 ) {
     if solver.0.num_particles() == 0 {
         return;
     }
 
+    let started = Instant::now();
     solver.0.step(&params.0, &colliders.0, time.delta_secs());
+
+    stats.0 = measure(
+        &solver.0.positions,
+        &solver.0.velocities,
+        &solver.0.predicted,
+        &solver.0.constraints.stretch,
+        &solver.0.hash,
+        &params.0,
+        started,
+    );
+}
+
+/// `VtGameState`: a paused simulation only advances when a single step was requested.
+pub fn simulation_should_run(state: Res<SimStateRes>) -> bool {
+    !state.0.pause || state.0.step
+}
+
+/// consume the one-shot step request so the next fixed tick waits for another key press.
+fn clear_step_request(mut state: ResMut<SimStateRes>) {
+    state.0.step = false;
 }
 
 fn writeback_cloth_mesh(

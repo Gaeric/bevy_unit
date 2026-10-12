@@ -87,13 +87,32 @@ impl SdfCollider {
         )
     }
 
-    /// cube from half extents; the source treats the local shape as a unit cube.
-    pub fn cube(center: Vec3, half_extents: Vec3, rotation: Quat, delta_time: f32) -> Self {
+    /// cube from the source's `transform.scale`. the local shape is a *unit* cube, so the world
+    /// half extent is `scale * 0.5`.
+    pub fn cube(center: Vec3, scale: Vec3, rotation: Quat, delta_time: f32) -> Self {
         Self::from_transform(
             ColliderKind::Cube,
-            Mat4::from_scale_rotation_translation(half_extents, rotation, center),
+            Mat4::from_scale_rotation_translation(scale, rotation, center),
             delta_time,
         )
+    }
+
+    /// the slot `UpdateColliders` leaves behind for a disabled collider.
+    ///
+    /// the source resizes `sdfColliders` to the collider count and `continue`s past disabled
+    /// entries, so the slot keeps the all-zero value `resize` gave it. the kernel reads a zero
+    /// `type` as `Sphere` (the first enumerator) at the origin with `scale == 0`, i.e. a sphere
+    /// whose radius collapses to `collisionMargin`. replicated 1:1 (plan.org §6 risk table).
+    pub fn disabled() -> Self {
+        Self {
+            kind: ColliderKind::Sphere,
+            position: Vec3::ZERO,
+            scale: Vec3::ZERO,
+            delta_time: 0.0,
+            cur_transform: Mat3::ZERO,
+            inv_cur_transform: Mat4::ZERO,
+            last_transform: Mat4::ZERO,
+        }
     }
 
     /// `VtClothSolverGPU.cuh:20`, `sgn`. `f32::signum` is not equivalent: it maps `-0.0` to `-1.0`.

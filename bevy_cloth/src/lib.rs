@@ -4,4 +4,8 @@
 pub mod demo;
 pub mod sim;
 
+pub use demo::ClothInputPlugin;
 pub use demo::ClothPlugin;
+pub use demo::ClothUiPlugin;
+pub use demo::MouseGrabPlugin;
+pub use demo::OrbitCameraPlugin;

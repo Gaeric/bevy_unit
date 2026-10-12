@@ -6,3 +6,27 @@
 #+OPTIONS: ^:{}
 * Intro
   This unit chronicles the learning process of cloth simulation.
+
+* 复现
+  #+begin_src bash
+    # 前置：root Cargo.toml 的 [patch.crates-io] 指向 ../bevy_engines/bevy_0.20/，该 checkout 必须存在
+    cargo run -p bevy_cloth --example velvet-00-sandbox     # M0：空场景 + 地面 + 球
+    cargo run -p bevy_cloth --example velvet-01-collision   # M3：单个场景（Cloth / SDF Collision）
+    cargo run -p bevy_cloth --example velvet-scenes         # M4/M5：调试面板 + 7 个场景
+  #+end_src
+
+  按键（源 =GameInstance::ProcessKeyboard= / =GUI.cpp= 的等价物）：
+  =1–7= 切场景 · =R= 重载当前场景 · =Space= 暂停 · =S= 单步 · =H= 隐藏 GUI · =K= 画粒子 · =L= 线框。
+  鼠标：左键拖拽抓布料（=MouseGrabber=），中键拖拽转相机，滚轮缩放。
+
+* 与源工程的差异 / 备注
+  | # | 事项 | 说明 |
+  |---+------+------|
+  | 1 | 迁移路径 | 落在 =bevy_unit/bevy_cloth=（workspace 成员），不是 =Velvet= 仓库内的 =velvet-bevy/= |
+  | 2 | 场景 3 的 substeps | 源 =ModifyParameter(numSubsteps, 3)= 紧跟 =(…, 8)=，实际生效 8，这里只写 8 |
+  | 3 | 布料纹理 V 朝向 | 源 =stbi_set_flip_vertically_on_load(true)=；Bevy 侧 UV 照抄，若图案上下颠倒再翻 v |
+  | 4 | 环境光 | Bevy 0.20 的 =AmbientLight= 是**相机组件**（=#[require(Camera)]=），单独 spawn 会多出一个相机实体；改用全局 =GlobalAmbientLight= 资源 |
+  | 5 | 立方体尺寸口径 | 源用 =transform.scale= 缩放**单位**立方体，故 =SdfCollider= 的 =scale = 2 × half_extent= |
+  | 6 | disabled collider | 源 =UpdateColliders= 对 disabled 只 =continue=，槽位保持 =resize= 的零值 → kernel 读成"原点处半径 =collisionMargin= 的球"；已 1:1 复刻（实际影响可忽略） |
+  | 7 | 暂停时不给抓取 | 源把 actor 的 =Update= / =FixedUpdate= 都放在 =if (!pause)= 内，所以暂停时不抓取；这里同样把抓取 gated 在 =simulation_should_run= |
+  | 8 | 无源数值对照 | 源工程（Windows/VS/CUDA）无法在 Linux 构建，缺 =velvet.exe= 黄金参照；以 =plan.org= §5.1 数值测试 + §1.7 定性判据为准 |

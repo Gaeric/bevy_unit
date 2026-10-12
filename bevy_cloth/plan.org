@@ -203,8 +203,9 @@
      │     ├─ render.rs            // 把 positions/normals 写回 Assets<Mesh>
      │     ├─ camera.rs            // 轨道相机（中键拖拽 + 滚轮）
      │     ├─ grab.rs              // MouseGrabber（viewport_to_world 射线 + 最近粒子）
-     │     ├─ ui.rs                // bevy_egui 参数面板 + 暂停/单步/重置
-     │     └─ scenes.rs            // 7 个场景 setup + 场景资源（含 OnEnter/OnExit 参数覆盖）
+          │      ├─ ui.rs                // bevy_feathers 参数面板 + 暂停/单步/线框/粒子/隐藏 GUI
+          │      ├─ input.rs             // 键盘快捷键（Space/S/H/K/L）
+          │      └─ scenes.rs            // 7 个场景 setup + 场景资源（含 OnEnter/OnExit 参数覆盖）
      ├─ examples/
      │  ├─ learning/01-cannonball2d.rs 02-cannonball3d.rs 03-billiard.rs   // 原例子挪过来
      │  ├─ velvet-00-sandbox.rs    // M0：空场景 + 地面 + 球
@@ -227,7 +228,7 @@
    | 写回代价 | =Assets<Mesh>::get_mut()= 会标脏 → 每帧重新上传顶点。res=64（4225 点 × pos+normal ≈ 100 KB/帧）可接受；res=200 ≈ 950 KB/帧，列为风险（§6） |
    | 写回时机 | 求解 + 写回都在 =FixedUpdate= 里 =.chain()= 完成（==在渲染 extract 之前），用 =FixedPostUpdate= 也可以，但不要用 =Update= |
    | 布料实体 | =Transform::IDENTITY=，线宽/材质用 =StandardMaterial { double_sided: true, cull_mode: None, .. }= |
-   | UI | =bevy_egui = "0.40"=（root 已在用 =bevy-inspector-egui 0.37=，其依赖即 =bevy_egui 0.40.1=，已验证与 patched bevy 0.19 兼容） |
+   | UI | =bevy_feathers=（引擎内置 crate，通过 =bevy= facade 的 =bevy_feathers= feature 打开，无第三方依赖）／方案见 =m4-feathers-plan.org= |
    | 诊断 | =FrameTimeDiagnosticsPlugin= / =bevy::dev_tools::fps_overlay::FpsOverlayPlugin=；自研指标用 =Diagnostic=（源的 =Timer= CPU/CUDA profiling 不移植） |
    | 风格 | root =AGENTS.md=：edition 2024、=prelude::*=、=Single<…>= 唯一实体、observer、导入分组（外部 crate → std → 本地）；简单注释，注释英文小写 |
    | 构建 | =cargo run -p bevy_cloth --example velvet-scenes=；不要 =cd= 进子目录（=../bevy_engines/bevy_0.20/= 必须存在） |
@@ -235,12 +236,13 @@
 ** 2.3 依赖（全部命中 workspace 的 =Cargo.lock= 与本地 cargo 缓存，无需联网拉新包）
    #+begin_src toml
      [dependencies]
-     bevy      = { version = "0.20.0", features = ["bevy_dev_tools", "render_dev_tools"] }
-     glam      = "0.33"          # 与 bevy_math 0.20 同版本；sim/ 用它，保持无 bevy 依赖
-     rayon     = "1.12"          # P0 并行（先单线程跑通，再并行）
-     bevy_egui = "0.40"          # SimParams 面板
-     rand      = "0.10"          # 已有
+     bevy = { version = "0.20.0", features = ["bevy_dev_tools", "render_dev_tools", "jpeg", "bevy_feathers"] }
+     glam = "0.33"          # 与 bevy_math 0.20 同版本；sim/ 用它，保持无 bevy 依赖
+     rand = "0.10"          # 已有
    #+end_src
+   =jpeg=：Bevy 默认只带 =png=，不打开它 =fabric{1,2,3}.jpg= 加载失败。
+   =rayon= 尚未引入（M2a 的并行留到实测有需求时再开）；UI 面板改用引擎内置 =bevy_feathers=
+   （见 =m4-feathers-plan.org=），不再引 =bevy_egui=。
    =bytemuck= / =encase= 只在走自定义管线（M3.5/M6）时才需要。
 
 * 3. 里程碑
@@ -345,23 +347,45 @@
 
 ** TODO M4 — 交互与调试面板 [AGENT]
    - =demo/camera.rs=：轨道相机（中键拖拽旋转、滚轮缩放），初始位姿对齐源 =(0.35,3.3,7.2) / euler(-21,2.25,0)=。
-   - =demo/ui.rs=：=bevy_egui= 面板，=SimParams= 全字段 1:1（范围照 §1.3；=enableSelfCollision= 用 checkbox，
-     =bendCompliance= 用对数滑块）+ =VtGameState= 的 pause/step/线框/粒子调试/隐藏 GUI。
-   - 按键：数字键 1–7 切场景、=R= 重置、=Space= 暂停、=S= 单步（源 =Input= 的等价物）。
+   - =demo/ui.rs=：=bevy_feathers= 面板（方案见 =m4-feathers-plan.org=），=SimParams= 全字段 1:1（范围照 §1.3；
+     =enableSelfCollision= 用 checkbox，=bendCompliance= 用对数滑块）+ =VtGameState= 的 pause/step/线框/粒子调试/隐藏 GUI。
+   - 按键：=Space= 暂停、=S= 单步（源 =Input= 的等价物）；=H= / =K= / =L= 沿用源 GUI 的隐藏 GUI / 粒子 / 线框开关。
+     **数字键 1–7 切场景与 =R= 重置随 M5 一起做**：M4 只挂 Collision 一个场景（=m4-feathers-plan.org= §4-6），
+     没有可切的场景，重置即重载当前场景。
    - =demo/grab.rs=：MouseGrabber —— =Camera::viewport_to_world= 生成射线 → 遍历粒子取
      =distanceToRay < particleDiameter= 且 =dot(dir, p-o)= 最小者；抓取期间 =inv_mass= 置 0（记住原值），
      目标 = =lerp(鼠标点, 当前位置, 0.8)=，并回写 =velocities=(target-cur)/dt=；释放时恢复 =inv_mass=。
+     指针悬停在 UI 上时不抓（=bevy_picking= 的 =HoverMap= 守卫，避免拖面板滑块时同时抓布料）。
+   - 落地情况（[AGENT] 代码已完成；=cargo check/clippy/test/fmt -p bevy_cloth= 全绿；需运行判定的项待显示器前确认）：
+     - =src/demo/camera.rs=：=OrbitCamera= / =OrbitCameraPlugin=；=tests/camera.rs= 校验初始位姿与朝向。
+     - =src/demo/ui.rs=：=ClothUiPlugin=（=FeathersPlugins= + =UiTheme= + 参数面板 + stats 文本 + 线框/粒子开关，
+       外加 =sync_toggle_checked=：键盘改状态后回写 checkbox 的 =Checked=，让面板与按键一致）。
+     - =src/demo/grab.rs=：=MouseGrab= / =MouseGrabPlugin=；=tests/grab.rs= 覆盖射线选点与 =lerp= 目标。
+     - =src/demo/input.rs=：=ClothInputPlugin=；=Space= 暂停、=S= 单步、=H/K/L= 开关；
+       有控件获得焦点时 =Space= 让位给控件（=bevy_input_focus::InputFocus= 守卫）。
+     - =examples/velvet-scenes.rs=：入口，挂 =ClothPlugin + ClothUiPlugin + OrbitCameraPlugin + MouseGrabPlugin + ClothInputPlugin=。
    - 验收：
      - [ ] 面板改参数实时生效（与源 ImGui 面板逐项对照）
      - [ ] 暂停 + 单步：每按一次前进恰好一个固定步（用 stats 的步数计数确认）
      - [ ] 抓取/拖拽/释放正常，释放后 =inv_mass= 恢复（打印确认）
-     - [ ] 切场景时参数按 §1.7 的 onEnter/onExit 语义正确覆盖并还原
+     - [ ] 切场景时参数按 §1.7 的 onEnter/onExit 语义正确覆盖并还原（随 M5）
    - 命令：=cargo run -p bevy_cloth --example velvet-scenes=
 
 ** TODO M5 — 七个场景补齐（依赖 M2b 完成）[AGENT]
    - 按 §1.7 表格逐个落地 =demo/scenes.rs=，每个场景写一条判据（落点 / 摆动周期 / 是否自穿 / 是否抖动）。
    - 多布料：=SceneClothMultiple= 三块布料共用一个 =Solver=（=index_offset= 拼接 index、=inv_masses/positions= 追加）。
    - 压测：=SceneClothHD= res=200 —— 若 CPU 版不可交互，只要求"能跑、数值稳定"，性能留给 M6。
+   - 落地情况（[AGENT] 代码已完成；=cargo check/clippy/test/fmt -p bevy_cloth= 全绿；视觉判据待显示器前确认）：
+     - =src/demo/scenes.rs=：=SceneId=（=ALL= / =label=）+ =CurrentScene= / =PendingScene= / =SceneEntity=
+       + =scene_params(id)= + =build_scene=；7 个场景 1:1（Attach / Collision / SelfCollision / Friction /
+       Multiple / HighResolution / Swirl）。=source_pose= 复刻 =Transform::matrix()= 的 =T*Ry*Rz*Rx*S= 顺序。
+     - =scene_params= 复刻源 =ModifyParameter= 的 onEnter/onExit 语义：每次都从 =SimParams::default()= 起算，
+       切场景不泄漏（§6 风险项）；覆盖在 =AddCloth= 之前生效，=maxSpeed= 用的是最终 =numSubsteps=。
+     - =src/demo/plugin.rs=：=ColliderMotion= 扩成 =Static / SweepZ / FrictionSweep / SwirlSlot=；
+       新增 =ClothCollider.enabled=；=collect_colliders= 对 disabled 推默认槽（结论见 §6 风险表）。
+     - 场景切换：=Update= 的 =apply_scene_switch= 全量重建（despawn 旧 =SceneEntity= + 清空 =Solver= +
+       释放 mesh/material）；=1–7= 切场景、=R= 重载；面板在 =CurrentScene= 变化时整体重建以反映新参数。
+     - 测试：=tests/scenes.rs=（7 条：参数覆盖 / 不泄漏）、=tests/colliders.rs=（3 条：=size()= 折算 + disabled 槽）。
    - 验收：
      - [ ] 7 个场景逐一对齐源工程 =Velvet.exe= 行为；无 source 录像时，以 README 的 Q1/Q2 现象作定性判据
        （预稳定化后不抖、Jacobi 下不自振、LRA 下不拉伸）
@@ -425,13 +449,13 @@
   |---|---|
   | 每帧 Mesh 资产重传（res=200 ≈ 950 KB/帧 + 资产事件） | 先接受并测量；若成为瓶颈，走 M3.5：自定义管线（=RenderAssetUsages::RENDER_WORLD= + storage buffer + WGSL 直接变换顶点）；或只在 res>64 时启用 |
   | =Mesh::attribute_mut= panic | 建 mesh 时显式 =RenderAssetUsages::default()=（=mesh.rs:41=） |
-  | =bevy_egui 0.40= 与 patched bevy 0.19 | root 已用 =bevy-inspector-egui 0.37= 依赖同一 =bevy_egui=，据此判断可行；失败则退化为 =bevy_ui= 自绘面板 |
+  | =feathers / =bsn!= 新 API（M4 面板） | M4 改用引擎内置 =bevy_feathers=，无第三方依赖（见 =m4-feathers-plan.org=）；风险集中在 =bsn!= 宏较新、文档少。落地后 14 个参数 + 5 个开关的面板可编译、可交互 |
   | =rayon= 与 Bevy =ComputeTaskPool= 争抢线程 | 先单线程跑通 → 试 =ComputeTaskPool= → 不够再引入独立 rayon 线程池（并测量 FPS 影响） |
   | 源工程无法在 Linux 构建 → 无黄金数值 | =VtClothSolverCPU*.hpp= 抄成测试参考实现（M2c）+ 录像参照（§5.4） |
   | res=200 的 CPU 性能 | P0 不设性能验收；只要求"能跑且数值稳定"，性能是 M6 的动机 |
   | =interleavedHash= 被"简化"成每子步重建哈希 | 必须保持"每 N 个子步重建一次"的语义，否则自碰撞场景行为漂移 |
   | 场景参数覆盖泄漏 | 用 =OnEnter/OnExit= 或 =SceneResource { base, overrides }=，加单测验证"切场景后 =SimParams == base=" |
-  | =enabled = false= 的 collider 仍占 =sdfColliders= 槽位（=UpdateColliders= 只 =continue=，但 =CollideSDF= 收到 =size()=） | M5 落地 Swirl 时实测"关闭的球是否真的不碰布料"；若源行为确实是仍按默认槽参与，则 1:1 照抄并在 readme 记录 |
+  | =enabled = false= 的 collider 仍占 =sdfColliders= 槽位（=UpdateColliders= 只 =continue=，但 =CollideSDF= 收到 =size()=） | **已核实**：槽位保持 =resize= 给的零值，=ColliderType= 首个枚举是 =Sphere=，于是 kernel 读成"原点处 =scale=0= 的球"（半径塌成 =collisionMargin=）。已用 =SdfCollider::disabled()= 1:1 复刻（=tests/colliders.rs=）并在 readme 记录；Swirl 里这个默认槽离布料很远，无实际影响 |
   | 邻居表槽位布局易被"顺手归一化"（=i + n*j= 易被写成 =i*maxNumNeighbors + k=） | 按 §1.6 实现并加 =tests/hash.rs= 断言 =neighbors[i + n*j]= 的步长，与暴力 O(n²) 比对 |
   | 源工程 spec 本身有坑（=Debug quad=、=Timer=、=IntCoord= 用 =int=） | 不迁移 debug quad/timer；=ComputeIntCoord= 的 =int= 语义在 Rust 里显式 =i32= + 溢出处理 |
 
@@ -497,8 +521,12 @@
   - 备注（workspace 级）：root =bevy_workflow= 与本 crate 已用 Bevy 0.20；但 =bevy_waltz= 与
     =units/{animation_blending,bone_attachments,modular_character,tps_camera}= 仍写 =bevy 0.19.0=，
     因此 =Cargo.lock= 同时存在 =bevy 0.19.1=（crates.io）与 =bevy 0.20.0=（patch 路径）两份引擎。
-  - [ ] M4 轨道相机 / egui 面板 / MouseGrabber（未开始）
-  - [ ] M5 七个场景补齐（未开始）
+  - [-] M4 交互与调试面板（UI 方案 =bevy_feathers=，见 =m4-feathers-plan.org=）：轨道相机 / 参数面板 /
+    MouseGrabber / =Space=·=S= 等按键 已完成（代码 + 单测绿）；数字键 1–7 切场景与 =R= 重置推迟到 M5
+    （M4 只有 Collision 一个场景）；面板交互与视觉判据待运行确认，详见 M4 的「落地情况」
+  - [-] M5 七个场景补齐：代码已完成（=demo/scenes.rs= 的 =SceneId= + =build_scene=、
+    =SceneClothMultiple= 共用 =Solver=、=Swirl= 的 slot 动画与 disabled 球、=1–7= 切场景与 =R= 重载），
+    单测绿（=tests/scenes.rs= / =tests/colliders.rs=）；7 个场景的视觉判据待显示器前逐条确认，见 M5 的「落地情况」
   - [ ] M6 WGSL compute 求解器（可选，未开始）
   - [ ] M7 打磨 / DoD（未开始）
 * tips

@@ -72,8 +72,15 @@ fn writeback_tracks_the_solver_positions() {
     // the cloth fell, so this is not the rest pose any more
     assert!(solver.positions[0].y < 1.0);
 
-    for (i, (got, want)) in positions_of(&mesh).iter().zip(&solver.positions).enumerate() {
+    for (i, (got, want)) in positions_of(&mesh)
+        .iter()
+        .zip(&solver.positions)
+        .enumerate()
+    {
         let got = Vec3::from_array(*got);
-        assert!((got - *want).length() < 1e-6, "particle {i}: {got} vs {want}");
+        assert!(
+            (got - *want).length() < 1e-6,
+            "particle {i}: {got} vs {want}"
+        );
     }
 }

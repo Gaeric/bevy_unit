@@ -19,14 +19,21 @@ pub fn build_cloth_mesh(cloth: &ClothMesh) -> Mesh {
         .iter()
         .map(|position| position.to_array())
         .collect();
-    let normals: Vec<[f32; 3]> = cloth.normals.iter().map(|normal| normal.to_array()).collect();
+    let normals: Vec<[f32; 3]> = cloth
+        .normals
+        .iter()
+        .map(|normal| normal.to_array())
+        .collect();
     let uvs: Vec<[f32; 2]> = cloth.uvs.iter().map(|uv| uv.to_array()).collect();
 
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-        .with_inserted_indices(Indices::U32(cloth.indices.clone()))
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(Indices::U32(cloth.indices.clone()))
 }
 
 /// writes the solver output into the render mesh.

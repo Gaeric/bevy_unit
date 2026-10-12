@@ -9,6 +9,7 @@ bevy = { version = "0.20.0", features = [
         "bevy_dev_tools",
         "render_dev_tools",
         "jpeg",
+        "bevy_feathers",
 ] }
 # same version bevy_math use
 glam = "0.33"
