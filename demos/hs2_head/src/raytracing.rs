@@ -20,19 +20,9 @@ fn add_raytracing_meshes_on_scene_load(
         &GltfMaterialName,
     )>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
     _asset_server: Res<AssetServer>,
 ) {
-    let sphere = meshes.add(Sphere::default());
-    let material = materials.add(StandardMaterial::default());
-
-    commands.spawn((
-        Mesh3d(sphere.clone()),
-        MeshMaterial3d(material),
-        RaytracingMesh3d(sphere),
-    ));
-
     for descendant in children.iter_descendants(scene_ready.entity) {
         if let Ok((Mesh3d(mesh_handle), MeshMaterial3d(material_handle), mat_name)) =
             mesh_query.get(descendant)
