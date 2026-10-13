@@ -21,7 +21,7 @@ use bevy::{
 use crate::{
     demo::{
         plugin::{SimClock, SimParamsRes, SimStateRes, SolverRes, StatsRes},
-        scenes::CurrentScene,
+        scenes::{self, CurrentScene},
     },
     sim::params::SimParams,
 };
@@ -68,7 +68,8 @@ impl Plugin for ClothUiPlugin {
             .insert_resource(UiTheme(create_dark_theme()))
             // keeps each checkbox's own `Checked` state in sync with its `ValueChange`
             .add_observer(checkbox_self_update)
-            .add_systems(Startup, spawn_panel)
+            // the panel reads the current scene's parameters, so build it after the scene writes them
+            .add_systems(Startup, spawn_panel.after(scenes::setup_initial_scene))
             .add_systems(
                 Update,
                 (
@@ -77,7 +78,9 @@ impl Plugin for ClothUiPlugin {
                     apply_wireframe,
                     draw_particles,
                     sync_toggle_checked,
-                    rebuild_panel_on_scene_change,
+                    // `apply_scene_switch` writes the new scene's parameters; rebuilding before it
+                    // runs would show the outgoing scene's values
+                    rebuild_panel_on_scene_change.after(scenes::apply_scene_switch),
                 ),
             );
     }
@@ -90,11 +93,20 @@ fn spawn_panel(mut commands: Commands, params: Res<SimParamsRes>) {
 /// a scene switch replaces the parameters, so the panel is thrown away and rebuilt from the current
 /// values.
 fn rebuild_panel_on_scene_change(
+    mut first_run: Local<bool>,
     current: Res<CurrentScene>,
     params: Res<SimParamsRes>,
     roots: Query<Entity, With<PanelRoot>>,
     mut commands: Commands,
 ) {
+    // `CurrentScene` is *added* at startup, so `is_changed()` is true on the first `Update` even
+    // though the scene never switched. `spawn_panel` already built the panel from this scene, so
+    // rebuilding here would despawn that fresh panel while `sync_toggle_checked` still holds its
+    // checkboxes and panic on the stale entities.
+    if !std::mem::replace(&mut *first_run, true) {
+        return;
+    }
+
     if !current.is_changed() {
         return;
     }
