@@ -69,9 +69,13 @@ impl BakeRecipe for SphereBake {
     }
 
     fn material(&self, _asset_server: &AssetServer) -> StandardMaterial {
+        // The checker texture is fully opaque, so the half-transparent look
+        // comes from the base color alpha. Blend mode already goes through the
+        // transparent pass that Solari is supposed to leave untouched.
         StandardMaterial {
-            base_color: Color::WHITE,
+            base_color: Color::srgba(1.0, 1.0, 1.0, 0.5),
             base_color_texture: Some(self.output.clone()),
+            alpha_mode: AlphaMode::Blend,
             ..default()
         }
     }
