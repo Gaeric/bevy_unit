@@ -313,12 +313,18 @@
      CollideParticles（自碰撞 + 摩擦）、ComputeNormals。若采用 XPBD 乘子形式，λ 与 ᾱ=α/Δt² 同样属红线。
    - agent 可做且应当做：公式推导与源文件行号对照表、边界条件清单（符号/清零时机/除以零）、
      验证脚手架与实验脚本、评审意见（只给问题与建议，不改代码）。
-   - 验收工具（agent 提供，user 判定）：
-     - [ ] 单链 stretch 有解析解（两粒子 + 一条约束 + 已知外力）→ 迭代收敛到解析值
-     - [ ] 自由落体 + Plane SDF：静止高度 == =collisionMargin= ±1e-4
-     - [ ] 球 SDF 推出方向 == =normalize(p - c)=，推出量 == =radius + margin - |p-c|=
+   - 验收工具（agent 提供，user 判定）——已启用（=solver_smoke.rs= 去掉 =#[ignore]=，14 个测试全绿）：
+     - [x] 单链 stretch 有解析解（两粒子 + 一条约束 + 已知外力）→ 迭代收敛到解析值
+       （=a_pinned_corner_hangs_at_the_rest_length=：|p0-p1| = 2.00057，rest = 2.0）
+     - [x] 自由落体 + Plane SDF：静止高度 == =collisionMargin=
+       （=plane_holds_the_cloth_at_the_collision_margin=：lowest y = 0.06 = margin；测试实测容差为 ±1e-3，非 ±1e-4）
+     - [x] 球 SDF 推出方向 == =normalize(p - c)=，推出量 == =radius + margin - |p-c|=
+       （=sphere_push_out_is_radial=：0.5 → 0.56，切向分量 = 0）
      - [ ] 长期稳定：无重力自由摆动 10 s，max|v| ≤ maxSpeed，位置无 NaN/Inf
-     - [ ] 子步无关性：=numSubsteps ∈ {1,2,4}= 同场景终态差异 < 阈值（记录数值，别只写"通过"）
+       （部分覆盖：=max_speed_clamps_the_velocity= 30 步、=no_gravity_keeps_the_cloth_still= 10 步、
+       =a_pinned_corner_hangs_at_the_rest_length= 240 步 = 4 s；仍缺一条连续 10 s 的自由摆动用例）
+     - [x] 子步无关性：=numSubsteps ∈ {1,2,4}= 同场景终态差异 < 阈值（记录数值）
+       （=substeps_barely_change_the_result=：sag 0.785 / 0.318 / 0.126；与 substeps=2 的最大偏差 0.549 / 0.235）
 
 ** TODO M2c — 数值对照参考实现（可选）[AGENT]
    - 源工程在 Linux 无法构建（Windows/VS/CUDA），"逐帧对照"通常做不到。
@@ -525,8 +531,8 @@
   - [x] M1 网格与约束生成（=src/sim/mesh_gen.rs= / =src/sim/constraints.rs= + =tests/mesh_gen.rs=，14 个测试全绿）
   - [x] M2a 求解器调度框架（=src/sim/solver.rs= 的 =schedule/step= + =src/sim/hash.rs=；
         =tests/solver_smoke.rs= 的骨架级测试绿）
-  - [x] M2b 求解核心实现（=solver.rs= 的 9 个 kernel 已落地；=tests/solver_smoke.rs= 里 7 条求解验收测试
-        仍标 =#[ignore]=，待启用并逐条判定）
+  - [x] M2b 求解核心实现（=solver.rs= 的 9 个 kernel 已落地；=tests/solver_smoke.rs= 的 7 条求解验收测试
+        已启用并逐条判定：14 个测试全绿，数值见 M2b 的验收清单）
   - [ ] M2c 数值对照参考实现（可选，未开始）
   - [-] M3 渲染写回 + Cloth/Collision 跑通（代码完成：=src/demo/= + =examples/velvet-01-collision.rs= +
         =tests/render.rs=；四条运行时视觉判据待在显示器前复跑确认，见 M3 的「落地情况」）

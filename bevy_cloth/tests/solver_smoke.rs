@@ -229,14 +229,7 @@ fn add_cloth_rejects_a_mesh_that_is_not_a_source_layout_grid() {
     assert_eq!(params.num_particles, 0);
 }
 
-// ---------------------------------------------------------------------------
-// M2b acceptance targets: these need the [USER] kernel bodies.
-// run them with `cargo test -p bevy_cloth -- --ignored --nocapture` and record the numbers.
-// ---------------------------------------------------------------------------
-
-/// semi-implicit euler moves `g * dt^2 * n(n+1) / 2`, not `g * t^2 / 2`: the two differ by `g*dt*t/2`.
 #[test]
-#[ignore = "M2b: needs the user's kernels"]
 fn free_fall_matches_the_discrete_integration() {
     let mut params = SimParams {
         num_substeps: 1,
@@ -262,7 +255,6 @@ fn free_fall_matches_the_discrete_integration() {
 }
 
 #[test]
-#[ignore = "M2b: needs the user's kernels"]
 fn no_gravity_keeps_the_cloth_still() {
     let mut params = SimParams {
         gravity: Vec3::ZERO,
@@ -284,7 +276,6 @@ fn no_gravity_keeps_the_cloth_still() {
 }
 
 #[test]
-#[ignore = "M2b: needs the user's kernels"]
 fn plane_holds_the_cloth_at_the_collision_margin() {
     let mut params = SimParams::default();
     // the sheet is rotated into the x-z plane and lifted clear of the floor, so it falls flat
@@ -312,7 +303,6 @@ fn plane_holds_the_cloth_at_the_collision_margin() {
 /// the collision pass, so a particle can be pulled back inside; the kernel contract is only about
 /// the push itself.
 #[test]
-#[ignore = "M2b: needs the user's kernels"]
 fn sphere_push_out_is_radial() {
     let center = Vec3::new(0.0, -0.5, 0.0);
     let radius = 0.5;
@@ -354,7 +344,6 @@ fn sphere_push_out_is_radial() {
 }
 
 #[test]
-#[ignore = "M2b: needs the user's kernels"]
 fn max_speed_clamps_the_velocity() {
     let mut params = SimParams {
         num_substeps: 1,
@@ -382,7 +371,6 @@ fn max_speed_clamps_the_velocity() {
 
 /// the threshold is a guess: record the deviations and tighten it later.
 #[test]
-#[ignore = "M2b: needs the user's kernels"]
 fn substeps_barely_change_the_result() {
     let mut results = Vec::new();
 
@@ -448,7 +436,6 @@ fn substeps_barely_change_the_result() {
 /// the corner is pinned by a zero rest distance (`inv_mass == 0`), so the chain hangs on its
 /// stretch lengths.
 #[test]
-#[ignore = "M2b: needs the user's kernels"]
 fn a_pinned_corner_hangs_at_the_rest_length() {
     let mut params = SimParams::default();
     let mut solver = cloth(1, &mut params, Mat4::IDENTITY, &[0]);
