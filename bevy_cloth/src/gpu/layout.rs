@@ -46,6 +46,8 @@ pub struct GpuParams {
     pub substep_time: f32,
     pub max_speed: f32,
     pub damping: f32,
+    pub relaxation_factor: f32,
+    pub pad: [f32; 3],
 }
 
 impl GpuParams {
@@ -56,6 +58,8 @@ impl GpuParams {
             substep_time,
             max_speed: params.max_speed,
             damping: params.damping,
+            relaxation_factor: params.relaxation_factor,
+            pad: [0.0; 3],
         }
     }
 }

@@ -6,4 +6,4 @@ pub mod solver_gpu;
 
 pub use layout::GpuParams;
 pub use pipeline::{SolverPipeline, WORKGROUP_SIZE};
-pub use solver_gpu::{SolverGpuPlugin, V1Report, V1ResultSlot};
+pub use solver_gpu::{SolverGpuPlugin, SolverReport, SolverResultSlot};

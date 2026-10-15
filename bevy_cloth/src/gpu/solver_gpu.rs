@@ -1,5 +1,5 @@
-//! gpu solver v1 (plan.org M6): upload the particle arrays, run the `predict`/`finalize` phases,
-//! read the result back and compare it with the cpu reference, all headless.
+//! gpu solver (plan.org M6): upload the particle and stretch-incidence arrays, run the phase
+//! schedule headless, read the result back and compare it with the cpu reference.
 
 use std::sync::{Arc, Mutex};
 
@@ -20,7 +20,7 @@ use glam::{Mat4, Vec3};
 use crate::{
     gpu::{
         layout::{GpuParams, GpuVec3, pack_vec3, unpack_vec3},
-        pipeline::{SolverPipeline, WORKGROUP_SIZE},
+        pipeline::{SolverPipeline, WORKGROUP_SIZE, binding},
     },
     sim::{mesh_gen::generate_cloth_mesh, params::SimParams, solver::Solver},
 };
@@ -30,51 +30,98 @@ const DT: f32 = 1.0 / 60.0;
 const RES: u32 = 16;
 const STEPS: u32 = 60;
 const SUBSTEPS: u32 = 2;
+const ITERATIONS: u32 = 4;
+/// the four grid corners, pinned so gravity actually loads the stretch constraints.
+const CORNERS: [u32; 4] = [0, RES, RES * (RES + 1), RES * (RES + 1) + RES];
 
-/// the v1 result, shared with the main world so its `Update` system can log it and exit.
+/// the compare result, shared with the main world so its `Update` system can log it and exit.
 #[derive(Resource, Clone, Default)]
-pub struct V1ResultSlot(pub Arc<Mutex<Option<V1Report>>>);
+pub struct SolverResultSlot(pub Arc<Mutex<Option<SolverReport>>>);
 
 #[derive(Clone, Copy, Debug)]
-pub struct V1Report {
+pub struct SolverReport {
     pub num_particles: u32,
     pub steps: u32,
+    pub iterations: u32,
     pub max_position_diff: f32,
     pub max_velocity_diff: f32,
 }
 
-struct V1Buffers {
+struct SolverBuffers {
     positions: Buffer,
     velocities: Buffer,
-    // not read back in v1, but the solver owns them for the bind group
+    // only read back for `positions` / `velocities`; the rest are bound and owned here
     _predicted: Buffer,
+    _deltas: Buffer,
+    _delta_counts: Buffer,
+    _inv_masses: Buffer,
+    _stretch_inc_offsets: Buffer,
+    _stretch_inc_other: Buffer,
+    _stretch_inc_rest: Buffer,
     _params: Buffer,
-    bind_group: BindGroup,
+    particle_bind_group: BindGroup,
+    constraint_bind_group: BindGroup,
     reference_positions: Vec<Vec3>,
     reference_velocities: Vec<Vec3>,
     num_particles: u32,
 }
 
-pub struct SolverGpuPlugin;
+/// per-particle incidence into the stretch constraints: `other` is the far endpoint and `rest` its
+/// rest length. built in constraint order so a particle's gather order matches the cpu scatter.
+struct StretchCsr {
+    offsets: Vec<u32>,
+    other: Vec<u32>,
+    rest: Vec<f32>,
+}
 
-impl Plugin for SolverGpuPlugin {
-    fn build(&self, app: &mut App) {
-        embedded_asset!(app, "solver.wesl");
-        app.init_resource::<V1ResultSlot>();
+fn build_stretch_csr(solver: &Solver) -> StretchCsr {
+    let num_particles = solver.num_particles();
+    let stretch = &solver.constraints.stretch;
 
-        let slot = app.world().resource::<V1ResultSlot>().clone();
-        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.insert_resource(slot);
-            render_app.add_systems(Render, run_v1);
+    let mut offsets = vec![0u32; num_particles + 1];
+    for pair in &stretch.indices {
+        offsets[pair[0] as usize + 1] += 1;
+        offsets[pair[1] as usize + 1] += 1;
+    }
+    for i in 0..num_particles {
+        offsets[i + 1] += offsets[i];
+    }
+
+    let mut cursor = offsets.clone();
+    let mut other = vec![0u32; 2 * stretch.indices.len()];
+    let mut rest = vec![0.0f32; 2 * stretch.indices.len()];
+    for (constraint, pair) in stretch.indices.iter().enumerate() {
+        for (self_id, other_id) in [(pair[0], pair[1]), (pair[1], pair[0])] {
+            let slot = cursor[self_id as usize] as usize;
+            other[slot] = other_id;
+            rest[slot] = stretch.lengths[constraint];
+            cursor[self_id as usize] += 1;
         }
     }
 
-    fn finish(&self, app: &mut App) {
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-        render_app.init_resource::<SolverPipeline>();
+    StretchCsr {
+        offsets,
+        other,
+        rest,
     }
+}
+
+fn storage_buffer(
+    device: &RenderDevice,
+    queue: &RenderQueue,
+    label: &'static str,
+    bytes: &[u8],
+) -> Buffer {
+    let buffer = device.create_buffer(&BufferDescriptor {
+        label: Some(label),
+        size: (bytes.len() as u64).max(4),
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+    if !bytes.is_empty() {
+        queue.write_buffer(&buffer, 0, bytes);
+    }
+    buffer
 }
 
 fn create_buffers(
@@ -82,10 +129,10 @@ fn create_buffers(
     queue: &RenderQueue,
     cache: &PipelineCache,
     pipeline: &SolverPipeline,
-) -> V1Buffers {
+) -> SolverBuffers {
     let mut params = SimParams {
         num_substeps: SUBSTEPS,
-        num_iterations: 0,
+        num_iterations: ITERATIONS,
         enable_self_collision: false,
         ..default()
     };
@@ -96,45 +143,78 @@ fn create_buffers(
             &mut params,
             &generate_cloth_mesh(RES),
             Mat4::IDENTITY,
-            &[],
+            &CORNERS,
             DT,
         )
         .expect("generated meshes are source-layout grids");
 
+    // the gpu implements stretch only so far, so the reference drops the other constraint tables.
+    // `inv_masses` keeps the pins, which stretch must respect.
     let mut reference = solver.clone();
+    reference.constraints.bend = Default::default();
+    reference.constraints.attach = Default::default();
     for _ in 0..STEPS {
         reference.step(&params, &[], DT);
     }
 
+    let csr = build_stretch_csr(&solver);
     let num_particles = solver.num_particles() as u32;
-    let byte_len = u64::from(num_particles) * size_of::<GpuVec3>() as u64;
+    let zero_vec3 = vec![GpuVec3::default(); solver.num_particles()];
+    let zero_counts = vec![0i32; solver.num_particles()];
 
-    let storage = |label: &str| {
-        device.create_buffer(&BufferDescriptor {
-            label: Some(label),
-            size: byte_len,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        })
-    };
-
-    let positions = storage("cloth positions");
-    let predicted = storage("cloth predicted");
-    let velocities = storage("cloth velocities");
-    queue.write_buffer(
-        &positions,
-        0,
+    let positions = storage_buffer(
+        device,
+        queue,
+        "cloth positions",
         bytemuck::cast_slice(&pack_vec3(&solver.positions)),
     );
-    queue.write_buffer(
-        &predicted,
-        0,
+    let predicted = storage_buffer(
+        device,
+        queue,
+        "cloth predicted",
         bytemuck::cast_slice(&pack_vec3(&solver.predicted)),
     );
-    queue.write_buffer(
-        &velocities,
-        0,
+    let velocities = storage_buffer(
+        device,
+        queue,
+        "cloth velocities",
         bytemuck::cast_slice(&pack_vec3(&solver.velocities)),
+    );
+    let deltas = storage_buffer(
+        device,
+        queue,
+        "cloth deltas",
+        bytemuck::cast_slice(&zero_vec3),
+    );
+    let delta_counts = storage_buffer(
+        device,
+        queue,
+        "cloth delta counts",
+        bytemuck::cast_slice(&zero_counts),
+    );
+    let inv_masses = storage_buffer(
+        device,
+        queue,
+        "cloth inverse masses",
+        bytemuck::cast_slice(&solver.constraints.inv_masses),
+    );
+    let stretch_inc_offsets = storage_buffer(
+        device,
+        queue,
+        "stretch incidence offsets",
+        bytemuck::cast_slice(&csr.offsets),
+    );
+    let stretch_inc_other = storage_buffer(
+        device,
+        queue,
+        "stretch incidence endpoints",
+        bytemuck::cast_slice(&csr.other),
+    );
+    let stretch_inc_rest = storage_buffer(
+        device,
+        queue,
+        "stretch incidence rest lengths",
+        bytemuck::cast_slice(&csr.rest),
     );
 
     let gpu_params = GpuParams::new(&params, params.substep_time(DT));
@@ -146,24 +226,56 @@ fn create_buffers(
     });
     queue.write_buffer(&params_buffer, 0, bytemuck::bytes_of(&gpu_params));
 
-    let layout = cache.get_bind_group_layout(&pipeline.layout);
-    let bind_group = device.create_bind_group(
-        "cloth solver bind group",
-        &layout,
-        &BindGroupEntries::sequential((
-            params_buffer.as_entire_binding(),
-            positions.as_entire_binding(),
-            predicted.as_entire_binding(),
-            velocities.as_entire_binding(),
+    let particle_layout = cache.get_bind_group_layout(&pipeline.particle_layout);
+    let particle_bind_group = device.create_bind_group(
+        "cloth solver particle bind group",
+        &particle_layout,
+        &BindGroupEntries::with_indices((
+            (binding::PARAMS, params_buffer.as_entire_binding()),
+            (binding::POSITIONS, positions.as_entire_binding()),
+            (binding::PREDICTED, predicted.as_entire_binding()),
+            (binding::VELOCITIES, velocities.as_entire_binding()),
         )),
     );
 
-    V1Buffers {
+    let constraint_layout = cache.get_bind_group_layout(&pipeline.constraint_layout);
+    let constraint_bind_group = device.create_bind_group(
+        "cloth solver constraint bind group",
+        &constraint_layout,
+        &BindGroupEntries::with_indices((
+            (binding::PARAMS, params_buffer.as_entire_binding()),
+            (binding::PREDICTED, predicted.as_entire_binding()),
+            (binding::DELTAS, deltas.as_entire_binding()),
+            (binding::DELTA_COUNTS, delta_counts.as_entire_binding()),
+            (binding::INV_MASSES, inv_masses.as_entire_binding()),
+            (
+                binding::STRETCH_INC_OFFSETS,
+                stretch_inc_offsets.as_entire_binding(),
+            ),
+            (
+                binding::STRETCH_INC_OTHER,
+                stretch_inc_other.as_entire_binding(),
+            ),
+            (
+                binding::STRETCH_INC_REST,
+                stretch_inc_rest.as_entire_binding(),
+            ),
+        )),
+    );
+
+    SolverBuffers {
         positions,
         velocities,
         _predicted: predicted,
+        _deltas: deltas,
+        _delta_counts: delta_counts,
+        _inv_masses: inv_masses,
+        _stretch_inc_offsets: stretch_inc_offsets,
+        _stretch_inc_other: stretch_inc_other,
+        _stretch_inc_rest: stretch_inc_rest,
         _params: params_buffer,
-        bind_group,
+        particle_bind_group,
+        constraint_bind_group,
         reference_positions: reference.positions,
         reference_velocities: reference.velocities,
         num_particles,
@@ -211,15 +323,37 @@ fn max_difference(a: &[Vec3], b: &[Vec3]) -> f32 {
         .fold(0.0, f32::max)
 }
 
-fn run_v1(
-    mut buffers: Local<Option<V1Buffers>>,
+pub struct SolverGpuPlugin;
+
+impl Plugin for SolverGpuPlugin {
+    fn build(&self, app: &mut App) {
+        embedded_asset!(app, "solver.wesl");
+        app.init_resource::<SolverResultSlot>();
+
+        let slot = app.world().resource::<SolverResultSlot>().clone();
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app.insert_resource(slot);
+            render_app.add_systems(Render, run_solver);
+        }
+    }
+
+    fn finish(&self, app: &mut App) {
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+        render_app.init_resource::<SolverPipeline>();
+    }
+}
+
+fn run_solver(
+    mut buffers: Local<Option<SolverBuffers>>,
     pipeline: Res<SolverPipeline>,
     cache: Res<PipelineCache>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
-    slot: Res<V1ResultSlot>,
+    slot: Res<SolverResultSlot>,
 ) {
-    if slot.0.lock().expect("v1 result slot").is_some() {
+    if slot.0.lock().expect("solver result slot").is_some() {
         return;
     }
 
@@ -228,24 +362,40 @@ fn run_v1(
     let Some(predict) = cache.get_compute_pipeline(pipeline.predict()) else {
         return;
     };
+    let Some(solve_stretch) = cache.get_compute_pipeline(pipeline.solve_stretch()) else {
+        return;
+    };
+    let Some(apply_deltas) = cache.get_compute_pipeline(pipeline.apply_deltas()) else {
+        return;
+    };
     let Some(finalize) = cache.get_compute_pipeline(pipeline.finalize()) else {
         return;
     };
 
     let groups = buffers.num_particles.div_ceil(WORKGROUP_SIZE);
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
-        label: Some("cloth solver v1"),
+        label: Some("cloth solver"),
     });
     {
         let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("cloth solver v1"),
+            label: Some("cloth solver"),
             timestamp_writes: None,
         });
-        pass.set_bind_group(0, &buffers.bind_group, &[]);
         for _ in 0..STEPS {
             for _ in 0..SUBSTEPS {
+                pass.set_bind_group(0, &buffers.particle_bind_group, &[]);
                 pass.set_pipeline(predict);
                 pass.dispatch_workgroups(groups, 1, 1);
+
+                pass.set_bind_group(0, &buffers.constraint_bind_group, &[]);
+                for _ in 0..ITERATIONS {
+                    pass.set_pipeline(solve_stretch);
+                    pass.dispatch_workgroups(groups, 1, 1);
+                    pass.set_pipeline(apply_deltas);
+                    pass.dispatch_workgroups(groups, 1, 1);
+                }
+
+                pass.set_bind_group(0, &buffers.particle_bind_group, &[]);
                 pass.set_pipeline(finalize);
                 pass.dispatch_workgroups(groups, 1, 1);
             }
@@ -256,11 +406,12 @@ fn run_v1(
     let gpu_positions = read_vec3(&device, &queue, &buffers.positions, buffers.num_particles);
     let gpu_velocities = read_vec3(&device, &queue, &buffers.velocities, buffers.num_particles);
 
-    let report = V1Report {
+    let report = SolverReport {
         num_particles: buffers.num_particles,
         steps: STEPS,
+        iterations: ITERATIONS,
         max_position_diff: max_difference(&gpu_positions, &buffers.reference_positions),
         max_velocity_diff: max_difference(&gpu_velocities, &buffers.reference_velocities),
     };
-    *slot.0.lock().expect("v1 result slot") = Some(report);
+    *slot.0.lock().expect("solver result slot") = Some(report);
 }

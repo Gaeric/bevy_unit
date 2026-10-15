@@ -1,4 +1,4 @@
-//! m6 v1: headless run of the `predict`/`finalize` gpu phases against the cpu reference.
+//! m6: headless run of the gpu solver phases against the cpu reference.
 
 use std::time::Duration;
 
@@ -8,7 +8,7 @@ use bevy::{
     window::{ExitCondition, WindowPlugin},
     winit::WinitPlugin,
 };
-use bevy_cloth::gpu::{SolverGpuPlugin, V1ResultSlot};
+use bevy_cloth::gpu::{SolverGpuPlugin, SolverResultSlot};
 
 fn main() {
     App::new()
@@ -30,8 +30,8 @@ fn main() {
         .run();
 }
 
-fn report_and_exit(slot: Res<V1ResultSlot>, mut exit: MessageWriter<AppExit>) {
-    let Some(report) = *slot.0.lock().expect("v1 result slot") else {
+fn report_and_exit(slot: Res<SolverResultSlot>, mut exit: MessageWriter<AppExit>) {
+    let Some(report) = *slot.0.lock().expect("solver result slot") else {
         return;
     };
 
