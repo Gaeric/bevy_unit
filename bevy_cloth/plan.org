@@ -15,6 +15,11 @@
   2. **正确性优先**：P0 是纯 Rust CPU 求解器，行为与源工程一致；P1（WGSL compute）后置，不阻塞 P0。
   3. **一次只动一个变量**：先用 =res=16= 的 =Cloth/Collision= 把整条链路（计时 → 求解 → 写回 → 渲染）
      跑对，再放分辨率、再放参数、最后铺 7 个场景。
+  4. **测试必须限并发（硬约束，agent/AI 一律遵守）**：本 workspace 构建 Bevy 依赖时，裸 =cargo test=
+     会用满核并行编译 + 链接，**撑爆内存**。因此任何测试执行都必须带 =-j 2=：
+     - 单 crate：=cargo test -j 2 -p bevy_cloth=
+     - 工作区：=cargo test --workspace -j 2=
+     **不要执行不带 =-j 2= 的 =cargo test=**（包括自动化脚本、验收命令）。见 §7。
 
 ** agent / user 分工速查
    | 部分                                            | 谁做     | 出处                          |
@@ -216,7 +221,7 @@
      ├─ hash.rs                 // 与暴力 O(n²) 邻居表比对
      └─ solver_smoke.rs         // 无重力静止、自由落体、maxSpeed clamp、子步无关性
    #+end_src
-   =sim/= 不依赖任何 bevy crate（用 =glam=），保证 =cargo test -p bevy_cloth= 能在无 GPU/window 的环境下跑
+   =sim/= 不依赖任何 bevy crate（用 =glam=），保证 =cargo test -j 2 -p bevy_cloth= 能在无 GPU/window 的环境下跑
    （这也是将来接 avian 的前提，见 §8）。
 
 ** 2.2 Bevy 0.20 已核实的 API 事实与坑（本 workspace 源码为准，=../bevy_engines/bevy_0.20/=）
@@ -272,7 +277,7 @@
      - [x] stretch rest length == 世界坐标距离；LRA =attach_distances[i] == |slot - p_i|=
      - [x] 吸附点 =rest_distance == 0= → =inv_masses[i] == 0=
      - [x] 网格不变量：面积 4.0、周长 8.0、法线全 +Z
-   - 验收：=cargo test -p bevy_cloth= 通过。
+   - 验收：=cargo test -j 2 -p bevy_cloth= 通过。
    - 落地情况（[AGENT] 已完成，14 个测试全绿）：
      - =src/sim/mesh_gen.rs=：=generate_cloth_mesh / bake_transform / collect_original_positions /
        particle_diameter_from_first_edge / validate_cloth_grid / grid_res=。
@@ -296,7 +301,7 @@
      - [ ] 无重力无碰撞：1 步后 =predicted == positions=，速度不变
      - [ ] 有重力：自由落体 y 位移 == ½ g t²（±1e-4）——验证 =dt= 与循环次数接线正确
      - [ ] =num_substeps= 变化时 =Finalize= 的位移与速度仍连续
-   - 验收：=cargo test -p bevy_cloth=；未实现的 =todo!()= 用 =#[ignore]= 或 =cfg(feature = "solver-wip")= 隔开，保持 test 绿。
+   - 验收：=cargo test -j 2 -p bevy_cloth=；未实现的 =todo!()= 用 =#[ignore]= 或 =cfg(feature = "solver-wip")= 隔开，保持 test 绿。
 
 ** TODO M2b — 求解核心实现 [USER]（红线：agent 不得代写）
    - 由用户本人实现（=../Velvet/AGENTS.md= §0）：Predict、SolveStretch（relaxationFactor/damping）、
@@ -404,7 +409,8 @@
    - 验收：同场景同参数与 CPU 版视觉一致；=res=200= 可交互（目标 ≥30 FPS）。
 
 ** TODO M7 — 打磨 / DoD
-   - [ ] =cargo fmt --all= / =cargo clippy --workspace --all-targets= 零告警 / =cargo test --workspace= 绿
+   - [ ] =cargo fmt --all= / =cargo clippy --workspace --all-targets= 零告警 / =cargo test --workspace -j 2= 绿
+        （测试必须带 =-j 2=，见 §7）
    - [ ] =readme.org= 写清：复现命令、与源工程的差异清单（含 §0 的路径偏差、场景 3 的 substeps=8 等）、截图
    - [ ] 同步 =../Velvet/AGENTS.md= §6（路径）与 §8（当前状态）
    - [ ] 清理未使用依赖与临时代码
@@ -430,7 +436,7 @@
   | 16 | 固定 dt 来源 | 用 =Time<Fixed>::delta_secs()=，不要用 =Time::delta_secs()=（源 =Timer::fixedDeltaTime=） |
 
 * 5. 验证方法
-** 5.1 单元测试（=cargo test -p bevy_cloth=）
+** 5.1 单元测试（=cargo test -j 2 -p bevy_cloth=）
    - 网格/约束：计数、rest length、LRA 距离、=inv_mass= 硬约束、索引转置的手算样例
    - 求解：两粒子解析解、自由落体、maxSpeed clamp、Plane/Sphere SDF 静止高度与推出方向、子步无关性
    - 哈希：随机点集与暴力 O(n²) 邻居表逐条对齐（源 =SpatialHashGPU::Test= 的等价物，含 falsePositive/Negative 报告）
@@ -460,11 +466,13 @@
   | 源工程 spec 本身有坑（=Debug quad=、=Timer=、=IntCoord= 用 =int=） | 不迁移 debug quad/timer；=ComputeIntCoord= 的 =int= 语义在 Rust 里显式 =i32= + 溢出处理 |
 
 * 7. 命令速查
+  **硬约束：测试一律 =-j 2=**。裸 =cargo test= 会满核并行编译/链接 Bevy 依赖 → 撑爆内存。
+  单 crate 用 =cargo test -j 2 -p bevy_cloth=，工作区用 =cargo test --workspace -j 2=。
   #+begin_src bash
     # 前置：../bevy_engines/bevy_0.20/（root Cargo.toml 的 patch 目标）必须存在
     cargo check -p bevy_cloth --all-targets
-    cargo test  -p bevy_cloth                     # sim/ 单测（无需 GPU）
-    cargo test  -p bevy_cloth solver_smoke -- --nocapture
+    cargo test  -j 2 -p bevy_cloth                # sim/ 单测（无需 GPU）；-j 2 必带
+    cargo test  -j 2 -p bevy_cloth solver_smoke -- --nocapture
     cargo clippy -p bevy_cloth --all-targets
     cargo fmt --all
 
