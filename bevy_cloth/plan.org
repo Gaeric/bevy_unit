@@ -8,6 +8,9 @@
 按什么顺序做、每步交付什么、怎么验收。规格与红线见 =../Velvet/AGENTS.md=（源真相地图 + §3 移植规格 +
 §4 任务分解 + §5 移植正确性清单），本文件不重复推导，只补「落到本 workspace 该怎么做」。
 
+**先读根 =../AGENTS.md=**：命令约定（=Commands=）、代码风格（=Style=）、改动流程（=Workflow=）以它为准，
+本文件不重复；=plan.org= 只写本 crate 的落地细节与源工程对照。执行任何 =cargo= 命令或改文件前，先看 =../AGENTS.md=。
+
 * 原则（按优先级）
   1. **红线：求解器核心由用户亲手写**（=../Velvet/AGENTS.md= §0）。本文件里求解算法实现一律标 =[USER]=；
      agent 只做骨架 / 场景 / 渲染写回 / UI / 网格与约束生成接线 / 测试脚手架 / 文档 / 评审。
@@ -466,7 +469,8 @@
   | 源工程 spec 本身有坑（=Debug quad=、=Timer=、=IntCoord= 用 =int=） | 不迁移 debug quad/timer；=ComputeIntCoord= 的 =int= 语义在 Rust 里显式 =i32= + 溢出处理 |
 
 * 7. 命令速查
-  **硬约束：测试一律 =-j 2=**。裸 =cargo test= 会满核并行编译/链接 Bevy 依赖 → 撑爆内存。
+  **硬约束：测试一律 =-j 2=**（同根 =../AGENTS.md= 的 =Commands= 一节；执行前先看 =../AGENTS.md=）。
+  裸 =cargo test= 会满核并行编译/链接 Bevy 依赖 → 撑爆内存。
   单 crate 用 =cargo test -j 2 -p bevy_cloth=，工作区用 =cargo test --workspace -j 2=。
   #+begin_src bash
     # 前置：../bevy_engines/bevy_0.20/（root Cargo.toml 的 patch 目标）必须存在
