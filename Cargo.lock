@@ -1132,6 +1132,7 @@ name = "bevy_cloth"
 version = "0.1.0"
 dependencies = [
  "bevy 0.20.0",
+ "bytemuck",
  "glam 0.33.12",
  "rand 0.10.3",
 ]

@@ -1,0 +1,108 @@
+#+title: bevy_cloth M6 — WGSL compute 求解器（对照 Velvet GPU 实现）
+#+startup: content
+#+OPTIONS: ^:{}
+
+M6 开工前对源工程 **GPU（CUDA）** 实现的观察，作为移植基准。里程碑定义见 =plan.org= §M6。
+
+原则：**以 Velvet 的 GPU 实现为准**，不以本 crate 的 CPU 版为准——GPU 特有的工程问题（atomic 累计、
+排序、memset、内存布局）源工程已经解决，照搬其结构可以少踩一遍坑。数据正确性可以晚些再校正，
+当前阶段先把"流程结构"做对。
+
+源文件（只读）：=../Velvet/Velvet/VtClothSolverGPU.hpp/.cu/.cuh=、=SpatialHashGPU.hpp/.cu/.cuh=、
+=Common.cuh/.hpp=、=VtBuffer.hpp=。
+
+* 1. 执行模型
+
+  - **一 phase 一个 kernel**，全在默认 stream 顺序发射 → **kernel 边界即全局同步**
+    （对应 bevy_cloth 侧"一 phase 一个 compute dispatch"）。
+  - =Common.cuh=：=BLOCK_SIZE = 256=；=ComputeGridSize(n)= 取 =threads = min(n, 256)=、
+    =blocks = ceil(n/threads)=；**一维**网格。
+  - 参数走 **constant memory**：=__constant__ VtSimParams d_params=，每步 =SetSimulationParams()= 里
+    =cudaMemcpyToSymbolAsync= 一次；**哈希另有一份独立的 =__constant__ HashParams d_params=**
+    （=SpatialHashGPU.cu=，独立翻译单元）。
+  - =substepTime= / =deltaTime= 是作为 **kernel 实参**逐个传的，不在 =VtSimParams= 里。
+  - =Simulate()= 末尾一次 =cudaDeviceSynchronize()=，随后 =positions.sync()/normals.sync()=
+    把结果拷回 GL VBO —— **渲染直接读求解器写的同一块内存**。
+
+* 2. 传递的数据
+
+  | 类别 | buffer | 元素类型 | 备注 |
+  |------+--------+----------+------|
+  | 粒子 | =positions= / =normals= | =vec3= | =VtMergedBuffer=，与 GL VBO 互操作 |
+  | 粒子 | =velocities= / =predicted= / =deltas= | =vec3= | |
+  | 粒子 | =deltaCounts= | =int= | Jacobi 计数 |
+  | 粒子 | =invMasses= | =float= | 硬吸附点置 0 |
+  | 约束 | =indices= | =uint=，3/三角形 | ComputeNormal 用 |
+  | 约束 | =stretchIndices=(2/条) / =stretchLengths= | =int= / =float= | |
+  | 约束 | =bendIndices=(4/条) / =bendAngles= | =uint= / =float= | |
+  | 约束 | =attachParticleIDs= / =attachSlotIDs= / =attachDistances= | =int=/=int=/=float= | |
+  | 约束 | =attachSlotPositions= | =vec3= | Swirl 场景每帧被外部改写 |
+  | 碰撞器 | =sdfColliders= | =SDFCollider= | 见下 |
+  | 哈希 | =initialPositions= | =vec3= | 仅用于 collision filtering |
+  | 哈希 | =particleHash= / =particleIndex= / =cellStart= / =cellEnd= / =neighbors= | =uint= | |
+  | 参数 | =VtSimParams= | constant | 所有求解 kernel |
+  | 参数 | =HashParams= | constant | 哈希 kernel；=numObjects/maxNumNeighbors/cellSpacing/cellSpacing2/tableSize/particleDiameter2= |
+
+  =SDFCollider=（=VtClothSolverGPU.cuh:8=）：
+  =type=、=vec3 position=、=vec3 scale=、=float deltaTime=、=mat3 curTransform=、
+  =mat4 invCurTransform=、=mat4 lastTransform=。
+
+* 3. Velvet 的 GPU 工程点（标注移植策略）
+
+  1. **scatter + 浮点 atomic**：=SolveStretch/Bending/Attachment=、=CollideParticles=、
+     =ComputeTriangleNormals= 都用 =atomicAdd= 把修正量散加到 =deltas[idx]= / =normals[idx]=，
+     并用 =atomicAdd(&deltaCounts[idx], 1)= 计数；这是源工程绕开"每粒子邻接关系"的手段。
+     **不移植**：标准 WebGPU 无浮点 atomic（见 §5），这几处改 gather。
+  2. =AtomicAdd(deltas, idx, val, reorder)=（.cu:13）用 =reorder = idx1+idx2= 对 x/y/z 做
+     **轮换加法顺序**，减少热点串行。**仅记录**：gather 化后不存在写冲突。
+  3. **法线两步**（.cu:452）=cudaMemsetAsync(normals, 0)= → 三角形 atomic 累加 →
+     单独 =ComputeVertexNormals= 归一化（归一化**无保护**，孤立粒子会 NaN，与 CPU 版一致）。
+     **不移植**：改"每顶点 gather 相邻三角形"，memset 那步也省掉。
+  4. =CollideParticles= 的 wrapper **内部顺带调 =ApplyDeltas_Kernel=**（.cu:384）。
+  5. **哈希四步**（=SpatialHashGPU.cu:159=）：=ComputeParticleHash= → **cub 基数排序** →
+     =FindCellStart=（共享内存）→ =CacheNeighbors=。邻居表 =neighbors[id + n*slot]=、
+     哨兵 =0xffffffff=；=cellStart= 用 =0xffffffff= 清空（=cudaMemsetAsync(cellStart, 0xffffffff, ...)=）。
+     **排序不移植**（cub 无对应物）：自写 bitonic sort，或换不需要排序的哈希方案。
+  6. **collision filtering**（.cu:116）：初始距离 ≤ =particleDiameter²= 的对直接跳过自碰撞。照搬。
+
+* 4. 每 phase 的 buffer 进出（作为 bind group layout 依据）
+
+  | phase | 读 | 写 |
+  |-------+----+----|
+  | InitializePositions | =positions= | =positions= |
+  | PredictPositions | =positions=、=velocities= | =velocities=、=predicted= |
+  | SolveStretch | =predicted=、=invMasses=、=stretchIndices/Lengths= | =deltas=、=deltaCounts= |
+  | SolveBending | =predicted=、=invMasses=、=bendIndices/Angles= | =deltas=、=deltaCounts= |
+  | SolveAttachment | =predicted=、=invMasses=、=attach*= | =deltas=、=deltaCounts= |
+  | ApplyDeltas | =deltaCounts= | =predicted=、=deltas=、=deltaCounts= |
+  | CollideSDF | =positions=、=sdfColliders= | =predicted= |
+  | CollideParticles | =predicted=、=invMasses=、=neighbors=、=positions= | =deltas=、=deltaCounts=、=predicted= |
+  | Finalize | =predicted=、=positions= | =velocities=、=positions= |
+  | ComputeNormal | =positions=、=indices= | =normals= |
+  | ComputeParticleHash | =positions= | =particleHash=、=particleIndex= |
+  | Sort | =particleHash=、=particleIndex= | 同左 |
+  | FindCellStart | =particleHash= | =cellStart=、=cellEnd= |
+  | CacheNeighbors | =particleIndex=、=cellStart=、=cellEnd=、=positions=、=initialPositions= | =neighbors= |
+
+* 5. 映射到 WGSL：能对上 / 必须另想办法
+
+  **能直接对上**：per-phase dispatch、=@workgroup_size(256)=、constant→uniform、
+  =neighbors[id+n*slot]=、哨兵 =0xffffffff=、=SDFCollider=（mat3/mat4 → mat3x3/mat4x4）。
+
+  **坑**：
+
+  | 坑 | 现状 | 备选 |
+  |----+------+------|
+  | **浮点 atomic** | 标准 WebGPU 的 =atomic= 只有 =i32/u32=；浮点 atomic 属扩展（wgpu 的 =SHADER_FLOAT32_ATOMIC=），**本项目不使用** | =Solve*= 与法线改 **gather**：每粒子/顶点一条线程遍历自己的入射约束/三角形，零原子 |
+  | **cub 基数排序** | WGSL 无现成排序 | 自写 bitonic sort，或换哈希方案（桶计数 / 不排序） |
+  | **=cudaMemset=** | wgpu =clear_buffer= 只写 0 | =cellStart=0xffffffff= 需专门填充 kernel |
+  | **绑定上限** | 8 storage/stage（默认 limits） | 每 phase 独立 layout，单 phase ≤8（已核对，最多 8） |
+  | **渲染取数** | Velvet 用 CUDA-GL 互操作 | Bevy：readback 到 Mesh，或 M3.5 自定义管线（storage buffer + 顶点着色器直读） |
+
+* 6. 待定与下一步
+
+  1. **为 gather 建入射表**：=stretch= / =bend= 的 per-particle CSR；=vertex→triangle= CSR；
+     attach 可按 =slot*n + p= 推导、不用表。这是 scatter→gather 的代价，属 [AGENT] 边界。
+  2. 用 §4 的表定下每个 phase 的 bind group layout（单 phase ≤ 8 storage）。
+  3. 定排序方案（自写 bitonic vs 换哈希）。
+  4. 只依赖标准 WebGPU 特性与默认 limits，**不请求任何扩展 feature**。

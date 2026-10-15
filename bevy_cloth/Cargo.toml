@@ -14,3 +14,4 @@ bevy = { version = "0.20.0", features = [
 # same version bevy_math use
 glam = "0.33"
 rand = "0.10.0"
+bytemuck = { version = "1", features = ["derive"] }
