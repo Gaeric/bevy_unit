@@ -8,6 +8,7 @@ members = [
         "bevy_shine",
         "bevy_waltz",
         "bevy_cloth",
+        "demos/bevy_deck",
         "demos/hs2_head",
         "units/animation_blending",
         "units/bone_attachments",
@@ -82,11 +83,6 @@ dev = [
         "bevy/bevy_solari",
 ]
 
-
-[dev-dependencies]
-libdeck = { path = "../libdeck/" }
-libdeck_sample = { path = "../libdeck/units/libdeck_sample/" }
-
 # Enable a small amount of optimization in debug mode
 [profile.dev]
 opt-level = 1
@@ -94,7 +90,3 @@ opt-level = 1
 # Enable high optimizations for dependencies (incl. Bevy), but not for our code:
 [profile.dev.package."*"]
 opt-level = 3
-
-[[example]]
-name = "bevy_deck"
-path = "examples/bevy_deck/bevy_deck.rs"

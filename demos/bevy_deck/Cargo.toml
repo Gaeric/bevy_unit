@@ -1,0 +1,25 @@
+[package]
+name = "bevy_deck"
+version = "0.1.1"
+edition = "2024"
+
+# `cargo run -p bevy_deck`.
+
+[dependencies]
+bevy = { version = "0.20.0", features = [
+        "wayland",
+        "dynamic_linking",
+        "hotpatching",
+        "asset_processor",
+        "file_watcher",
+] }
+libdeck = { path = "../../../libdeck/" }
+libdeck_sample = { path = "../../../libdeck/units/libdeck_sample/" }
+
+[features]
+default = ["dev"]
+dev = [
+        "bevy/dynamic_linking",
+        "bevy/bevy_dev_tools",
+        "bevy/bevy_ui_debug",
+]

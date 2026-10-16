@@ -3,7 +3,7 @@
 ## Commands
 - Check/build workspace: `cargo check --workspace` / `cargo build --workspace`
 - Lint: `cargo clippy --workspace --all-targets` · Format: `cargo fmt --all` (verify: `cargo fmt --all --check`)
-- Run example (root package is `bevy_workflow`, Bevy 0.19): `cargo run --example example-bake`; other packages: `cargo run -p bevy_shine --example minimal`; the `hs2_head` demo is its own crate: `cargo run -p hs2_head`
+- Run example (root package is `bevy_workflow`, Bevy 0.19): `cargo run --example example-bake`; other packages: `cargo run -p bevy_shine --example minimal`; the `hs2_head` demo is its own crate: `cargo run -p hs2_head`, and so is the `bevy_deck` demo: `cargo run -p bevy_deck` (it is the only crate depending on the external `../libdeck/`, keeping `libdeck`/`libdeck_sample` out of the root package)
 - Tests: `cargo test --workspace -j 2`; single test: `cargo test -j 2 -p bevy_workflow <test_name> -- --nocapture` (or `cargo test -j 2 <filter>`). Always pass `-j 2`: full-parallel compilation/linking of the Bevy dependency tree otherwise exhausts memory.
 - Bevy is patched to a local engine at `../bevy_engines/bevy_0.20/` via `[patch.crates-io]` in the root `Cargo.toml`; that checkout must exist before any build.
 - Debug perf profiles are preconfigured in root `Cargo.toml` (opt-level 1 for our code, 3 for deps) — don't add per-crate overrides.

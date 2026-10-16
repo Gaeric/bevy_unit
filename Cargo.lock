@@ -1239,6 +1239,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_deck"
+version = "0.1.1"
+dependencies = [
+ "bevy 0.20.0",
+ "libdeck",
+ "libdeck_sample",
+]
+
+[[package]]
 name = "bevy_derive"
 version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3726,8 +3735,6 @@ version = "0.1.1"
 dependencies = [
  "bevy 0.20.0",
  "bevy_waltz",
- "libdeck",
- "libdeck_sample",
  "rand 0.10.3",
  "tracing-appender",
 ]
