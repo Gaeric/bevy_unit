@@ -64,7 +64,7 @@ pub const HEAD_PARAMS: SkinBakeUniform = SkinBakeUniform {
     detail_uv: Vec4::new(120.0, 60.0, 0.0, 0.0),
     eyebrow: Vec4::new(9.0, 4.0, 0.0, 2.0),
     eyebrow_offset: Vec4::new(0.0, 0.0, 0.0, 0.0),
-    eyebrow_color: Vec4::new(0.06573, 0.32796, 0.0, 1.0),
+    eyebrow_color: Vec4::new(0.8, 0.8, 0.8, 1.0),
     gloss: Vec4::new(1.0, 0.75, 0.0, 0.0),
     bump: Vec4::new(1.0, 1.0, 1.0, 0.0),
     bump_gamma: Vec4::new(1.0, 1.592, 1.0, 1.592),

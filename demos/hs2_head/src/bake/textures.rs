@@ -98,6 +98,21 @@ impl TextureSlot {
         }
     }
 
+    /// Clamped linear mask whose placeholder is transparent black.
+    ///
+    /// Masks such as the eyebrow sheet are read through one channel (the skin
+    /// shader uses B as the overlay factor), so the normal-map placeholder of
+    /// [`Self::linear_clamped`] would paint the whole face with the overlay
+    /// color whenever the file is missing.
+    pub const fn linear_clamped_mask(path: &'static str) -> Self {
+        Self {
+            path: Some(Cow::Borrowed(path)),
+            is_srgb: false,
+            address: AddressMode::ClampEdge,
+            placeholder: Placeholder::TransparentBlack,
+        }
+    }
+
     /// Linear image with a path built at runtime; used by materials whose file
     /// name depends on the source asset (hair keeps the original HS2 name).
     pub fn linear_owned(path: String) -> Self {
@@ -218,7 +233,7 @@ pub const HEAD_SKIN: SkinTextureSet = SkinTextureSet {
     main: TextureSlot::srgb("materials/head/cf_m_skin_head_01_MainTex.png"),
     detail: TextureSlot::linear("materials/head/cf_m_skin_head_01_DetailMainTex.png"),
     detail_gloss: TextureSlot::linear("materials/head/cf_m_skin_head_01_DetailGlossMap.png"),
-    eyebrow: TextureSlot::linear_clamped("materials/head/cf_m_skin_head_01_Texture3.png"),
+    eyebrow: TextureSlot::linear_clamped_mask("materials/head/cf_m_skin_head_01_Texture3.png"),
     bump: TextureSlot::linear_clamped("materials/head/cf_m_skin_head_01_BumpMap_converted.png"),
     bump2: TextureSlot::linear_clamped("materials/head/cf_m_skin_head_01_BumpMap2_converted.png"),
     // `SubsurfaceAlbedo` has no local copy; importer.py disconnects the node.
