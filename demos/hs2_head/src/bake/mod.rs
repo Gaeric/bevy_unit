@@ -4,18 +4,20 @@ mod body;
 mod eye;
 mod eyelash;
 mod eyeshadow;
+mod hair;
 mod head;
+mod textures;
 
 pub use body::BodyBake;
 pub use eye::EyeBake;
 pub use eyelash::EyelashBake;
 pub use eyeshadow::EyeshadowBake;
+pub use hair::HairBake;
 pub use head::HeadBake;
 
 use std::{borrow::Cow, marker::PhantomData, sync::Arc};
 
 use bevy::{
-    asset::RenderAssetUsages,
     ecs::system::StaticSystemParam,
     platform::collections::HashMap,
     prelude::*,
@@ -422,25 +424,37 @@ fn save_img(
 
     info!("readback image to cpu");
 
-    let img = Image::new(
-        source.texture_descriptor.size,
-        TextureDimension::D2,
-        event.data.clone(),
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::MAIN_WORLD,
-    );
+    // The readback returns raw texels, so reinterpret them with the output
+    // texture's format before saving. `convert` cannot be used here: it
+    // rejects `Rgba16Float` (the linear color target) and has no `Rgba8Unorm`
+    // arm, so go through `try_into_dynamic` instead.
+    //
+    // Values are written unscaled (no sRGB encode). The Blender reference
+    // renders use the `Raw` view transform, so both sides are comparable.
+    let mut img = source.clone();
+    img.data = Some(event.data.clone());
+
+    // `try_into_dynamic` only knows the sRGB variant of 8-bit RGBA; the bytes
+    // are identical, only the GPU-side decode differs.
+    if img.texture_descriptor.format == TextureFormat::Rgba8Unorm {
+        img.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
+    }
+
+    let Ok(dyn_img) = img.try_into_dynamic() else {
+        warn!(
+            "unsupported bake output format {:?}",
+            source.texture_descriptor.format
+        );
+        return;
+    };
 
     let name = names
         .get(event.entity)
         .map(|n| n.as_str())
         .unwrap_or("bake_output");
 
-    if let Ok(dyn_img) = img.try_into_dynamic() {
-        if let Err(e) = dyn_img.save(format!("{}.png", name)) {
-            warn!("failed to save bake result: {e}");
-        }
-    } else {
-        warn!("try into dynamic failed");
+    if let Err(e) = dyn_img.save(format!("{}.png", name)) {
+        warn!("failed to save bake result: {e}");
     }
 }
 
@@ -582,6 +596,7 @@ impl Plugin for BakeMatPlugin {
             BakeRecipePlugin::<HeadBake>::default(),
             BakeRecipePlugin::<BodyBake>::default(),
             BakeRecipePlugin::<EyeBake>::default(),
+            BakeRecipePlugin::<HairBake>::default(),
         ));
 
         // Debug hotkey: spell out the concrete recipe types since `RecipeMat<R>`
@@ -594,6 +609,7 @@ impl Plugin for BakeMatPlugin {
                 rebake_all_on_r::<HeadBake>,
                 rebake_all_on_r::<BodyBake>,
                 rebake_all_on_r::<EyeBake>,
+                rebake_all_on_r::<HairBake>,
             ),
         );
 
@@ -603,6 +619,7 @@ impl Plugin for BakeMatPlugin {
             register_bake::<HeadBake>(&mut registry, "Head_");
             register_bake::<BodyBake>(&mut registry, "Torso_");
             register_bake::<EyeBake>(&mut registry, "Eyes_");
+            register_bake::<HairBake>(&mut registry, "hair_");
         });
     }
 }

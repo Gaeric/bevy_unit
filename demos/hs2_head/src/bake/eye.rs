@@ -1,16 +1,12 @@
 use bevy::{
     color::{Color, LinearRgba, Srgba},
-    image::{
-        ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerBorderColor,
-        ImageSamplerDescriptor,
-    },
     prelude::*,
     render::render_resource::{AsBindGroup, TextureFormat},
     shader::ShaderRef,
 };
 
 use crate::bake::{
-    BakeChannel, BakeOutputSpec, BakeRecipe, BakedMaterial, MaterialBaker, RecipeMat,
+    BakeChannel, BakeOutputSpec, BakeRecipe, BakedMaterial, MaterialBaker, RecipeMat, textures,
 };
 
 const SIZE: UVec2 = UVec2::new(1024, 1024);
@@ -55,7 +51,7 @@ pub struct EyeBake {
     #[sampler(67, visibility(compute))]
     pupil_texture: Handle<Image>,
 
-    #[storage_texture(68, image_format = Rgba8Unorm, access = ReadWrite)]
+    #[storage_texture(68, image_format = Rgba16Float, access = ReadWrite)]
     output: Handle<Image>,
 
     #[uniform(69)]
@@ -81,7 +77,7 @@ impl BakeRecipe for EyeBake {
     fn output_specs() -> &'static [BakeOutputSpec] {
         &[BakeOutputSpec {
             channel: BakeChannel::BaseColor,
-            format: TextureFormat::Rgba8Unorm,
+            format: TextureFormat::Rgba16Float,
         }]
     }
 
@@ -122,20 +118,11 @@ impl MaterialBaker for EyeBake {
         images: &mut Assets<Image>,
         materials: &mut Assets<StandardMaterial>,
     ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
-        let sclera = asset_server.load::<Image>("materials/c_t_eye_white_01-DXT1.dds");
-        let iris = asset_server.load::<Image>("materials/c_t_eye_00-DXT1.dds");
-        let highlight = asset_server.load::<Image>("materials/c_m_eye_01_Texture4.png");
-        let pupil = asset_server
-            .load_builder()
-            .with_settings(|settings: &mut ImageLoaderSettings| {
-                settings.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-                    address_mode_u: ImageAddressMode::ClampToBorder,
-                    address_mode_v: ImageAddressMode::ClampToBorder,
-                    border_color: Some(ImageSamplerBorderColor::TransparentBlack),
-                    ..default()
-                });
-            })
-            .load("materials/c_m_eye_01_Texture3.png");
+        let set = textures::EYES;
+        let sclera = set.sclera.load(asset_server, images);
+        let iris = set.iris.load(asset_server, images);
+        let highlight = set.highlight.load(asset_server, images);
+        let pupil = set.pupil.load(asset_server, images);
 
         Self::bake(
             vec![sclera, iris, highlight, pupil],

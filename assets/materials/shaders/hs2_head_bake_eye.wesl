@@ -28,7 +28,7 @@ var pupil_texture: texture_2d<f32>;
 var pupil_sampler: sampler;
 
 @group(0) @binding(68)
-var output: texture_storage_2d<rgba8unorm, read_write>;
+var output: texture_storage_2d<rgba16float, read_write>;
 
 @group(0) @binding(69)
 var<uniform> params: EyeBakeParams;

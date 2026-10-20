@@ -1,12 +1,11 @@
 use bevy::{
-    image::ImageLoaderSettings,
     prelude::*,
     render::render_resource::{AsBindGroup, TextureFormat},
     shader::ShaderRef,
 };
 
 use crate::bake::{
-    BakeChannel, BakeOutputSpec, BakeRecipe, BakedMaterial, MaterialBaker, RecipeMat,
+    BakeChannel, BakeOutputSpec, BakeRecipe, BakedMaterial, MaterialBaker, RecipeMat, textures,
 };
 
 const SIZE: UVec2 = UVec2::new(1024, 1024);
@@ -19,7 +18,7 @@ pub struct EyelashBake {
     #[sampler(61, visibility(compute))]
     eyelash_texture: Handle<Image>,
 
-    #[storage_texture(62, image_format = Rgba8Unorm, access = ReadWrite)]
+    #[storage_texture(62, image_format = Rgba16Float, access = ReadWrite)]
     output: Handle<Image>,
 }
 
@@ -42,7 +41,7 @@ impl BakeRecipe for EyelashBake {
     fn output_specs() -> &'static [super::BakeOutputSpec] {
         &[BakeOutputSpec {
             channel: BakeChannel::BaseColor,
-            format: TextureFormat::Rgba8Unorm,
+            format: TextureFormat::Rgba16Float,
         }]
     }
 
@@ -75,12 +74,7 @@ impl MaterialBaker for EyelashBake {
         images: &mut Assets<Image>,
         materials: &mut Assets<StandardMaterial>,
     ) -> (RecipeMat<Self>, BakedMaterial<StandardMaterial>) {
-        let tex = asset_server
-            .load_builder()
-            .with_settings(|settings: &mut ImageLoaderSettings| {
-                settings.is_srgb = true;
-            })
-            .load("materials/c_t_eyelash_04-DXT1.dds");
+        let tex = textures::EYELASH.load(asset_server, images);
 
         Self::bake(vec![tex], (), images, materials, asset_server)
     }

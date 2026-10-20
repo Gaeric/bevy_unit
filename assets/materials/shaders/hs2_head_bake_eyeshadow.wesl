@@ -15,7 +15,7 @@ var eyeshadow_texture: texture_2d<f32>;
 var eyeshadow_sampler: sampler;
 
 @group(0) @binding(62)
-var output: texture_storage_2d<rgba8unorm, read_write>;
+var output: texture_storage_2d<rgba16float, read_write>;
 
 @compute @workgroup_size(8, 8, 1)
 fn bake(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
