@@ -12,7 +12,9 @@ pub use body::BodyBake;
 pub use eye::EyeBake;
 pub use eyelash::EyelashBake;
 pub use eyeshadow::EyeshadowBake;
-pub use hair::HairBake;
+pub use hair::{
+    HairBake, HairBake001, HairBake002, HairBake003, HairBake004, HairBake005, HairBake006,
+};
 pub use head::HeadBake;
 
 use std::{borrow::Cow, marker::PhantomData, sync::Arc};
@@ -597,6 +599,12 @@ impl Plugin for BakeMatPlugin {
             BakeRecipePlugin::<BodyBake>::default(),
             BakeRecipePlugin::<EyeBake>::default(),
             BakeRecipePlugin::<HairBake>::default(),
+            BakeRecipePlugin::<HairBake001>::default(),
+            BakeRecipePlugin::<HairBake002>::default(),
+            BakeRecipePlugin::<HairBake003>::default(),
+            BakeRecipePlugin::<HairBake004>::default(),
+            BakeRecipePlugin::<HairBake005>::default(),
+            BakeRecipePlugin::<HairBake006>::default(),
         ));
 
         // Debug hotkey: spell out the concrete recipe types since `RecipeMat<R>`
@@ -610,6 +618,12 @@ impl Plugin for BakeMatPlugin {
                 rebake_all_on_r::<BodyBake>,
                 rebake_all_on_r::<EyeBake>,
                 rebake_all_on_r::<HairBake>,
+                rebake_all_on_r::<HairBake001>,
+                rebake_all_on_r::<HairBake002>,
+                rebake_all_on_r::<HairBake003>,
+                rebake_all_on_r::<HairBake004>,
+                rebake_all_on_r::<HairBake005>,
+                rebake_all_on_r::<HairBake006>,
             ),
         );
 
@@ -619,7 +633,14 @@ impl Plugin for BakeMatPlugin {
             register_bake::<HeadBake>(&mut registry, "Head_");
             register_bake::<BodyBake>(&mut registry, "Torso_");
             register_bake::<EyeBake>(&mut registry, "Eyes_");
+            // Each hair part is its own material with its own textures.
             register_bake::<HairBake>(&mut registry, "hair_");
+            register_bake::<HairBake001>(&mut registry, "hair_.001");
+            register_bake::<HairBake002>(&mut registry, "hair_.002");
+            register_bake::<HairBake003>(&mut registry, "hair_.003");
+            register_bake::<HairBake004>(&mut registry, "hair_.004");
+            register_bake::<HairBake005>(&mut registry, "hair_.005");
+            register_bake::<HairBake006>(&mut registry, "hair_.006");
         });
     }
 }

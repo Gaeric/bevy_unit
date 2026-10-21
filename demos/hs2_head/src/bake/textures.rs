@@ -19,8 +19,6 @@
 // steps; silence dead-code warnings until every slot is wired up.
 #![allow(dead_code)]
 
-use std::borrow::Cow;
-
 use bevy::{
     asset::RenderAssetUsages,
     image::{
@@ -60,7 +58,7 @@ pub enum Placeholder {
 #[derive(Clone, Debug)]
 pub struct TextureSlot {
     /// `None` means the file is not available yet and a placeholder is used.
-    pub path: Option<Cow<'static, str>>,
+    pub path: Option<&'static str>,
     /// Whether the image is decoded from sRGB (Blender `csp=None`).
     pub is_srgb: bool,
     pub address: AddressMode,
@@ -71,7 +69,7 @@ impl TextureSlot {
     /// sRGB image, tiled - the usual setting for albedo maps.
     pub const fn srgb(path: &'static str) -> Self {
         Self {
-            path: Some(Cow::Borrowed(path)),
+            path: Some(path),
             is_srgb: true,
             address: AddressMode::Repeat,
             placeholder: Placeholder::White,
@@ -81,7 +79,7 @@ impl TextureSlot {
     /// Linear image, tiled - the usual setting for `csp='Non-Color'` maps.
     pub const fn linear(path: &'static str) -> Self {
         Self {
-            path: Some(Cow::Borrowed(path)),
+            path: Some(path),
             is_srgb: false,
             address: AddressMode::Repeat,
             placeholder: Placeholder::White,
@@ -91,7 +89,7 @@ impl TextureSlot {
     /// Linear image clamped to the edge (Blender `EXTEND`).
     pub const fn linear_clamped(path: &'static str) -> Self {
         Self {
-            path: Some(Cow::Borrowed(path)),
+            path: Some(path),
             is_srgb: false,
             address: AddressMode::ClampEdge,
             placeholder: Placeholder::FlatNormal,
@@ -106,38 +104,17 @@ impl TextureSlot {
     /// color whenever the file is missing.
     pub const fn linear_clamped_mask(path: &'static str) -> Self {
         Self {
-            path: Some(Cow::Borrowed(path)),
+            path: Some(path),
             is_srgb: false,
             address: AddressMode::ClampEdge,
             placeholder: Placeholder::TransparentBlack,
         }
     }
 
-    /// Linear image with a path built at runtime; used by materials whose file
-    /// name depends on the source asset (hair keeps the original HS2 name).
-    pub fn linear_owned(path: String) -> Self {
-        Self {
-            path: Some(Cow::Owned(path)),
-            is_srgb: false,
-            address: AddressMode::Repeat,
-            placeholder: Placeholder::White,
-        }
-    }
-
-    /// Clamped variant of [`Self::linear_owned`].
-    pub fn linear_owned_clamped(path: String) -> Self {
-        Self {
-            path: Some(Cow::Owned(path)),
-            is_srgb: false,
-            address: AddressMode::ClampEdge,
-            placeholder: Placeholder::FlatNormal,
-        }
-    }
-
     /// Linear image clamped to a transparent border (Blender `CLIP`).
     pub const fn linear_clipped(path: &'static str) -> Self {
         Self {
-            path: Some(Cow::Borrowed(path)),
+            path: Some(path),
             is_srgb: false,
             address: AddressMode::ClampBorder,
             placeholder: Placeholder::TransparentBlack,
@@ -156,7 +133,7 @@ impl TextureSlot {
 
     /// Load the slot, or return the placeholder when the file is missing.
     pub fn load(&self, asset_server: &AssetServer, images: &mut Assets<Image>) -> Handle<Image> {
-        let Some(path) = self.path.clone() else {
+        let Some(path) = self.path else {
             return placeholder_texture(images, self.placeholder);
         };
 
@@ -169,7 +146,7 @@ impl TextureSlot {
                 settings.is_srgb = is_srgb;
                 settings.sampler = ImageSampler::Descriptor(sampler_descriptor(address));
             })
-            .load(path.into_owned())
+            .load(path)
     }
 }
 
@@ -253,34 +230,58 @@ pub const BODY_SKIN: SkinTextureSet = SkinTextureSet {
 
 /// `hair_*`: the template only reads alpha and the green channel.
 ///
-/// Both files are named after the source material of the hair mesh
-/// (`importer.py` passes `mesh.materials[0].name` to `set_tex`/`set_bump`),
-/// so the paths are built per instance at runtime.
+/// Every hair part is its own material, so each one gets its own set of slots.
+/// The file names have no relation to the glTF material name (`importer.py`
+/// names the textures after the *source* material), so the paths are written
+/// out by hand, per material, like the skin and eye slots.
 pub struct HairTextureSet {
     pub main: TextureSlot,
     pub bump: TextureSlot,
 }
 
-impl HairTextureSet {
-    /// Manifest entry for one hair material; `material` is the original HS2
-    /// material name such as `cf_m_hair_00`.
-    pub fn from_material_name(material: &str) -> Self {
-        Self {
-            main: TextureSlot::linear_owned(format!("materials/hair/{material}_MainTex.png")),
-            bump: TextureSlot::linear_owned_clamped(format!(
-                "materials/hair/{material}_BumpMap_converted.png"
-            )),
-        }
-    }
+/// `hair_` textures. Files not delivered yet; replace each `missing` with
+/// `TextureSlot::linear("materials/hair/<file>.png")` (and `linear_clamped`
+/// for the normal map) once the art is available.
+pub const HAIR_00: HairTextureSet = HairTextureSet {
+    main: TextureSlot::missing(Placeholder::White),
+    bump: TextureSlot::missing(Placeholder::FlatNormal),
+};
 
-    /// Placeholder-only variant used until the hair art is delivered.
-    pub const fn missing() -> Self {
-        Self {
-            main: TextureSlot::missing(Placeholder::White),
-            bump: TextureSlot::missing(Placeholder::FlatNormal),
-        }
-    }
-}
+/// `hair_.001` textures.
+pub const HAIR_01: HairTextureSet = HairTextureSet {
+    main: TextureSlot::missing(Placeholder::White),
+    bump: TextureSlot::missing(Placeholder::FlatNormal),
+};
+
+/// `hair_.002` textures.
+pub const HAIR_02: HairTextureSet = HairTextureSet {
+    main: TextureSlot::missing(Placeholder::White),
+    bump: TextureSlot::missing(Placeholder::FlatNormal),
+};
+
+/// `hair_.003` textures.
+pub const HAIR_03: HairTextureSet = HairTextureSet {
+    main: TextureSlot::missing(Placeholder::White),
+    bump: TextureSlot::missing(Placeholder::FlatNormal),
+};
+
+/// `hair_.004` textures.
+pub const HAIR_04: HairTextureSet = HairTextureSet {
+    main: TextureSlot::missing(Placeholder::White),
+    bump: TextureSlot::missing(Placeholder::FlatNormal),
+};
+
+/// `hair_.005` textures.
+pub const HAIR_05: HairTextureSet = HairTextureSet {
+    main: TextureSlot::missing(Placeholder::White),
+    bump: TextureSlot::missing(Placeholder::FlatNormal),
+};
+
+/// `hair_.006` textures.
+pub const HAIR_06: HairTextureSet = HairTextureSet {
+    main: TextureSlot::missing(Placeholder::White),
+    bump: TextureSlot::missing(Placeholder::FlatNormal),
+};
 
 /// `Eyes_` slots, mapped from the four `Image Texture` nodes.
 pub struct EyeTextureSet {
