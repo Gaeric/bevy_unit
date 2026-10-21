@@ -437,6 +437,12 @@ glTF 材质名 (Head_ / Torso_ / Eyes_ / Eyelashes_ / Eyeshadow_ / hair_)
 base color 用 `Rgba16Float`（线性，避免 8-bit 暗部断层），法线与
 metallic-roughness 用 `Rgba8Unorm`（数据贴图，不能走 sRGB 解码）。
 
+输出图在 dispatch 之前是 `Image::new_target_texture` 的零填充内容，而材质一创建就
+绑定了它——零 alpha 会让 `AlphaMode::Blend` 的部位（hair/eyelash/eyeshadow）整块透明，
+不透明部位则变黑。为此 `BakeRecipe::bake` 用 `fill_neutral()` 预填中性值：base color
+填白（16F 的 `0x3C00`）、法线填 `(128,128,255)`、metallic-roughness 填
+`(AO=255, rough=255, metal=0)`，所以 bake 之前模型就是白模，dispatch 完成后被覆盖。
+
 ### 11.2 绑定布局
 
 | 材质 | 输入 | 输出 |
@@ -487,6 +493,80 @@ hair    = (base_color = hair_color, alpha = tex.a, metallic = tex.g, rough = 0.4
 - `src/bake/hair.rs`：头发
 - `assets/materials/shaders/hs2_head_bake_skin.wesl` / `_hair.wesl`：compute shader
 
+
+## 12. 头发（hair_*）贴图映射
+
+### 12.1 素材：5 组贴图 → 7 个 glTF 材质
+
+`assets/materials/hair/` 里按 MD5 去重后其实只有 **3 套真正不同的像素**：
+
+| 组 | MainTex | BumpMap_converted | 其它 |
+|---|---|---|---|
+| `b_03_00` | `6b6e83…`（= `b_03_01` = `s_04_00`） | `107217…`（同上三家共用） | ColorMask 只有几个像素 |
+| `b_03_01` | 同上 | 同上 | ColorMask `027b95…`；DetailMask/Occlusion 与 b_03_00 相同 |
+| `s_04_00` | 同上 | 同上 | ColorMask 与 b_03_01 相同 |
+| `f_13_00` | `195796…`（独立） | 同上 | ColorMask 独立，另有 `MeshColorMask` |
+| `b_03_acs` | `614699…`（256×256，独立） | `4141fb…`（独立） | 无 ColorMask/DetailMask/Occlusion |
+
+也就是说：**b_03_00 / b_03_01 / s_04_00 对当前模板（只读 MainTex + BumpMap）产出完全相同**，
+真正会改变画面的只有 `f_13_00`（前发）和 `b_03_acs`（配件）两套。
+
+### 12.2 几何判定：哪个 prim 是哪一撮头发
+
+joined 后的网格叫 `cf_O_hairback_03_00`，7 个 prim 各自的包围盒（已换算到头部坐标系，
+`+y` 向上、`+z` 为脸朝前）给出：
+
+| glTF 材质 | 顶点/三角 | 位置特征 | 判定 |
+|---|---|---|---|
+| `hair_` | 2202 / 2485 | 包住颅骨的壳，前后都有 | 后发外层 |
+| `hair_.004` | 2198 / 2484 | 与上一个几乎同拓扑 | 后发内层 |
+| `hair_.003` | 313 / 480 | 头顶后方极小一撮 | 配件发束 |
+| `hair_.001` | 5145 / 5020 | 覆盖整个颅骨的大壳 | 后发帽 |
+| `hair_.002` | 7845 / 7968 | 一直垂到背后的长条 | 后发长发 |
+| `hair_.006` | 1322 / 1800 | 耳侧对称两撮 | 侧发 |
+| `hair_.005` | 5619 / 7094 | z 最靠前、横跨额头 | 前发（刘海） |
+
+### 12.3 落表（`src/bake/textures.rs`）
+
+| Rust 常量 | glTF 材质 | 贴图组 |
+|---|---|---|
+| `HAIR_00` | `hair_` | `b_03_00` |
+| `HAIR_01` | `hair_.001` | `b_03_00` |
+| `HAIR_02` | `hair_.002` | `b_03_01` |
+| `HAIR_03` | `hair_.003` | `b_03_acs` |
+| `HAIR_04` | `hair_.004` | `b_03_01` |
+| `HAIR_05` | `hair_.005` | `f_13_00` |
+| `HAIR_06` | `hair_.006` | `s_04_00` |
+
+去重后 manifest 只引用 **5 个文件**（`b_03_00` 的 MainTex/法线、`f_13_00` 的 MainTex、
+`b_03_acs` 的 MainTex/法线），其余三套共用同一组常量，GPU 上每个唯一像素集只上传一份。
+`b_03_01` / `s_04_00` 的 MainTex 和法线、`f_13_00` 的法线、`Default-Material_MainTex`
+与 `b_03_00` 的文件字节相同，已作为重复文件删除（目录 31 MB → 20 MB）。
+
+加载设置沿用 `importer.py`：
+
+- `MainTex` 用 `set_tex(..., csp='Non-Color')` → `TextureSlot::linear`（Repeat）。
+  它只提供 **alpha 遮罩** 和 **G 通道（metallic）**，颜色来自材质常量。
+- 法线用 `set_bump` → `*_converted`，`TextureSlot::linear_clamped`（Blender `EXTEND`）。
+- 逐通道 gamma 实测（`gamma = -1/log2(median)`）：
+  `b_03_00/b_03_01/f_13_00/s_04_00` 共用 → R **1.006**、G **1.615**（`HAIR_PARAMS`）；
+  `b_03_acs` → R **0.951**、G **1.615**（`HAIR_ACS_PARAMS`）。
+
+### 12.4 模板只消费两张图
+
+`test_hair` 节点树里只有 `Image Texture`（MainTex）和 `Image Texture.001`(bump)；
+`ColorMask` / `DetailMask` / `Occlusion` / `MeshColorMask` 属于游戏内头发着色器，
+当前 Blender 模板没有接口，所以不参与 bake。为避免死素材，这些图已从
+`assets/materials/hair/` 删除（目录 31 MB → 7 MB，只剩 manifest 引用的 5 个文件），
+需要时从 `hs2_blender_export` 的贴图导出重新拷回即可。
+
+### 12.5 一个待核对的现象
+
+把每个 prim 的 UV0 覆盖格子与三套 MainTex 的 alpha 岛做相关，最高只有 ~0.3：
+几何的 UV 是"整块矩形覆盖在发丝图上"，靠 alpha 裁出丝状轮廓，而不是沿发丝条带展开；
+`TEXCOORD_1` 对多数 prim 退化成一条线（`(0,0)-(0,1)`），不是第二套 UV。
+因此贴图对位是否正确，最终要靠参考渲染比对——注意 alpha 遮罩很慢才收边，
+多层壳叠在一起时视觉上容易糊成一片实体（尤其刘海遮住脸）。
 
 ## 执行要求
 1. 不得主动调起任何可能会打开窗口的界面，只有能以headless方式执行的命令才被允许执行

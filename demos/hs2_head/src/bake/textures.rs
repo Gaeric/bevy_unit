@@ -234,53 +234,75 @@ pub const BODY_SKIN: SkinTextureSet = SkinTextureSet {
 /// The file names have no relation to the glTF material name (`importer.py`
 /// names the textures after the *source* material), so the paths are written
 /// out by hand, per material, like the skin and eye slots.
+///
+/// `importer.py` loads the hair `MainTex` with `csp='Non-Color'`, i.e. as
+/// linear data: it only supplies the alpha mask and the green (metallic)
+/// channel, the colour comes from the material constant. The normal map is
+/// the `*_converted` file, exactly like the skin slots.
 pub struct HairTextureSet {
     pub main: TextureSlot,
     pub bump: TextureSlot,
 }
 
-/// `hair_` textures. Files not delivered yet; replace each `missing` with
-/// `TextureSlot::linear("materials/hair/<file>.png")` (and `linear_clamped`
-/// for the normal map) once the art is available.
+// The delivered files are de-duplicated by content: `b_03_00`, `b_03_01` and
+// `s_04_00` `MainTex` share one MD5, and every `*_BumpMap_converted` except the
+// accessory one is the same file. Only these four slots are ever loaded, so the
+// GPU sees one copy per unique pixel set instead of one per material.
+const HAIR_BACK_MAIN: TextureSlot =
+    TextureSlot::linear("materials/hair/hair_material_b_03_00_MainTex.png");
+const HAIR_BACK_BUMP: TextureSlot =
+    TextureSlot::linear_clamped("materials/hair/hair_material_b_03_00_BumpMap_converted.png");
+const HAIR_FRONT_MAIN: TextureSlot =
+    TextureSlot::linear("materials/hair/hair_material_f_13_00_MainTex.png");
+const HAIR_ACS_MAIN: TextureSlot =
+    TextureSlot::linear("materials/hair/hair_material_b_03_acs_MainTex.png");
+const HAIR_ACS_BUMP: TextureSlot =
+    TextureSlot::linear_clamped("materials/hair/hair_material_b_03_acs_BumpMap_converted.png");
+
+/// `hair_`: outer back-hair shell around the skull.
 pub const HAIR_00: HairTextureSet = HairTextureSet {
-    main: TextureSlot::missing(Placeholder::White),
-    bump: TextureSlot::missing(Placeholder::FlatNormal),
+    main: HAIR_BACK_MAIN,
+    bump: HAIR_BACK_BUMP,
 };
 
-/// `hair_.001` textures.
+/// `hair_.001`: back-hair cap covering the whole skull.
 pub const HAIR_01: HairTextureSet = HairTextureSet {
-    main: TextureSlot::missing(Placeholder::White),
-    bump: TextureSlot::missing(Placeholder::FlatNormal),
+    main: HAIR_BACK_MAIN,
+    bump: HAIR_BACK_BUMP,
 };
 
-/// `hair_.002` textures.
+/// `hair_.002`: long back-hair mass hanging behind the shoulders.
 pub const HAIR_02: HairTextureSet = HairTextureSet {
-    main: TextureSlot::missing(Placeholder::White),
-    bump: TextureSlot::missing(Placeholder::FlatNormal),
+    main: HAIR_BACK_MAIN,
+    bump: HAIR_BACK_BUMP,
 };
 
-/// `hair_.003` textures.
+/// `hair_.003`: small accessory tuft at the crown.
+///
+/// This is the only hair set whose own `MainTex`/normal map differ from the
+/// shared `b_03_00` sheet, and it is also the only one without an alpha mask
+/// (256x256, fully opaque).
 pub const HAIR_03: HairTextureSet = HairTextureSet {
-    main: TextureSlot::missing(Placeholder::White),
-    bump: TextureSlot::missing(Placeholder::FlatNormal),
+    main: HAIR_ACS_MAIN,
+    bump: HAIR_ACS_BUMP,
 };
 
-/// `hair_.004` textures.
+/// `hair_.004`: inner back-hair shell (same topology as `hair_`).
 pub const HAIR_04: HairTextureSet = HairTextureSet {
-    main: TextureSlot::missing(Placeholder::White),
-    bump: TextureSlot::missing(Placeholder::FlatNormal),
+    main: HAIR_BACK_MAIN,
+    bump: HAIR_BACK_BUMP,
 };
 
-/// `hair_.005` textures.
+/// `hair_.005`: front bangs across the forehead.
 pub const HAIR_05: HairTextureSet = HairTextureSet {
-    main: TextureSlot::missing(Placeholder::White),
-    bump: TextureSlot::missing(Placeholder::FlatNormal),
+    main: HAIR_FRONT_MAIN,
+    bump: HAIR_BACK_BUMP,
 };
 
-/// `hair_.006` textures.
+/// `hair_.006`: paired side locks beside the ears.
 pub const HAIR_06: HairTextureSet = HairTextureSet {
-    main: TextureSlot::missing(Placeholder::White),
-    bump: TextureSlot::missing(Placeholder::FlatNormal),
+    main: HAIR_BACK_MAIN,
+    bump: HAIR_BACK_BUMP,
 };
 
 /// `Eyes_` slots, mapped from the four `Image Texture` nodes.

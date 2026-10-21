@@ -108,6 +108,7 @@ pub trait BakeRecipe: AsBindGroup + Send + Sync + Clone + Default + 'static {
                 let mut image = Image::new_target_texture(size.x, size.y, spec.format, None);
                 image.texture_descriptor.usage |= TextureUsages::STORAGE_BINDING;
                 image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+                fill_neutral(&mut image, spec.channel);
                 images.add(image)
             })
             .collect();
@@ -124,6 +125,51 @@ pub trait BakeRecipe: AsBindGroup + Send + Sync + Clone + Default + 'static {
             debug_save: false,
         };
         (recipe_mat, BakedMaterial { material })
+    }
+}
+
+/// Neutral pre-bake content for a freshly allocated output texture.
+///
+/// `Image::new_target_texture` zero-fills the pixels, and the material binds that
+/// texture right away, so an un-baked part would render as black (opaque
+/// materials) or fully transparent (alpha-blended ones such as hair, where the
+/// zero alpha discards everything). Filling the maps with neutral values keeps
+/// the model readable as a white model until the compute pass overwrites them.
+fn fill_neutral(image: &mut Image, channel: BakeChannel) {
+    let Some(data) = image.data.as_mut() else {
+        return;
+    };
+
+    match (image.texture_descriptor.format, channel) {
+        // Linear colour: f16 1.0 is 0x3C00, i.e. the little-endian bytes 00 3C.
+        (TextureFormat::Rgba16Float, BakeChannel::BaseColor) => {
+            data.chunks_mut(2)
+                .for_each(|c| c.copy_from_slice(&[0x00, 0x3C]));
+        }
+        (TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb, BakeChannel::BaseColor) => {
+            data.chunks_mut(4)
+                .for_each(|c| c.copy_from_slice(&[255, 255, 255, 255]));
+        }
+        // Flat tangent-space normal (0.5, 0.5, 1.0), no bump.
+        (TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb, BakeChannel::NormalMap) => {
+            data.chunks_mut(4)
+                .for_each(|c| c.copy_from_slice(&[128, 128, 255, 255]));
+        }
+        // R = ambient occlusion 1, G = roughness 1 (matte), B = metallic 0.
+        (
+            TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb,
+            BakeChannel::MetallicRoughness,
+        ) => {
+            data.chunks_mut(4)
+                .for_each(|c| c.copy_from_slice(&[255, 255, 0, 255]));
+        }
+        // Occlusion-only maps stay opaque white; everything else keeps its zero
+        // fill (emissive, custom channels).
+        (TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb, BakeChannel::Occlusion) => {
+            data.chunks_mut(4)
+                .for_each(|c| c.copy_from_slice(&[255, 255, 255, 255]));
+        }
+        _ => {}
     }
 }
 

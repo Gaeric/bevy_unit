@@ -31,10 +31,47 @@ impl Default for HairBakeUniform {
 /// Shared parameters: roughness is a template constant and the gamma recenters
 /// the `*_converted` normal maps. `hair_color` is the template default; the
 /// importer overwrites it with the character's hair color.
+///
+/// The gamma values are measured the way `importer.py:estimate_bump_gamma`
+/// does it, `gamma = -1 / log2(median)`, on the delivered files:
+/// `b_03_00/b_03_01/f_13_00/s_04_00_BumpMap_converted` share one file
+/// (median R 0.502, G 0.651).
 const HAIR_PARAMS: HairBakeUniform = HairBakeUniform {
     hair_color: Vec4::new(0.698, 0.6039, 0.5537, 1.0),
-    surface: Vec4::new(0.4364, 1.0, 1.592, 0.0),
+    surface: Vec4::new(0.4364, 1.006, 1.615, 0.0),
 };
+
+/// `hair_.003` (`b_03_acs`) uses its own normal map (median R 0.482, G 0.651),
+/// so its red-channel gamma differs from [`HAIR_PARAMS`].
+const HAIR_ACS_PARAMS: HairBakeUniform = HairBakeUniform {
+    hair_color: Vec4::new(0.698, 0.6039, 0.5537, 1.0),
+    surface: Vec4::new(0.4364, 0.951, 1.615, 0.0),
+};
+
+/// `StandardMaterial` shared by all seven hair parts.
+///
+/// The baked base-colour map carries the strand alpha in its alpha channel; the
+/// material blends so the overlapping card shells composite like the Blender
+/// template instead of cutting hard edges.
+fn hair_standard_material(
+    base_color: &Handle<Image>,
+    normal: &Handle<Image>,
+    metallic_roughness: &Handle<Image>,
+) -> StandardMaterial {
+    StandardMaterial {
+        base_color: Color::WHITE,
+        base_color_texture: Some(base_color.clone()),
+        normal_map_texture: Some(normal.clone()),
+        metallic_roughness_texture: Some(metallic_roughness.clone()),
+        perceptual_roughness: 1.0,
+        metallic: 1.0,
+        alpha_mode: AlphaMode::Blend,
+        // Hair cards are single-sided geometry.
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    }
+}
 
 /// `hair_`
 #[derive(Default, Asset, Clone, Reflect, AsBindGroup)]
@@ -114,19 +151,11 @@ impl BakeRecipe for HairBake {
     }
 
     fn material(&self, _asset_server: &AssetServer) -> Self::Output {
-        StandardMaterial {
-            base_color: Color::WHITE,
-            base_color_texture: Some(self.out_base_color.clone()),
-            normal_map_texture: Some(self.out_normal.clone()),
-            metallic_roughness_texture: Some(self.out_metallic_roughness.clone()),
-            perceptual_roughness: 1.0,
-            metallic: 1.0,
-            alpha_mode: AlphaMode::Blend,
-            // Hair cards are single-sided geometry.
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        }
+        hair_standard_material(
+            &self.out_base_color,
+            &self.out_normal,
+            &self.out_metallic_roughness,
+        )
     }
 }
 
@@ -228,18 +257,11 @@ impl BakeRecipe for HairBake001 {
     }
 
     fn material(&self, _asset_server: &AssetServer) -> Self::Output {
-        StandardMaterial {
-            base_color: Color::WHITE,
-            base_color_texture: Some(self.out_base_color.clone()),
-            normal_map_texture: Some(self.out_normal.clone()),
-            metallic_roughness_texture: Some(self.out_metallic_roughness.clone()),
-            perceptual_roughness: 1.0,
-            metallic: 1.0,
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        }
+        hair_standard_material(
+            &self.out_base_color,
+            &self.out_normal,
+            &self.out_metallic_roughness,
+        )
     }
 }
 
@@ -341,18 +363,11 @@ impl BakeRecipe for HairBake002 {
     }
 
     fn material(&self, _asset_server: &AssetServer) -> Self::Output {
-        StandardMaterial {
-            base_color: Color::WHITE,
-            base_color_texture: Some(self.out_base_color.clone()),
-            normal_map_texture: Some(self.out_normal.clone()),
-            metallic_roughness_texture: Some(self.out_metallic_roughness.clone()),
-            perceptual_roughness: 1.0,
-            metallic: 1.0,
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        }
+        hair_standard_material(
+            &self.out_base_color,
+            &self.out_normal,
+            &self.out_metallic_roughness,
+        )
     }
 }
 
@@ -454,18 +469,11 @@ impl BakeRecipe for HairBake003 {
     }
 
     fn material(&self, _asset_server: &AssetServer) -> Self::Output {
-        StandardMaterial {
-            base_color: Color::WHITE,
-            base_color_texture: Some(self.out_base_color.clone()),
-            normal_map_texture: Some(self.out_normal.clone()),
-            metallic_roughness_texture: Some(self.out_metallic_roughness.clone()),
-            perceptual_roughness: 1.0,
-            metallic: 1.0,
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        }
+        hair_standard_material(
+            &self.out_base_color,
+            &self.out_normal,
+            &self.out_metallic_roughness,
+        )
     }
 }
 
@@ -481,7 +489,7 @@ impl MaterialBaker for HairBake003 {
                 set.main.load(asset_server, images),
                 set.bump.load(asset_server, images),
             ],
-            HAIR_PARAMS,
+            HAIR_ACS_PARAMS,
             images,
             materials,
             asset_server,
@@ -567,18 +575,11 @@ impl BakeRecipe for HairBake004 {
     }
 
     fn material(&self, _asset_server: &AssetServer) -> Self::Output {
-        StandardMaterial {
-            base_color: Color::WHITE,
-            base_color_texture: Some(self.out_base_color.clone()),
-            normal_map_texture: Some(self.out_normal.clone()),
-            metallic_roughness_texture: Some(self.out_metallic_roughness.clone()),
-            perceptual_roughness: 1.0,
-            metallic: 1.0,
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        }
+        hair_standard_material(
+            &self.out_base_color,
+            &self.out_normal,
+            &self.out_metallic_roughness,
+        )
     }
 }
 
@@ -680,18 +681,11 @@ impl BakeRecipe for HairBake005 {
     }
 
     fn material(&self, _asset_server: &AssetServer) -> Self::Output {
-        StandardMaterial {
-            base_color: Color::WHITE,
-            base_color_texture: Some(self.out_base_color.clone()),
-            normal_map_texture: Some(self.out_normal.clone()),
-            metallic_roughness_texture: Some(self.out_metallic_roughness.clone()),
-            perceptual_roughness: 1.0,
-            metallic: 1.0,
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        }
+        hair_standard_material(
+            &self.out_base_color,
+            &self.out_normal,
+            &self.out_metallic_roughness,
+        )
     }
 }
 
@@ -793,18 +787,11 @@ impl BakeRecipe for HairBake006 {
     }
 
     fn material(&self, _asset_server: &AssetServer) -> Self::Output {
-        StandardMaterial {
-            base_color: Color::WHITE,
-            base_color_texture: Some(self.out_base_color.clone()),
-            normal_map_texture: Some(self.out_normal.clone()),
-            metallic_roughness_texture: Some(self.out_metallic_roughness.clone()),
-            perceptual_roughness: 1.0,
-            metallic: 1.0,
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        }
+        hair_standard_material(
+            &self.out_base_color,
+            &self.out_normal,
+            &self.out_metallic_roughness,
+        )
     }
 }
 
