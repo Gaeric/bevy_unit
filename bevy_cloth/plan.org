@@ -1,550 +1,122 @@
-#+title: bevy_cloth — Velvet（XPBD 布料）迁移实施计划
+#+title: bevy_cloth — GPU 布料模拟当前工作计划
 #+startup: content
 #+author: Gaeric
 #+HTML_HEAD: <link href="/static/css/worg.css" rel="stylesheet" type="text/css">
 #+OPTIONS: ^:{}
 
-本文档写的是**具体步骤**：把 =../Velvet=（C++17 + CUDA + OpenGL 的 XPBD 布料 demo）迁移成 Bevy demo，
-按什么顺序做、每步交付什么、怎么验收。规格与红线见 =../Velvet/AGENTS.md=（源真相地图 + §3 移植规格 +
-§4 任务分解 + §5 移植正确性清单），本文件不重复推导，只补「落到本 workspace 该怎么做」。
+* 目标与范围
+  - [决定] 目标是基于 Bevy compute shader（在 GPU 上执行通用计算的着色器）的高性能布料模拟。
+    XPBD（通过修正位置满足约束，并用柔度控制软硬程度的方法）是当前主要算法；不做通用 XPBD 框架。
+  - [决定] CPU 求解器用于小规模参考与诊断，不是完成七个场景后才开始 GPU 的前置项目。
+  - [决定] 用户掌握理论，能够解释、验证、修改代码，也是验收的一部分；代码能运行不等于完成。
+  - [决定] Velvet 是参考实现，不再是必须逐项 1:1 照搬的规格。
+    改变特殊行为前，先解释原理与原设计的问题，提出明确修改，再用实验验证是否改善。
+  - 本文件只保留当前计划，旧迁移规格、里程碑与历史数值由 Git 保存，不折叠留档。
 
-**先读根 =../AGENTS.md=**：命令约定（=Commands=）、代码风格（=Style=）、改动流程（=Workflow=）以它为准，
-本文件不重复；=plan.org= 只写本 crate 的落地细节与源工程对照。执行任何 =cargo= 命令或改文件前，先看 =../AGENTS.md=。
+* 协作方法与职责
+  - [决定] 通过实际开发与共同排查问题熟悉项目，不采用先授课、再答题或通过知识考核才能推进的方式。
+    CPU 求解器由用户编写，不默认用户需要重学其中的基本计算；实现时按需要查询公式和参考。
+  - agent 推进一小批双方同意的框架代码，包括插件、资源、GPU 上传与读取、管线接线、渲染和诊断工具。
+    求解公式等核心仍由用户实现；涉及算法数据布局、求解顺序或边界不明确的改动，先讨论，不包装成普通接线。
+  - 用户运行、观察和验证，带回异常现象、日志或数据；双方共同定位，而不是 agent 直接猜原因并给出补丁。
+    agent 具体说明文件和函数、该看哪些数据、正常值或应满足的关系，以及不同结果分别指向的下一项检查。
+  - 每批改动交付：改了哪些文件、预期行为、运行方式、验证方法和已知限制。
+    验证后再决定下一批；失败时先定位，不靠继续叠加功能绕过问题。
+  - 理论解释服务于具体问题与方案判断，需要时用通俗语言、公式或数字说明，不安排脱离开发的必修练习。
+    小测试和手算仍可作诊断工具，但不要求重复用户已掌握的内容。
+  - 改代码前说明文件、区域、目的与范围，等待用户确认；每项逻辑改动单独给出可审阅替换。
+    不顺手扩展任务，不未经确认替用户实现核心。
+  - 记录时区分 [代码事实]、[手算预期]、[实验结果]、[决定]、[待验证]。
+    未运行不记测试通过，未实测不记性能达标；不替用户宣称已经掌握，也不以答题作为验收。
+  - 工作流遵守根 [[file:../AGENTS.md][AGENTS.md]]；测试必须带 =-j 2=，避免 Bevy 编译、链接耗尽内存。
 
-* 原则（按优先级）
-  1. **红线：求解器核心由用户亲手写**（=../Velvet/AGENTS.md= §0）。本文件里求解算法实现一律标 =[USER]=；
-     agent 只做骨架 / 场景 / 渲染写回 / UI / 网格与约束生成接线 / 测试脚手架 / 文档 / 评审。
-     **边界不确定时先问用户，不要默认帮写。**
-  2. **正确性优先**：P0 是纯 Rust CPU 求解器，行为与源工程一致；P1（WGSL compute）后置，不阻塞 P0。
-  3. **一次只动一个变量**：先用 =res=16= 的 =Cloth/Collision= 把整条链路（计时 → 求解 → 写回 → 渲染）
-     跑对，再放分辨率、再放参数、最后铺 7 个场景。
-  4. **测试必须限并发（硬约束，agent/AI 一律遵守）**：本 workspace 构建 Bevy 依赖时，裸 =cargo test=
-     会用满核并行编译 + 链接，**撑爆内存**。因此任何测试执行都必须带 =-j 2=：
-     - 单 crate：=cargo test -j 2 -p bevy_cloth=
-     - 工作区：=cargo test --workspace -j 2=
-     **不要执行不带 =-j 2= 的 =cargo test=**（包括自动化脚本、验收命令）。见 §7。
+* 当前状态（不是运行验收）
+  | 类别 | 代码现状 | 验收边界 |
+  |------+----------+----------|
+  | CPU | 已有 demo、求解器及场景代码 | 只作为现有基础，未经运行重新验收 |
+  | GPU | 已有无窗口、仅拉伸约束的四阶段计算：预测位置 → 求拉伸修正 → 应用修正 → 更新位置与速度 | 未接渲染；未经运行重新验收 |
+  | 当前工作 | 准备将现有 GPU 原型推进到可视验证 | 首批框架改动方案尚待检查与确认，未实现 |
 
-** agent / user 分工速查
-   | 部分                                            | 谁做     | 出处                          |
-   |-------------------------------------------------+----------+-------------------------------|
-   | 工程骨架、插件接线、示例入口                    | =[AGENT]= | M0 / M3                       |
-   | 网格生成、约束与 LRA 生成的接线、单测           | =[AGENT]= | M1（=VtClothObjectGPU.hpp= 是"生成规则"，可照抄数量与结构） |
-   | 求解器调度框架（循环与调用顺序）                | =[AGENT]= | M2a                           |
-   | Predict / SolveStretch / SolveAttachment / SolveBending / ApplyDeltas / Finalize / CollideSDF / CollideParticles / ComputeNormals | =[USER]= | M2b（=../Velvet/AGENTS.md= §0） |
-   | 验证工具（解析解测试、残差/守恒量监视、子步无关性实验） | =[AGENT]= | M2b 验收工具                  |
-   | 场景复现、轨道相机、egui 参数面板、MouseGrabber | =[AGENT]= | M4 / M5                       |
-   | WGSL compute 求解核心                           | =[USER]= | M6（外围接线 =[AGENT]=）      |
+* 下一步：检查 GPU 原型到可视验证的缺口
+  [决定] 不再把“两粒子手算”作为开发的必经步骤。以现有代码为起点，
+  由 agent 提出并推进小批框架改动，用户运行验证，双方根据观察定位问题。
 
-* 0. 目标与偏差
+** 先调查，再确定首批改动
+   - 检查范围：=src/gpu/solver_gpu.rs= 的创建、执行和读回，=examples/velvet-gpu.rs= 的运行入口，
+     以及 =src/demo/render.rs= 的 Mesh 更新。以上路径相对 =bevy_cloth/=。
+   - 当前 GPU 一次计算 60 步后退出；要看到输出，需要确认数据怎样送到渲染，以及显示的是哪一步。
+     不预先把一次性结果显示、逐步推进或逐帧读回视为已经选定的方案。
+   - agent 给出首批改动的文件范围、预期画面或日志、运行命令、检查数据和已知限制，用户确认后再实现。
+   - 当前固定点语义有缺口；方案必须明确使用什么初始状态、能验证什么，不能假称已有悬挂布料。
+     若需要修改核心算法或求解顺序，另行讨论，不混入框架改动。
+   - 不同时补齐弯曲、自碰撞、七个场景或进行大规模重构；读回用于验证不等于最终高性能路径。
 
-  | 项 | 决定 |
-  |---|---|
-  | 源真相（只读） | =../Velvet/Velvet/*.hpp= / =*.cuh= / =*.cu=；=README.md=（Q1/Q2 等工程技巧）；=doc/solver-notes.md= |
-  | **迁移目标** | 本 crate =bevy_unit/bevy_cloth=（workspace 成员），不是 =Velvet= 仓库内的新目录 |
-  | 与 =Velvet/AGENTS.md= §6 的偏差 | 该节建议新建 =velvet-bevy/=。我们落在 =bevy_cloth/=；按 §6 要求需在 =../Velvet/AGENTS.md= 记录路径变更（§8 状态一并更新）。 |
-  | 引擎 | Bevy 0.20（root =Cargo.toml= 的 =[patch.crates-io]= 指向 =../bevy_engines/bevy_0.20/=，该 checkout 必须存在），edition 2024 |
-  | 不做 | CUDA / OpenGL / 自研引擎（=VtEngine=、=Actor=、=Component=、=Material=、=RenderPipeline=、=VtBuffer= GPU 互操作） |
-  | 演示规模 | res ≤ 64（≈4225 粒子）；res = 200（≈40401）为压测目标 |
-  | 现有资产 | =src/main.rs= 是 Hello world；=examples/01..03= 是学习用台球例，保留但移入 =examples/learning/=，不参与迁移 |
+** 验证与共同定位
+   - 先确认 GPU 输出确实进入显示或诊断数据；仅看到静态布面，不能证明 GPU 已执行。
+     明确显示数据的步骤编号、粒子数量，以及选定粒子的初值与输出，检查数值是否有限。
+   - 出现问题时按数据流逐段检查：CPU 初值 → 上传的 GPU 数组 → 计算执行 → GPU 输出 → 渲染数据。
+     实际排查时，agent 必须把每段落实到文件／函数、数据字段和预期关系，不只给抽象流程。
+   - 例如“没有移动”，要区分计算未执行、输出未变化、结果未传到显示、相机看不到差异等情况；
+     根据检查结果选择下一项，不直接把原因归到求解公式。
+   - 记录运行条件、观察、定位证据和仍未确认的部分，再共同决定下一批工作。
+     当前尚无这批改动的实现或运行结果，不标记完成。
 
-* 1. 迁移规格速查（从源工程抄出的"事实"，实现时必须逐条对齐）
+* 后续方向（不是并行展开的任务清单）
+  - 先让现有 GPU 输出可观察、可定位，再根据验证结果逐项完善布料变形、碰撞与渲染，并测量性能。
+    需要判断柔度、乘子或并行策略时，再围绕具体代码与现象查原理，不设先学完整理论的前置要求。
+  - 每一批的范围和验证标准都先讨论，不预先选择并行算法、碰撞结构或渲染接法。
+    CPU 参考按诊断需要使用，不重做已知计算，也不补做旧七场景清单。
+  - [待验证] “高性能”需要硬件、粒子与约束规模、时间步、子步与迭代参数、误差和耗时证据。
+    区分求解、数据传输与渲染耗时；比较 CPU/GPU 时记录相同问题和可比的误差标准。
+  - 不承诺固定 FPS（每秒显示帧数），不能因为用了 GPU 就宣称更快；先测量，再讨论优化。
 
-** 1.1 固定步长主循环（=VtClothSolverGPU.hpp::Simulate=）
-   每次 1/60 s 固定步长（Bevy =FixedUpdate=）：
-   #+begin_src text
-     MouseGrabber.UpdateGrappedVertex()
-     UpdateColliders()                     // 先更新 collider 的 curTransform/lastTransform
-     CollideSDF(positions, colliders, frameTime)     // 预稳定化：改位置、不改速度（README Q1）
-     for substep in 0..numSubsteps:
-     PredictPositions(predicted, velocities, positions, substepTime)
-     if enableSelfCollision:
-     if substep % interleavedHash == 0: rebuildHash(predicted)
-     CollideParticles(deltas, deltaCounts, predicted, invMasses, neighbors, positions)
-     CollideSDF(predicted, colliders, positions, substepTime)
-     for iter in 0..numIterations:
-     SolveStretch(...); SolveAttachment(...); SolveBending(...); ApplyDeltas(...)
-     Finalize(velocities, positions, predicted, substepTime)
-     ComputeNormals(normals, positions, indices)
-   #+end_src
-   - =frameTime = fixedDeltaTime=，=substepTime = fixedDeltaTime / numSubsteps=。
-   - =SolveAttachment= 内部含 Long Range Attachment；=SolveBending= 传 =substepTime=。
+* 验证记录与限制
+  - [审查范围] 2026-10-28 为静态审查，环境没有 GPU 设备暴露；不是 GPU 运行或视觉验收。
+  - [执行记录] 此前尝试以下命令，在依赖解析时因 =avian3d= 离线索引缺失失败，测试没有运行：
+    #+begin_src bash
+      cargo test --offline -j 2 -p bevy_cloth --test solver_smoke -- --nocapture
+    #+end_src
+    源码缓存存在不等于离线依赖解析可行；不能据此声称本次测试通过。
+  - [代码事实／验收缺口] GPU 对照中的四角未固定；删除 CPU 的 attach（挂点约束）后两边一致，
+    也不能证明原场景的固定点正确。参考初值与约束必须先一致，并分别满足预期。
+  - [代码事实／验收缺口] max diff（最大位置差）缺少阈值断言，以及 NaN（非数）、无穷值等拒绝条件；
+    打印差异不等于具备通过标准。
+  - [代码事实／验收缺口] 子步测试只要求差值小于 1，不能据此宣称子步无关性。
+    子步是把一次时间推进拆成更小步；其误差标准需随具体问题讨论。
+  - 这些限制用于防止误读现有测试。是否在下一批处理，按可视验证需要讨论，不默认同时修复所有问题。
 
-** 1.2 数据布局（源 =VtBuffer= → Rust =Vec=）
-   | 源数组 | Rust 侧 | 说明 |
-   |---|---|---|
-   | =positions= | =Vec<Vec3>= | 世界坐标。**求解器直接写世界坐标**，同时就是渲染顶点位置 |
-   | =predicted= | =Vec<Vec3>= | 预测位置 x* |
-   | =velocities= | =Vec<Vec3>= | |
-   | =deltas= / =deltaCounts= | =Vec<Vec3>= / =Vec<i32>= | Jacobi 累积量与计数 |
-   | =invMasses= | =Vec<f32>= | 硬吸附点（restDistance == 0）置 0 |
-   | =originalPositions= | =Vec<Vec3>= | 初始世界坐标，**仅用于自碰撞过滤** |
-   | =stretchIndices= / =stretchLengths= | =Vec<[u32;2]>= / =Vec<f32>= | 顺序即求解顺序的遍历顺序 |
-   | =bendIndices= / =bendAngles= | =Vec<[u32;4]>= / =Vec<f32>= | rest angle 源里恒 0 |
-   | =attachParticleIDs= / =attachSlotIDs= / =attachDistances= | =Vec<u32>= / =Vec<u32>= / =Vec<f32>= | |
-   | =attachSlotPositions= | =Vec<Vec3>= | Swirl 场景每帧被外部改写 |
-   | =neighbors= | =Vec<u32>=（长度 = n * maxNumNeighbors） | 布局 =neighbors[i + n * j]=（i = 粒子 id，j = 第 j 个邻居槽；步长是 **numParticles** 不是 maxNumNeighbors —— 见 §1.6，源 =SpatialHashGPU.hpp::Test= 里的 =i*maxNumNeighbors+k= 与 kernel 不一致，属 debug 代码 bug，别照抄）；空槽哨兵 =0xffffffff= → =u32::MAX= |
-   | =indices= | =Vec<u32>= | 与 Mesh index buffer 完全相同（=ComputeNormals= 也用它） |
+* 命令与路径
+  - 以下命令从 workspace 根目录运行，执行前先读根 [[file:../AGENTS.md][AGENTS.md]]；本次文档调整不运行构建。
+    #+begin_src bash
+      cargo check -j 2 -p bevy_cloth --all-targets
+      cargo test -j 2 -p bevy_cloth --test solver_smoke -- --nocapture
+    #+end_src
+  - Bevy 由根 =Cargo.toml= 的 =[patch.crates-io]= 指向 =../bevy_engines/bevy_0.20/=，该 checkout 必须存在。
+    依赖解析是否可用须独立确认，不能因缓存存在而预先承诺离线构建可行。
+  - 除明确标注的文件链接、源码相对目录外，本文裸路径均以 workspace 根解释。
+    Velvet 参考仓库为 =../Velvet/=；从本文件所在目录出发则是 =../../Velvet/=。
+  - 需要查源时只围绕当前问题阅读，例如 =../Velvet/doc/solver-notes.md= 与求解器源码，
+    不恢复旧版的强制逐项迁移清单，也不在本任务修改参考仓库。
 
-** 1.3 参数（=Common.hpp::VtSimParams=，GUI 1:1 保留）
-   | 字段 | 默认 | GUI 范围 | 备注 |
-   |---|---|---|---|
-   | =numSubsteps= | 2 | 1–20 | |
-   | =numIterations= | 4 | 1–20 | |
-   | =maxNumNeighbors= | 64 | — | neighbors 数组第 2 维 |
-   | =maxSpeed= | 50 | 1e-2–100 | =AddCloth= 时被覆写为 =2*pd/dt*numSubsteps= |
-   | =gravity= | (0,-9.8,0) | 每轴 -50–50 | |
-   | =bendCompliance= | 0.0 | 0–100（对数） | 源注释：Jacobi 下 bending 表现差，建议关 |
-   | =damping= | 0.25 | 0–10 | |
-   | =relaxationFactor= | 1.0 | 0–3 | >1 可能不稳 |
-   | =longRangeStretchiness= | 1.2 | 1.0–2.0 | |
-   | =collisionMargin= | 0.06 | 0–0.5 | |
-   | =friction= | 0.1 | 0–1 | |
-   | =enableSelfCollision= | true | checkbox | |
-   | =interleavedHash= | 3 | 1–10 | 每 N 个子步重建哈希 |
-   | =particleDiameterScalar= | 1.5 | — | pd = |p0-p1| * scalar |
-   | =hashCellSizeScalar= | 1.5 | — | cellSpacing = pd * scalar |
-   | 运行时 | | | =numParticles= / =particleDiameter= / =deltaTime= |
-   另外 =VtGameState=：=step= / =pause= / =renderWireframe= / =drawParticles= / =hideGUI= / =detailTimer= → Bevy 侧作为资源。
+* 与 Avian 的区别
+  [源码核对，2026-10-28] workspace 的 =bevy_waltz= 使用 =avian3d 0.7.0=；
+  相邻 =../avian/= checkout 是 =0.8.0-dev=，不能混用版本结论。以下以缓存中的 0.7.0 源码为依据。
 
-** 1.4 网格与约束生成（=Scene.hpp::GenerateClothMesh= + =VtClothObjectGPU.hpp=）
-   - 网格：=clothSize = 2.0=；对 =y=0..=res= 外层、=x=0..=res= 内层依次 push
-     =pos = clothSize * vec3(x/res - 0.5, -y/res, 0)=，=normal = (0,0,1)=，=uv = (x/res, y/res)=。
-     **粒子索引 = push 顺序 = i = y*(res+1) + x**（局部坐标 x∈[-1,1]、y∈[-2,0]）。
-   - ⚠️ 源里 index 生成用 =VertexIndexAt(x,y) = x*(res+1) + y=，与 push 顺序（y 外层）**是转置关系**，
-     等价于把每个 quad 的对角线镜像。区域覆盖面不变（仍是同一片方形网格），但：
-     1. 三角形绕序相反（所以源材质必须 =doubleSided=）；
-     2. =GenerateBending= 用 =indices[i], [i+5], [i+2], [i+1]= 取 4 个点，配对到的三角形不同。
-     → **迁移时 index 生成式原样照抄，不要"顺手修正"成自然对角线**；否则 bend 约束配对与绕序都变。
-   - stretch：每个顶点向 +x、+y 邻居各一条，加每个 cell 的两条对角线（共 2 组，双向计 4 条/顶点）。
-     rest length = 变换后世界坐标的距离。
-   - bend：每 6 个 index（= 一个 quad）一条，索引 =(i, i+5, i+2, i+1)=，=angle = 0=。
-   - attach + LRA：对每个吸附顶点建一个 slot（记录=变换后的=初始位置），
-     然后**对所有粒子**加 =(particle, slot, |slotPos - p_i|)=；=restDistance == 0= 的粒子 =invMass = 0=。
-   - =particleDiameter = |positions[0] - positions[1]| * particleDiameterScalar=。
-   - =AddCloth=：把 =modelMatrix= 烘焙进顶点（=ApplyTransform=），随后 =actor->transform->Reset()=
-     → Bevy 侧**布料实体 Transform 恒为 identity**。
-   - =AddCloth= 返回 =indexOffset=，多布料共用 solver 时用它拼接 index（=SceneClothMultiple=）。
+  Avian 连接的是保持自身形状的刚体；本项目连接的是布料上的粒子，使整片布能够变形。
+  共同点是可以通过位置修正满足约束，不同点是对象、约束和执行方式。
 
-** 1.5 SDF 碰撞器（=Collider.hpp= / =VtClothSolverGPU.cuh::SDFCollider=）
-   - 三种 =ColliderType=：Plane / Sphere / Cube；Cube 走 =invCurTransform= 转局部坐标，
-     且角上做 rounded 处理（=margin=0.03=；=midVal = offset 中位数= 大于 -margin 时 =scalar=0.2=）。
-   - =Collider::FixedUpdate= 维护 =curTransform= / =lastTransform=，=VelocityAt= 用 =lastTransform * invCurTransform=
-     反推上一帧位置求速度（摩擦用）。→ Bevy 侧的等价组件必须**在 =Solver::step= 之前**更新。
-   - Plane：=offset = p.y - (position.y + margin)=，< 0 则回推；Sphere：=radius = scale.x + margin=。
-   - Swirl 场景里球体 =Collider::enabled = false=（只做视觉标记）→ 迁移时需保留 enabled 开关。
+  | 比较项 | Avian 0.7.0 | 本项目目标／当前实现 |
+  |--------+-------------+---------------------|
+  | 对象 | 有位置、朝向、质量、转动惯量的刚体 | 以粒子和网格表示可变形布面 |
+  | XPBD 用途 | 刚体关节与自定义约束；主要接触求解采用冲量方法，改变速度处理碰撞 | 以 XPBD 为主要方法处理布料变形，不做通用关节框架 |
+  | 执行 | CPU；内置 XPBD 关节路径按顺序直接修正刚体 | GPU 主线；当前拉伸阶段同时读取本轮位置，各粒子收集修正，下一阶段统一应用 |
+  | 所需能力 | 刚体运动、关节、碰撞及场景查询等 | 布料拉伸、弯曲、固定、物体碰撞与自碰撞，以及布面渲染更新 |
 
-** 1.6 空间哈希（=SpatialHashGPU.hpp=.cu=）
-   - =spacing = particleDiameter * hashCellSizeScalar=；=tableSize = 2 * numParticles=。
-   - 坐标 → 格子：=(x,y,z) = floor(p / spacing)=；hash = =abs((x*92837111) ^ (y*689287499) ^ (z*283923481) % tableSize)=。
-     ⚠️ C++ 的 =int= 溢出是 UB，Rust debug 下会 panic → 必须用 =i32::wrapping_mul / wrapping_xor / wrapping_rem=。
-   - =cellStart= 初始化为 =0xffffffff=；=cellEnd= 由相邻 cellStart 推导（源注释里有 BUG_LOG）。
-   - neighbor 收集（=CacheNeighbors_Kernel=）：
-     - 距离判据：=length2(p - p_j) < cellSpacing2=；
-     - **collision filtering**：=length2(orig - orig_j) > particleDiameter2= 才收（严格大于）；
-     - 每个粒子的邻居从 =neighbors[id + j*numObjects]= 起写，满 =maxNumNeighbors= 直接 return；
-     - 写完在第一个空槽写 =0xffffffff=。
-   - =SetInitialPositions= 在 =AddCloth= 时抓一次快照 → Rust 侧 =original_positions= 必须在**烘焙变换之后**采集。
-   - 逐条对齐清单（源码已核对，M2a 的 =hash.rs= 必须按此实现）：
-     - 邻居写入步长 = =numObjects=（=SpatialHashGPU.cu::CacheNeighbors_Kernel= 的 =neighborIndex = id; ... += numObjects=），
-       读取步长也是 =numObjects=（=VtClothSolverGPU.cu::CollideParticles_Kernel= 的
-       =for (k = id; k < n*maxNumNeighbors; k += n)=）→ 布局 =neighbors[i + n * j]=；
-       源 =SpatialHashGPU.hpp::Test= 用 =neighbors[i * maxNumNeighbors + k]=，与两个 kernel 都不一致（debug 代码 bug）。
-     - 格子扫描顺序：=x= 外层、=y= 中层、=z= 最内层，各 =ix-1..=ix+1=（27 格）；
-       每格区间 =end = min(cellEnd[h], start + maxNumNeighbors)=（源注释 BUG_LOG：GPU 独有的提前截断，
-       CPU 版是否复现要在测试里显式记录）。
-     - 邻居槽写满 =maxNumNeighbors= 时直接 =return=（**不写哨兵**）；否则在第一个空槽写 =0xffffffff=，
-       于是"满"与"未满"两种情况的终止方式不同，=CollideParticles= 用 =j > numParticles= 才 =break=。
-     - 排序：=HashObjects= 用 cub radix sort（=maxBit = ceil(log2(tableSize))=）按 hash 排序，属 GPU 实现细节；
-       CPU 版用桶排序即可，但必须保持"同一格子内按粒子 id 升序"（它决定邻居槽内容与后续浮点求和顺序，
-       是"同初值可复现"的前提）。
-   - **预稳定化是自别名调用**：=VtClothSolverGPU.hpp::Simulate= 里 =CollideSDF(positions, sdfColliders, positions, frameTime)=
-     把 =positions= 同时当读写两侧；kernel 只读自己的 =positions[id]=（不读邻居），
-     所以语义 = "就地自碰撞、不改速度（README Q1）"。Rust 借用不允许 =&mut x= 与 =&x= 并存，
-     M2a 用 step 级 scratch 拷贝复现（等价，不引入额外语义）——**此点属内核语义，M2b 由用户确认**。
-   - =UpdateColliders= 对 =enabled == false= 的 collider 只 =continue=，但数组已 =resize(colliders.size())=，
-     而 =CollideSDF= 收到的是 =sdfColliders.size()=（**含被跳过的槽**）→ Swirl 里"关闭"的球是否真的不参与碰撞，
-     取决于该槽的默认值。M5 落地 Swirl 时必须实测（见 §6 风险表）。
-
-** 1.7 七个场景（=main.cpp=，数字键 1–7 顺序）
-   | # | 场景 | res | 纹理 | attachedIndices | 参数覆盖 | 刚体动画 |
-   |---|---|---|---|---|---|---|
-   | 1 | =SceneClothAttach= | 40 | fabric1 | ={0, res, (res+1)²-1, (res+1)*res}=（四角） | — | 球 r=0.5 静止于 (0,r,0) |
-   | 2 | =SceneClothCollision= | 16 | fabric2 | ={0, res}= | — | 球 r=0.6，=z = -cos(2t)=（t = dt*physicsFrame） |
-   | 3 | =SceneClothSelfCollision= | 60 | fabric1 | 无 | substeps=8、friction=0.3 | 无 |
-   | 4 | =SceneClothFriction= | 64 | fabric2 | 无 | friction=0.6、substeps=5、iterations=5 | 球 r=0.5：t>0 后 =x = sin(t)=；绕 y 轴 =±180t=（=(int)t%4>1= 取负） |
-   | 5 | =SceneClothMultiple= | 64 ×3 | fabric1/2/3 | 无 | friction=0.6、substeps=5、iterations=5 | cube scale 1.0 静止 |
-   | 6 | =SceneClothHD= | 200 | fabric2 | 无 | substeps=10、iterations=10 | 球 r=0.6 静止 |
-   | 7 | =SceneClothSwirl= | 36 | fabric1 | ={0}=（单角） | — | 球 r=0.1、碰撞器关闭；=slot0 = (sin 3t, cos 3t + 2, 0)=，球同步 |
-   公共 setup（=Scene::SpawnCameraAndLight=）：
-   - 相机 pos =(0.35, 3.3, 7.2)=、scale 1、euler =(-21, 2.25, 0)=（源 =PlayerController= 是轨道相机 → M4 自写）。
-   - 光源 =LightType::SpotLight=：pos =(2.5,5,2.5)=、euler =(20,30,0)=、color 1.3、=innerCutoff=40°= / =outerCutoff=50°=、=constant/linear/quadratic = 1.0/0.09/0.032=。
-   - 地面 =SpawnInfinitePlane=：渲染是一个 quad（材质 =InfinitePlane= 用平面方程裁剪），碰撞是 Plane SDF。
-     → Bevy 侧可以简化为一个大 =Plane3d= / 薄 =Cuboid=，但碰撞必须是 =Plane= 型 SDF。
-   - 布料 =SpawnCloth=：=doubleSided=true=、=tint=(0,0.5,1)=、fabric{1,2,3}.jpg、=specular=0.01=；
-     每个场景初始化位姿：cloth = (0,1.5,1)= + euler(90,0,0)（场景 3 为 euler(-15,10,10)、场景 5 三块 y=1.5/1.8/2.1）。
-   - 场景参数覆盖语义：源 =ModifyParameter= 是"onEnter 改、onExit 还原" → Rust 侧用 =OnEnter/OnExit= 或
-     =SceneResource { base, overrides }= 实现同样语义，**别把参数泄漏到下一个场景**。
-   - 场景 3 里 =ModifyParameter(numSubsteps, 3)= 紧接着 =(numSubsteps, 8)=，实际生效 8 → 只需 8（写进 readme 备注）。
-   - 资源文件：=Velvet/Velvet/Assets/Texture/fabric{1,2,3}.jpg=、=wood.png=；=Model/{sphere,cube}.obj= 可用 Bevy 内置
-     =Sphere= / =Cuboid= 替代（Shape 更省事，且碰撞是解析 SDF，不依赖模型）。
-
-* 2. 目标结构与 Bevy 0.20 工程约定
-
-** 2.1 crate 结构
-   #+begin_src text
-     bevy_cloth/
-     ├─ Cargo.toml                 // [lib] + [[example]]；依赖见 2.3
-     ├─ plan.org  readme.org
-     ├─ src/
-     │  ├─ lib.rs                  // pub mod sim; pub mod demo; ClothPlugin 组合
-     │  ├─ sim/                    // 纯 Rust，无 bevy 依赖，可 cargo test 单测
-     │  │  ├─ mod.rs
-     │  │  ├─ params.rs            // SimParams（VtSimParams 1:1）+ SimState(VtGameState)
-     │  │  ├─ mesh_gen.rs          // generate_cloth_mesh + build_constraints（stretch/bend/attach+LRA）
-     │  │  ├─ solver.rs            // [AGENT] 调度框架 + [USER] 求解核心（标 todo!()）
-     │  │  ├─ collide.rs           // SdfCollider / ColliderKind + [USER] collide_sdf / collide_particles
-     │  │  ├─ hash.rs              // uniform grid + 邻居缓存 + collision filtering 装载
-     │  │  └─ stats.rs             // max|v| / stretch 误差 / clamp 计数 / step 耗时
-     │  └─ demo/
-     │     ├─ mod.rs
-     │     ├─ plugin.rs            // ClothPlugin：FixedUpdate 顺序、示例场景装载、按键
-     │     ├─ render.rs            // 把 positions/normals 写回 Assets<Mesh>
-     │     ├─ camera.rs            // 轨道相机（中键拖拽 + 滚轮）
-     │     ├─ grab.rs              // MouseGrabber（viewport_to_world 射线 + 最近粒子）
-          │      ├─ ui.rs                // bevy_feathers 参数面板 + 暂停/单步/线框/粒子/隐藏 GUI
-          │      ├─ input.rs             // 键盘快捷键（Space/S/H/K/L）
-          │      └─ scenes.rs            // 7 个场景 setup + 场景资源（含 OnEnter/OnExit 参数覆盖）
-     ├─ examples/
-     │  ├─ learning/01-cannonball2d.rs 02-cannonball3d.rs 03-billiard.rs   // 原例子挪过来
-     │  ├─ velvet-00-sandbox.rs    // M0：空场景 + 地面 + 球
-     │  ├─ velvet-01-collision.rs  // M3：单个场景跑通（Cloth/Collision）
-     │  └─ velvet-scenes.rs        // M5：1–7 数字键切场景（主验收入口）
-     └─ tests/
-     ├─ mesh_gen.rs             // 顶点/索引/约束计数、rest length、LRA 距离
-     ├─ hash.rs                 // 与暴力 O(n²) 邻居表比对
-     └─ solver_smoke.rs         // 无重力静止、自由落体、maxSpeed clamp、子步无关性
-   #+end_src
-   =sim/= 不依赖任何 bevy crate（用 =glam=），保证 =cargo test -j 2 -p bevy_cloth= 能在无 GPU/window 的环境下跑
-   （这也是将来接 avian 的前提，见 §8）。
-
-** 2.2 Bevy 0.20 已核实的 API 事实与坑（本 workspace 源码为准，=../bevy_engines/bevy_0.20/=）
-   | 事项 | 结论 |
-   |---|---|
-   | 固定步长 | =Time<Fixed>::from_hz(60.0)=（=bevy_time/src/fixed.rs:105=）；求解系统放 =FixedUpdate=，取 =time.delta_secs()= 即 =fixedDeltaTime= |
-   | 事件 | 0.20 里 =Event= 走 observer（=On<T>=），通道式广播是 **Message**：=MessageReader<=…>= / =MessageWriter=。本仓库 =examples/03-billiard.rs= 已在用 =MessageReader<WindowResized>= |
-   | **Mesh 每帧写回** | 建 mesh 必须显式 =RenderAssetUsages::default()=（含 MAIN_WORLD），否则 =Mesh::attribute_mut= 会 panic：=MESH_EXTRACTED_ERROR="…mesh asset_usage must include MAIN_WORLD"=（=bevy_mesh/src/mesh.rs:41=） |
-   | 写回代价 | =Assets<Mesh>::get_mut()= 会标脏 → 每帧重新上传顶点。res=64（4225 点 × pos+normal ≈ 100 KB/帧）可接受；res=200 ≈ 950 KB/帧，列为风险（§6） |
-   | 写回时机 | 求解 + 写回都在 =FixedUpdate= 里 =.chain()= 完成（==在渲染 extract 之前），用 =FixedPostUpdate= 也可以，但不要用 =Update= |
-   | 布料实体 | =Transform::IDENTITY=，线宽/材质用 =StandardMaterial { double_sided: true, cull_mode: None, .. }= |
-   | UI | =bevy_feathers=（引擎内置 crate，通过 =bevy= facade 的 =bevy_feathers= feature 打开，无第三方依赖）／方案见 =m4-feathers-plan.org= |
-   | 诊断 | =FrameTimeDiagnosticsPlugin= / =bevy::dev_tools::fps_overlay::FpsOverlayPlugin=；自研指标用 =Diagnostic=（源的 =Timer= CPU/CUDA profiling 不移植） |
-   | 风格 | root =AGENTS.md=：edition 2024、=prelude::*=、=Single<…>= 唯一实体、observer、导入分组（外部 crate → std → 本地）；简单注释，注释英文小写 |
-   | 构建 | =cargo run -p bevy_cloth --example velvet-scenes=；不要 =cd= 进子目录（=../bevy_engines/bevy_0.20/= 必须存在） |
-
-** 2.3 依赖（全部命中 workspace 的 =Cargo.lock= 与本地 cargo 缓存，无需联网拉新包）
-   #+begin_src toml
-     [dependencies]
-     bevy = { version = "0.20.0", features = ["bevy_dev_tools", "render_dev_tools", "jpeg", "bevy_feathers"] }
-     glam = "0.33"          # 与 bevy_math 0.20 同版本；sim/ 用它，保持无 bevy 依赖
-     rand = "0.10"          # 已有
-   #+end_src
-   =jpeg=：Bevy 默认只带 =png=，不打开它 =fabric{1,2,3}.jpg= 加载失败。
-   =rayon= 尚未引入（M2a 的并行留到实测有需求时再开）；UI 面板改用引擎内置 =bevy_feathers=
-   （见 =m4-feathers-plan.org=），不再引 =bevy_egui=。
-   =bytemuck= / =encase= 只在走自定义管线（M3.5/M6）时才需要。
-
-* 3. 里程碑
-  与 =../Velvet/AGENTS.md= §4 的对应：本文件 M0→源 M0，M1→源 M1，M2a/2b/2c→源 M2，
-  M3/M4/M5→源 M2 的渲染部分 + 源 M3，M6→源 M4，M7→源 M5。粒度更细，便于逐步验证。
-
-** TODO M0 — 骨架与场景基线 [AGENT]
-   - 把 =bevy_cloth= 改成 lib + examples；=ClothPlugin= 里配 60 Hz =FixedUpdate=。
-   - =examples/velvet-00-sandbox.rs=：=Camera3d= + =SpotLight=/*=DirectionalLight=* + 大平面 + 一个球 + FPS 叠加。
-   - 原 =examples/01..03= 移到 =examples/learning/=，删掉 =src/main.rs= 的 Hello world。
-   - 验收：
-     - [ ] =cargo run -p bevy_cloth --example velvet-00-sandbox= 出画面、可退出、无 panic
-       （本环境无显示，尚未复跑；代码已就绪）
-     - [x] =cargo check -p bevy_cloth --all-targets= 零 warning
-     - [x] =FixedUpdate= 在 60 Hz 下稳定触发（=velvet-00-sandbox.rs= 显式 =Time::<Fixed>::from_hz(60.0)=）
-
-** TODO M1 — 网格与约束生成（=sim/mesh_gen.rs=）[AGENT]
-   - =generate_cloth_mesh(res) -> ClothMesh { positions, normals, uvs, indices }=，1:1 照抄
-     =Scene.hpp::GenerateClothMesh=，**包括 §1.4 的索引转置细节**。
-   - =bake_transform(positions, &Mat4)=（=AddCloth= 的 =ApplyTransform= 等价物）+ =collect_original_positions=。
-   - =build_constraints(res, positions, attached_indices, params) -> Constraints=：
-     =stretch { indices, lengths }= / =bend { indices, angles }= / =attach { particle_ids, slot_ids, distances, slot_positions }= /
-     =inv_masses=；数量与顺序必须与 =VtClothObjectGPU.hpp= 逐项一致。
-   - 单测（=tests/mesh_gen.rs=）：
-     - [x] res=2：顶点 9、index 24、bend 4 条、attach 条数 = 9 × slot 数
-     - [x] stretch 条数按源公式手算写死（res=2 时逐条列出 i1/i2 更保险）
-     - [x] stretch rest length == 世界坐标距离；LRA =attach_distances[i] == |slot - p_i|=
-     - [x] 吸附点 =rest_distance == 0= → =inv_masses[i] == 0=
-     - [x] 网格不变量：面积 4.0、周长 8.0、法线全 +Z
-   - 验收：=cargo test -j 2 -p bevy_cloth= 通过。
-   - 落地情况（[AGENT] 已完成，14 个测试全绿）：
-     - =src/sim/mesh_gen.rs=：=generate_cloth_mesh / bake_transform / collect_original_positions /
-       particle_diameter_from_first_edge / validate_cloth_grid / grid_res=。
-     - =src/sim/constraints.rs=：=build_constraints(vertices, indices, attached)=（**签名与上面草稿不同**：
-       不收 =res= / =params=，改为由 =validate_cloth_grid= 反推 + 校验网格布局，顺带拦住"把索引改成自然对角线"
-       这类误用；=inv_masses / particle_diameter= 由调用方（M2a 的 =Solver::add_cloth=）传入/覆写）。
-     - =tests/mesh_gen.rs=：res=1 的 6 条 stretch 逐一列出、res=2 计数、周长/面积/绕序、LRA 与 =inv_mass=、
-       索引转置与重复顶点校验、烘焙后快照。
-
-** TODO M2a — 求解器调度框架（=sim/solver.rs= / =sim/hash.rs=）[AGENT]
-   - =Solver= 持有 §1.2 全部数组（多布料共用 → =num_particles/particle_diameter/max_speed= 在 =Solver= 上）。
-   - =Solver::step(&mut self, params: &SimParams, colliders: &[SdfCollider], dt: f32)= 按 §1.1 **只写循环与调用顺序**；
-     下面这些函数先留签名 + =todo!()=（红线部分，交 [USER]）：
-     =predict_positions / solve_stretch / solve_attachment / solve_bending / apply_deltas / finalize /
-     collide_sdf / collide_particles / compute_normals=
-   - =sim/hash.rs=：哈希函数、=cell_start/cell_end=、=neighbors= 布局、=rebuild(predicted, original_positions)=
-     的数据结构由 agent 搭（哈希/排序/邻居表装配属工程）；**邻居筛选判据只按 §1.6 照抄并注释出处**，
-     若要改动必须先问用户。
-   - =sim/stats.rs=：每步采集 =max|v| / 平均与最大 stretch 误差 / clamp 粒子数 / step 耗时（=std::time::Instant=）。
-   - =tests/solver_smoke.rs=（与具体投影公式无关的骨架级测试）：
-     - [ ] 无重力无碰撞：1 步后 =predicted == positions=，速度不变
-     - [ ] 有重力：自由落体 y 位移 == ½ g t²（±1e-4）——验证 =dt= 与循环次数接线正确
-     - [ ] =num_substeps= 变化时 =Finalize= 的位移与速度仍连续
-   - 验收：=cargo test -j 2 -p bevy_cloth=；未实现的 =todo!()= 用 =#[ignore]= 或 =cfg(feature = "solver-wip")= 隔开，保持 test 绿。
-
-** TODO M2b — 求解核心实现 [USER]（红线：agent 不得代写）
-   - 由用户本人实现（=../Velvet/AGENTS.md= §0）：Predict、SolveStretch（relaxationFactor/damping）、
-     SolveAttachment（+LRA）、SolveBending（angle/compliance）、ApplyDeltas（Jacobi 平均）、
-     Finalize（v=(x*-x)/dt、maxSpeed clamp）、CollideSDF（三种 SDF + 预稳定化语义）、
-     CollideParticles（自碰撞 + 摩擦）、ComputeNormals。若采用 XPBD 乘子形式，λ 与 ᾱ=α/Δt² 同样属红线。
-   - agent 可做且应当做：公式推导与源文件行号对照表、边界条件清单（符号/清零时机/除以零）、
-     验证脚手架与实验脚本、评审意见（只给问题与建议，不改代码）。
-   - 验收工具（agent 提供，user 判定）——已启用（=solver_smoke.rs= 去掉 =#[ignore]=，14 个测试全绿）：
-     - [x] 单链 stretch 有解析解（两粒子 + 一条约束 + 已知外力）→ 迭代收敛到解析值
-       （=a_pinned_corner_hangs_at_the_rest_length=：|p0-p1| = 2.00057，rest = 2.0）
-     - [x] 自由落体 + Plane SDF：静止高度 == =collisionMargin=
-       （=plane_holds_the_cloth_at_the_collision_margin=：lowest y = 0.06 = margin；测试实测容差为 ±1e-3，非 ±1e-4）
-     - [x] 球 SDF 推出方向 == =normalize(p - c)=，推出量 == =radius + margin - |p-c|=
-       （=sphere_push_out_is_radial=：0.5 → 0.56，切向分量 = 0）
-     - [ ] 长期稳定：无重力自由摆动 10 s，max|v| ≤ maxSpeed，位置无 NaN/Inf
-       （部分覆盖：=max_speed_clamps_the_velocity= 30 步、=no_gravity_keeps_the_cloth_still= 10 步、
-       =a_pinned_corner_hangs_at_the_rest_length= 240 步 = 4 s；仍缺一条连续 10 s 的自由摆动用例）
-     - [x] 子步无关性：=numSubsteps ∈ {1,2,4}= 同场景终态差异 < 阈值（记录数值）
-       （=substeps_barely_change_the_result=：sag 0.785 / 0.318 / 0.126；与 substeps=2 的最大偏差 0.549 / 0.235）
-
-** TODO M2c — 数值对照参考实现（可选）[AGENT]
-   - 源工程在 Linux 无法构建（Windows/VS/CUDA），"逐帧对照"通常做不到。
-   - 替代：把 =VtClothSolverCPU*.hpp= / =VtClothObjectCPU*.hpp= / =SpatialHashCPU.hpp= 的关键 kernel
-     **单独抄成 Rust 参考实现**（=tests/reference/=，只做对照，不进 demo）。
-   - 验收：同一初值下，我们的第一步/第 N 步结果与参考实现差异 < 1e-5（浮点求和顺序差异可接受并记录）。
-
-** TODO M3 — 渲染写回 + 首个场景跑通（必做，卡住后面所有事）[AGENT]
-   - =demo/render.rs=：=sync_cloth_mesh(mesh: &mut Mesh, positions: &[Vec3], normals: &[Vec3])=，
-     写 =Mesh::ATTRIBUTE_POSITION= / =ATTRIBUTE_NORMAL=；建 mesh 时 =RenderAssetUsages::default()=。
-   - 布料实体 =Transform::IDENTITY=；材质 =StandardMaterial { base_color: srgb(0,0.5,1), base_color_texture: fabric_n, double_sided: true, perceptual_roughness: 1.0, .. }=。
-   - 把 =fabric1..3.jpg= 拷到 =bevy_unit/assets/=（或 =bevy_cloth/assets/=）；UV 照抄，若图案上下颠倒再翻 v（记录结论）。
-   - 验收场景：=Cloth/Collision=（res=16、fabric2、attach {0, res}、球 r=0.6 沿 =z=-cos(2t)= 往复）。
-   - 验收：
-     - [ ] 布料下落 → 两个角挂住 → 球推出鼓包 → 回弹，无炸裂/无明显拉伸
-     - [ ] 关掉 Bevy 自动法线（只用求解器写回的法线）画面依然正确
-     - [ ] res=16 / 32 / 64 都稳定；球体 =collisionMargin= 生效（布料不穿透）
-     - [ ] 布料与地面碰撞后停在 =y ≈ collisionMargin=
-   - 命令：=cargo run -p bevy_cloth --example velvet-01-collision=
-   - 落地情况（[AGENT] 代码已完成；=cargo check/clippy/test -p bevy_cloth= 全绿。四条运行时视觉判据
-     待人在显示器前复跑确认）：
-     - =src/demo/render.rs=：=build_cloth_mesh= / =sync_cloth_mesh=（建 mesh 用 =RenderAssetUsages::default()=）。
-     - =src/demo/plugin.rs=：=ClothPlugin= —— 60 Hz =FixedUpdate= + 具名 set
-       =ClothSystems::{Collide, Step, Writeback}=（=.chain()=）；=Collide= 里更新 collider 变换并按
-       =UpdateColliders= 收集 =SdfCollider=，同时维护 =lastTransform= 供摩擦用的表面速度。
-     - =src/demo/scenes.rs=：=SceneClothCollision= 1:1（res=16、fabric2、布料 =(0,2.5,0)= 不旋转、
-       球 r=0.6 沿 =z=-cos(2t)=、attach {0,res}）；材质 =double_sided + cull_mode: None=。
-     - =examples/velvet-01-collision.rs= + =tests/render.rs=（静止网格 + 写回跟随求解器，无 GPU 可测）。
-     - 资源位置：=bevy_cloth/assets/velvet/fabric{1,2,3}.jpg=。**不要放 workspace 根 =assets/=**：
-       Bevy 的 asset root 优先 =BEVY_ASSET_ROOT=，否则 =CARGO_MANIFEST_DIR=
-       （=bevy_asset/src/io/file/mod.rs=），所以 =cargo run -p bevy_cloth= 解析到 =bevy_cloth/assets/=，
-       放根目录会报 =Path not found=。
-     - 还未判定（需运行）：纹理 V 朝向是否要翻（§4-8）、四条视觉判据。
-
-** TODO M4 — 交互与调试面板 [AGENT]
-   - =demo/camera.rs=：轨道相机（中键拖拽旋转、滚轮缩放），初始位姿对齐源 =(0.35,3.3,7.2) / euler(-21,2.25,0)=。
-   - =demo/ui.rs=：=bevy_feathers= 面板（方案见 =m4-feathers-plan.org=），=SimParams= 全字段 1:1（范围照 §1.3；
-     =enableSelfCollision= 用 checkbox，=bendCompliance= 用对数滑块）+ =VtGameState= 的 pause/step/线框/粒子调试/隐藏 GUI。
-   - 按键：=Space= 暂停、=S= 单步（源 =Input= 的等价物）；=H= / =K= / =L= 沿用源 GUI 的隐藏 GUI / 粒子 / 线框开关。
-     **数字键 1–7 切场景与 =R= 重置随 M5 一起做**：M4 只挂 Collision 一个场景（=m4-feathers-plan.org= §4-6），
-     没有可切的场景，重置即重载当前场景。
-   - =demo/grab.rs=：MouseGrabber —— =Camera::viewport_to_world= 生成射线 → 遍历粒子取
-     =distanceToRay < particleDiameter= 且 =dot(dir, p-o)= 最小者；抓取期间 =inv_mass= 置 0（记住原值），
-     目标 = =lerp(鼠标点, 当前位置, 0.8)=，并回写 =velocities=(target-cur)/dt=；释放时恢复 =inv_mass=。
-     指针悬停在 UI 上时不抓（=bevy_picking= 的 =HoverMap= 守卫，避免拖面板滑块时同时抓布料）。
-   - 落地情况（[AGENT] 代码已完成；=cargo check/clippy/test/fmt -p bevy_cloth= 全绿；需运行判定的项待显示器前确认）：
-     - =src/demo/camera.rs=：=OrbitCamera= / =OrbitCameraPlugin=；=tests/camera.rs= 校验初始位姿与朝向。
-     - =src/demo/ui.rs=：=ClothUiPlugin=（=FeathersPlugins= + =UiTheme= + 参数面板 + stats 文本 + 线框/粒子开关，
-       外加 =sync_toggle_checked=：键盘改状态后回写 checkbox 的 =Checked=，让面板与按键一致）。
-     - =src/demo/grab.rs=：=MouseGrab= / =MouseGrabPlugin=；=tests/grab.rs= 覆盖射线选点与 =lerp= 目标。
-     - =src/demo/input.rs=：=ClothInputPlugin=；=Space= 暂停、=S= 单步、=H/K/L= 开关；
-       有控件获得焦点时 =Space= 让位给控件（=bevy_input_focus::InputFocus= 守卫）。
-     - =examples/velvet-scenes.rs=：入口，挂 =ClothPlugin + ClothUiPlugin + OrbitCameraPlugin + MouseGrabPlugin + ClothInputPlugin=。
-   - 验收：
-     - [ ] 面板改参数实时生效（与源 ImGui 面板逐项对照）
-     - [ ] 暂停 + 单步：每按一次前进恰好一个固定步（用 stats 的步数计数确认）
-     - [ ] 抓取/拖拽/释放正常，释放后 =inv_mass= 恢复（打印确认）
-     - [ ] 切场景时参数按 §1.7 的 onEnter/onExit 语义正确覆盖并还原（随 M5）
-   - 命令：=cargo run -p bevy_cloth --example velvet-scenes=
-
-** TODO M5 — 七个场景补齐（依赖 M2b 完成）[AGENT]
-   - 按 §1.7 表格逐个落地 =demo/scenes.rs=，每个场景写一条判据（落点 / 摆动周期 / 是否自穿 / 是否抖动）。
-   - 多布料：=SceneClothMultiple= 三块布料共用一个 =Solver=（=index_offset= 拼接 index、=inv_masses/positions= 追加）。
-   - 压测：=SceneClothHD= res=200 —— 若 CPU 版不可交互，只要求"能跑、数值稳定"，性能留给 M6。
-   - 落地情况（[AGENT] 代码已完成；=cargo check/clippy/test/fmt -p bevy_cloth= 全绿；视觉判据待显示器前确认）：
-     - =src/demo/scenes.rs=：=SceneId=（=ALL= / =label=）+ =CurrentScene= / =PendingScene= / =SceneEntity=
-       + =scene_params(id)= + =build_scene=；7 个场景 1:1（Attach / Collision / SelfCollision / Friction /
-       Multiple / HighResolution / Swirl）。=source_pose= 复刻 =Transform::matrix()= 的 =T*Ry*Rz*Rx*S= 顺序。
-     - =scene_params= 复刻源 =ModifyParameter= 的 onEnter/onExit 语义：每次都从 =SimParams::default()= 起算，
-       切场景不泄漏（§6 风险项）；覆盖在 =AddCloth= 之前生效，=maxSpeed= 用的是最终 =numSubsteps=。
-     - =src/demo/plugin.rs=：=ColliderMotion= 扩成 =Static / SweepZ / FrictionSweep / SwirlSlot=；
-       新增 =ClothCollider.enabled=；=collect_colliders= 对 disabled 推默认槽（结论见 §6 风险表）。
-     - 场景切换：=Update= 的 =apply_scene_switch= 全量重建（despawn 旧 =SceneEntity= + 清空 =Solver= +
-       释放 mesh/material）；=1–7= 切场景、=R= 重载；面板在 =CurrentScene= 变化时整体重建以反映新参数。
-     - 测试：=tests/scenes.rs=（7 条：参数覆盖 / 不泄漏）、=tests/colliders.rs=（3 条：=size()= 折算 + disabled 槽）。
-   - 验收：
-     - [ ] 7 个场景逐一对齐源工程 =Velvet.exe= 行为；无 source 录像时，以 README 的 Q1/Q2 现象作定性判据
-       （预稳定化后不抖、Jacobi 下不自振、LRA 下不拉伸）
-     - [ ] =SceneClothSwirl= 中 =attach_slot_positions[0]= 每帧被外部改写能生效（LRA 跟着走）
-     - [ ] =SceneClothSwirl= 的球体 =Collider::enabled = false= 不参与碰撞
-     - [ ] 场景 3 自碰撞开启时不下陷/不抖动；关掉 =enableSelfCollision= 有明显差异（开关生效）
-   - 命令：=cargo run -p bevy_cloth --example velvet-scenes=
-
-** TODO M6 —（可选 P1）WGSL compute 求解器 [USER 核心 + AGENT 外围]
-   - 前置：M2b/M5 全通过 + CPU 版有基准（=res=200= 的 ms/step，用 =stats.rs= 记录）。
-   - 迁移顺序（每步都与 CPU 版同参数对照）：Predict → ApplyDeltas/Finalize → SolveStretch →
-     SolveAttachment → CollideSDF → 空间哈希（先 compute 版 uniform grid，后排序版）→ CollideParticles。
-   - 关键约束：WGSL 无浮点 atomic（用 =f32_to_ordered= 的 u32 bitcast 技巧或改算法避免竞争）；
-     =neighbors= 布局保持 =i + j*n= 的合并访问形式；=interleavedHash= 的"跨 dispatch 复用邻居"要显式管理。
-   - agent 负责：storage buffer 布局、compute pipeline / 调度接线、GPU readback 对照工具、bench 报表。
-   - 验收：同场景同参数与 CPU 版视觉一致；=res=200= 可交互（目标 ≥30 FPS）。
-
-** TODO M7 — 打磨 / DoD
-   - [ ] =cargo fmt --all= / =cargo clippy --workspace --all-targets= 零告警 / =cargo test --workspace -j 2= 绿
-        （测试必须带 =-j 2=，见 §7）
-   - [ ] =readme.org= 写清：复现命令、与源工程的差异清单（含 §0 的路径偏差、场景 3 的 substeps=8 等）、截图
-   - [ ] 同步 =../Velvet/AGENTS.md= §6（路径）与 §8（当前状态）
-   - [ ] 清理未使用依赖与临时代码
-
-* 4. 移植正确性清单（= Velvet/AGENTS.md= §5 逐条落到 Rust/Bevy 语境）
-  | # | 要点 | 我们的做法 |
-  |---|---|---|
-  | 1 | 世界坐标即求解结果 | 布料实体 =Transform::IDENTITY=；不要把粒子位置再乘实体变换（源 =actor->transform->Reset()= 同理） |
-  | 2 | collision filtering（必做） | =original_positions= 初始距离 > =particle_diameter²= 才收邻居；快照必须在烘焙变换后采集 |
-  | 3 | Jacobi 而非 Gauss-Seidel | 修正量累积到 =deltas=、除 =delta_counts= 后统一应用；**CPU 版也不要用 GS 顺序优化**，否则与源行为不一致 |
-  | 4 | 预稳定化 CollideSDF | 子步循环前先做一次不写速度的 SDF 碰撞（README Q1） |
-  | 5 | Long Range Attachment | attach 是"每个粒子都被每个吸附点约束"，不是只钉住那几个顶点（去掉它就变拉伸布） |
-  | 6 | maxSpeed clamp 与 damping | 在 =Finalize= 内；=AddCloth= 时按 =2*pd/dt*numSubsteps= 覆写（注意覆写时机与场景参数覆盖的先后） |
-  | 7 | bend rest angle = 0 | 源就是这样且 =bendCompliance= 默认 0；先 1:1 照抄再谈改进 |
-  | 8 | 纹理 V 朝向 | 源 =stbi_set_flip_vertically_on_load(true)=；Bevy 侧 UV 照抄，若上下颠倒再翻 v（写进 readme 结论） |
-  | 9 | 布料双面 | =StandardMaterial { double_sided: true, cull_mode: None, .. }= |
-  | 10 | 浮点/整型语义 | C++ =int= 溢出是 UB → Rust 用 =wrapping_mul/xor/rem=；=% / abs / floor / copysign= 的负数与 NaN 语义逐条核对；=glm::abs= 与 Rust =f32::abs= 在 -0.0/NaN 上不同；除零要显式保护（sphere SDF 的 =diff/distance=） |
-  | 11 | 法线由求解器每步重算 | 不依赖 Bevy 的法线缓存；如改用法线贴图/自动法线要单独验证 |
-  | 12 | 索引转置（§1.4） | index 生成式原样照抄，不要"修正"成自然对角线（会影响绕序与 bend 配对） |
-  | 13 | 哨兵与越界 | =neighbors= 空槽 =u32::MAX=；=cell_start= 初值 =!0=；写邻居时满 =max_num_neighbors= 直接返回（源 =return=）|
-  | 14 | 多布料共享 solver | =num_particles= / =particle_diameter= / =max_speed= 是 solver 级状态；=index_offset= 拼接 index |
-  | 15 | 系统顺序 | =FixedUpdate= 内：collider 变换更新 → 抓取更新 → =Solver::step= → Mesh 写回，=chain()= 固定顺序 |
-  | 16 | 固定 dt 来源 | 用 =Time<Fixed>::delta_secs()=，不要用 =Time::delta_secs()=（源 =Timer::fixedDeltaTime=） |
-
-* 5. 验证方法
-** 5.1 单元测试（=cargo test -j 2 -p bevy_cloth=）
-   - 网格/约束：计数、rest length、LRA 距离、=inv_mass= 硬约束、索引转置的手算样例
-   - 求解：两粒子解析解、自由落体、maxSpeed clamp、Plane/Sphere SDF 静止高度与推出方向、子步无关性
-   - 哈希：随机点集与暴力 O(n²) 邻居表逐条对齐（源 =SpatialHashGPU::Test= 的等价物，含 falsePositive/Negative 报告）
-** 5.2 运行时指标（=stats.rs= + egui 面板显示）
-   - 每步：max|v|、max/avg stretch 误差 =(|len-rest|/rest)=、被 clamp 粒子数、自碰撞对数、step 耗时（CPU 单线程/并行各一组）
-   - 判据：稳定场景下 max stretch error 应收敛到 O(1e-3)；max|v| ≤ maxSpeed；无 NaN/Inf
-** 5.3 视觉验收
-   - 每个场景一条判据，写成表格（场景 / 期望现象 / 实测 / 与源的差异）。主入口 =velvet-scenes=。
-   - 常用对照：源 =doc/gif-2022-04-19.gif= 与 =doc/shot-2022-04-19.png=。
-** 5.4 与源工程对照
-   - 若能有 Windows 机器跑 =bin/Release/velvet.exe=（=run_velvet.bat=）→ 录 7 个场景短视频做黄金参照。
-   - 否则：以 §5.1 的数值测试 + §1.7 的定性判据为准，并在 readme 明确"无源数值对照"这一限制。
-
-* 6. 风险与待验证
-  | 风险 | 处理 |
-  |---|---|
-  | 每帧 Mesh 资产重传（res=200 ≈ 950 KB/帧 + 资产事件） | 先接受并测量；若成为瓶颈，走 M3.5：自定义管线（=RenderAssetUsages::RENDER_WORLD= + storage buffer + WGSL 直接变换顶点）；或只在 res>64 时启用 |
-  | =Mesh::attribute_mut= panic | 建 mesh 时显式 =RenderAssetUsages::default()=（=mesh.rs:41=） |
-  | =feathers / =bsn!= 新 API（M4 面板） | M4 改用引擎内置 =bevy_feathers=，无第三方依赖（见 =m4-feathers-plan.org=）；风险集中在 =bsn!= 宏较新、文档少。落地后 14 个参数 + 5 个开关的面板可编译、可交互 |
-  | =rayon= 与 Bevy =ComputeTaskPool= 争抢线程 | 先单线程跑通 → 试 =ComputeTaskPool= → 不够再引入独立 rayon 线程池（并测量 FPS 影响） |
-  | 源工程无法在 Linux 构建 → 无黄金数值 | =VtClothSolverCPU*.hpp= 抄成测试参考实现（M2c）+ 录像参照（§5.4） |
-  | res=200 的 CPU 性能 | P0 不设性能验收；只要求"能跑且数值稳定"，性能是 M6 的动机 |
-  | =interleavedHash= 被"简化"成每子步重建哈希 | 必须保持"每 N 个子步重建一次"的语义，否则自碰撞场景行为漂移 |
-  | 场景参数覆盖泄漏 | 用 =OnEnter/OnExit= 或 =SceneResource { base, overrides }=，加单测验证"切场景后 =SimParams == base=" |
-  | =enabled = false= 的 collider 仍占 =sdfColliders= 槽位（=UpdateColliders= 只 =continue=，但 =CollideSDF= 收到 =size()=） | **已核实**：槽位保持 =resize= 给的零值，=ColliderType= 首个枚举是 =Sphere=，于是 kernel 读成"原点处 =scale=0= 的球"（半径塌成 =collisionMargin=）。已用 =SdfCollider::disabled()= 1:1 复刻（=tests/colliders.rs=）并在 readme 记录；Swirl 里这个默认槽离布料很远，无实际影响 |
-  | 邻居表槽位布局易被"顺手归一化"（=i + n*j= 易被写成 =i*maxNumNeighbors + k=） | 按 §1.6 实现并加 =tests/hash.rs= 断言 =neighbors[i + n*j]= 的步长，与暴力 O(n²) 比对 |
-  | 源工程 spec 本身有坑（=Debug quad=、=Timer=、=IntCoord= 用 =int=） | 不迁移 debug quad/timer；=ComputeIntCoord= 的 =int= 语义在 Rust 里显式 =i32= + 溢出处理 |
-
-* 7. 命令速查
-  **硬约束：测试一律 =-j 2=**（同根 =../AGENTS.md= 的 =Commands= 一节；执行前先看 =../AGENTS.md=）。
-  裸 =cargo test= 会满核并行编译/链接 Bevy 依赖 → 撑爆内存。
-  单 crate 用 =cargo test -j 2 -p bevy_cloth=，工作区用 =cargo test --workspace -j 2=。
-  #+begin_src bash
-    # 前置：../bevy_engines/bevy_0.20/（root Cargo.toml 的 patch 目标）必须存在
-    cargo check -p bevy_cloth --all-targets
-    cargo test  -j 2 -p bevy_cloth                # sim/ 单测（无需 GPU）；-j 2 必带
-    cargo test  -j 2 -p bevy_cloth solver_smoke -- --nocapture
-    cargo clippy -p bevy_cloth --all-targets
-    cargo fmt --all
-
-    cargo run -p bevy_cloth --example velvet-00-sandbox     # M0
-    cargo run -p bevy_cloth --example velvet-01-collision   # M3
-    cargo run -p bevy_cloth --example velvet-scenes         # M4/M5：1–7 切场景
-  #+end_src
-  源码参考（只读，不改）：
-  - =../Velvet/Velvet/VtClothSolverGPU.hpp::Simulate= / =VtClothSolverGPU.cu= / =.cuh=
-  - =../Velvet/Velvet/VtClothObjectGPU.hpp=、=Common.hpp::VtSimParams=、=Collider.hpp=、
-    =SpatialHashGPU.hpp/.cu/.cuh=、=Scene.hpp::GenerateClothMesh/SpawnCloth=、=main.cpp=（7 场景）
-  - =../Velvet/Velvet/MouseGrabber.hpp=、=PlayerController.hpp=、=GUI.cpp=、=Timer.cpp=
-  - =../Velvet/Velvet/VtClothSolverCPU.hpp= 等 CPU 参考实现、=../Velvet/doc/solver-notes.md=、=README.md=
-
-* 8. 共存约束：为将来的 avian 适配留门（现在不引依赖、不做里程碑）
-  方针：P0/P1 全程不依赖 =avian3d=；只守住下面 6 条不变量，使将来「接 avian」退化为
-  「加一个 bridge 模块 + 一行调度位置 + 一个 feature」。
-  已核实（仅备忘，不进代码）：本地 =../avian= 是 =0.8.0-dev=、crates.io =avian3d 0.7.0=（=bevy_waltz= 已在用、
-  =bevy_unit/Cargo.lock= 里只有一份 patched bevy）**都对准 Bevy 0.19**；avian 物理跑在 =FixedPostUpdate=、
-  =Time<Physics>= 跟随 =Time<Fixed>=；可用 =SpatialQuery::project_point=、=CollisionLayers=/=SpatialQueryFilter=、
-  =Query<Forces>= 的 =apply_linear_impulse_at_point=、=XpbdSolverSystems::SolveUserConstraints=。
-
-  | # | 不变量（现在就守） | 落在哪 | 以后省掉什么 |
-  |---|---|---|---|
-  | 1 | =sim/= 零 bevy / 零 avian 依赖（只用 =glam=），不认识 =Transform=/=GlobalTransform= | §2.1 | 桥接层整个放 =demo/=，=sim/= 一行不用动 |
-  | 2 | =Solver::step(&mut self, params, colliders: &[SdfCollider], dt)=：求解器不关心碰撞器从哪来 | M2a | 换源（手写组件 → avian 刚体）只是换一个收集系统 |
-  | 3 | 碰撞器是「实体 + 组件 + =Transform=」，每帧 =collect_colliders= 生成 =SdfCollider=；组件存**显式** =radius= / =half_extents=，转换时再折算成 Velvet 的 =scale= | M5 的形态 | 避免与 avian「形状自带尺寸」的口径冲突（源用 =transform.scale= 推半径） |
-  | 4 | dt 只来自 =Time<Fixed>=；场景动画用固定步累计的 =SimTime=（== 源 =physicsFrameCount * fixedDeltaTime=），不用 =Time::elapsed=、不用渲染帧计数 | §4-16 + M5 | 与 avian 共用同一时钟（=Time<Physics>= 跟随 =Time<Fixed>=），不用重对时 |
-  | 5 | 布料求解放进具名 set =ClothSystems::{Collide, Step, Writeback}=（内部 =.chain()=），外部只有一处 =.in_set(...)= | M2a / M3 | 挪到 =FixedPostUpdate= 并 =.after(PhysicsSystems::Writeback)= 只改一行 |
-  | 6 | 布料实体 =Transform::IDENTITY=，求解器写世界坐标 | §4-1 | 不与 avian「=Position=/=Rotation= 权威、writeback 覆盖 =Transform=」冲突 |
-
-  - **故意不动的扩展点**：源的 =Plane= 硬编码 y 向上、=Cube= 假设局部单位立方并用 =scale= 推尺寸
-    （属 =CollideSDF=，红线）→ 现在 1:1 照抄；将来若要支持 avian 的任意 =half_space= 法线或非均匀缩放，
-    由用户决定改法。
-  - 将来接 avian 的预期工作量：=demo/avian_bridge.rs=（=Query<(&Collider, &GlobalTransform, …)>= → =SdfCollider=）
-    + 一行调度 + 一个 =avian= feature；=sim/= 与 7 个场景不动。
-  - 明确不做（除非另开任务）：布料 → 刚体的反作用力/冲量回写；用 =XpbdConstraint= 把布料约束塞进 avian 求解器；
-    用 avian 的宽相替代我们的空间哈希。
-
-* 9. 当前状态
-  - [x] 源工程规格提取（本文件 §1）与 Bevy 0.19 API 事实核对（§2.2）
-  - [x] 共存约束登记（§8：为将来的 avian 留门，不引依赖、不做里程碑）
-  - [x] M0 骨架与场景基线（部分：=lib= 目标 + =examples/velvet-00-sandbox.rs= 已就绪、=cargo check --all-targets= 零 warning；
-        =ClothPlugin= 推迟到 M2a 一起做，=examples/01..03= 仍未移入 =examples/learning/=，
-        出画面的验收因本环境无显示未复跑）
-  - [x] M1 网格与约束生成（=src/sim/mesh_gen.rs= / =src/sim/constraints.rs= + =tests/mesh_gen.rs=，14 个测试全绿）
-  - [x] M2a 求解器调度框架（=src/sim/solver.rs= 的 =schedule/step= + =src/sim/hash.rs=；
-        =tests/solver_smoke.rs= 的骨架级测试绿）
-  - [x] M2b 求解核心实现（=solver.rs= 的 9 个 kernel 已落地；=tests/solver_smoke.rs= 的 7 条求解验收测试
-        已启用并逐条判定：14 个测试全绿，数值见 M2b 的验收清单）
-  - [ ] M2c 数值对照参考实现（可选，未开始）
-  - [-] M3 渲染写回 + Cloth/Collision 跑通（代码完成：=src/demo/= + =examples/velvet-01-collision.rs= +
-        =tests/render.rs=；四条运行时视觉判据待在显示器前复跑确认，见 M3 的「落地情况」）
-  - 备注（workspace 级）：root =bevy_workflow= 与本 crate 已用 Bevy 0.20；但 =bevy_waltz= 与
-    =units/{animation_blending,bone_attachments,modular_character,tps_camera}= 仍写 =bevy 0.19.0=，
-    因此 =Cargo.lock= 同时存在 =bevy 0.19.1=（crates.io）与 =bevy 0.20.0=（patch 路径）两份引擎。
-  - [-] M4 交互与调试面板（UI 方案 =bevy_feathers=，见 =m4-feathers-plan.org=）：轨道相机 / 参数面板 /
-    MouseGrabber / =Space=·=S= 等按键 已完成（代码 + 单测绿）；数字键 1–7 切场景与 =R= 重置推迟到 M5
-    （M4 只有 Collision 一个场景）；面板交互与视觉判据待运行确认，详见 M4 的「落地情况」
-  - [-] M5 七个场景补齐：代码已完成（=demo/scenes.rs= 的 =SceneId= + =build_scene=、
-    =SceneClothMultiple= 共用 =Solver=、=Swirl= 的 slot 动画与 disabled 球、=1–7= 切场景与 =R= 重载），
-    单测绿（=tests/scenes.rs= / =tests/colliders.rs=）；7 个场景的视觉判据待显示器前逐条确认，见 M5 的「落地情况」
-  - [ ] M6 WGSL compute 求解器（可选，未开始）
-  - [ ] M7 打磨 / DoD（未开始）
-* tips
+  - 用许多 Avian 刚体和关节可以做布料近似实验，但不会自动成为 GPU 布料模拟。
+    GPU 组织方式的正确性和性能仍需验证；尚不能宣称本项目比 Avian 更快。
+  - Avian 可作为约束数学的参考，日后也可能提供刚体环境；目前不安排适配，不承诺“一行接入”。
+  - 公式不能只看名字：Avian 的 =compute_lagrange_update= 包含旧乘子项，但其距离关节传入 =0.0=；
+    记录用于力回写的累计量，不等于在多次迭代中反馈旧乘子。到讨论柔度时再结合调用顺序展开。
+  - 源码定位（相对 =avian3d-0.7.0= 源码目录）：
+    =src/dynamics/solver/plugin.rs=、=xpbd/plugin.rs=、=xpbd/mod.rs::compute_lagrange_update=、
+    =xpbd/joints/distance.rs=；后三者位于同一 =src/dynamics/solver/= 下。

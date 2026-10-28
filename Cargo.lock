@@ -6293,6 +6293,7 @@ dependencies = [
  "inventory",
  "libdeck_macros",
  "log",
+ "modkit",
  "paste",
  "serde",
  "uuid",
@@ -6518,6 +6519,15 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "modkit"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "uuid",
 ]
 
 [[package]]

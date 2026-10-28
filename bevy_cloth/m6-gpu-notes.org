@@ -1,17 +1,30 @@
-#+title: bevy_cloth M6 — WGSL compute 求解器（对照 Velvet GPU 实现）
+#+title: bevy_cloth — Velvet GPU 实现参考笔记
 #+startup: content
 #+OPTIONS: ^:{}
 
-M6 开工前对源工程 **GPU（CUDA）** 实现的观察，作为移植基准。里程碑定义见 =plan.org= §M6。
+* 使用范围
+  本文保存源工程的 GPU 实现观察，供遇到具体问题时查阅，不是当前计划或必须照搬的规格。
+  文件名中的 M6 是历史标记；当前工作见 [[file:plan.org][plan.org]]，项目入口见 [[file:readme.org][readme.org]]。
 
-原则：**以 Velvet 的 GPU 实现为准**，不以本 crate 的 CPU 版为准——GPU 特有的工程问题（atomic 累计、
-排序、memset、内存布局）源工程已经解决，照搬其结构可以少踩一遍坑。数据正确性可以晚些再校正，
-当前阶段先把"流程结构"做对。
+  目标是 GPU 布料模拟，XPBD 是主要方法。通过小批框架开发、用户验证和共同定位逐步推进，
+  理论按实际问题查询，不以完成课程或手算练习作为前置条件。
+  也不采用“流程先搭完、正确性以后再校正”的做法；源实现和 CPU 参考都需要独立验证。
+  更改 Velvet 的特殊行为前，先说明原理与修改方向，再用实验确认是否改善。
 
-源文件（只读）：=../Velvet/Velvet/VtClothSolverGPU.hpp/.cu/.cuh=、=SpatialHashGPU.hpp/.cu/.cuh=、
-=Common.cuh/.hpp=、=VtBuffer.hpp=。
+  以下源路径以 workspace 根为起点：=../Velvet/Velvet/VtClothSolverGPU.hpp/.cu/.cuh=、
+  =SpatialHashGPU.hpp/.cu/.cuh=、=Common.cuh/.hpp=、=VtBuffer.hpp=。本任务不修改该参考仓库。
 
-* 1. 执行模型
+* 当前 GPU 原型（2026-10-28 源码检查，非运行验收）
+  - =src/gpu/solver.wesl= 有四阶段：预测位置、求拉伸修正、应用修正、更新位置与速度。
+  - =src/gpu/solver_gpu.rs= 建立粒子到拉伸约束的查询表，一次提交固定的 60 步，再读回位置和速度作 CPU 对照。
+    它不是逐帧布料后端，未连接交互场景或渲染。
+  - “每粒子收集修正”（gather）：一个线程查找该粒子的相关约束，只写自己的修正量。
+    查询表采用 CSR，即连续数组加分段索引。求修正和应用修正分两次 dispatch（计算发射）执行。
+  - 挂点、弯曲、SDF 碰撞、空间哈希、自碰撞和法线尚未进入这条 GPU 路径。
+  - 当前对照的固定点与通过条件存在缺口，见 [[file:plan.org::*验证记录与限制][验证记录]]。
+    本文不把数据布局相符或 CPU/GPU 接近当作算法已经正确的证据。
+
+* 1. Velvet 的执行模型（参考事实）
 
   - **一 phase 一个 kernel**，全在默认 stream 顺序发射 → **kernel 边界即全局同步**
     （对应 bevy_cloth 侧"一 phase 一个 compute dispatch"）。
@@ -47,25 +60,27 @@ M6 开工前对源工程 **GPU（CUDA）** 实现的观察，作为移植基准�
   =type=、=vec3 position=、=vec3 scale=、=float deltaTime=、=mat3 curTransform=、
   =mat4 invCurTransform=、=mat4 lastTransform=。
 
-* 3. Velvet 的 GPU 工程点（标注移植策略）
+* 3. Velvet 的 GPU 工程点与本项目的选择边界
 
-  1. **scatter + 浮点 atomic**：=SolveStretch/Bending/Attachment=、=CollideParticles=、
-     =ComputeTriangleNormals= 都用 =atomicAdd= 把修正量散加到 =deltas[idx]= / =normals[idx]=，
-     并用 =atomicAdd(&deltaCounts[idx], 1)= 计数；这是源工程绕开"每粒子邻接关系"的手段。
-     **不移植**：标准 WebGPU 无浮点 atomic（见 §5），这几处改 gather。
-  2. =AtomicAdd(deltas, idx, val, reorder)=（.cu:13）用 =reorder = idx1+idx2= 对 x/y/z 做
-     **轮换加法顺序**，减少热点串行。**仅记录**：gather 化后不存在写冲突。
-  3. **法线两步**（.cu:452）=cudaMemsetAsync(normals, 0)= → 三角形 atomic 累加 →
-     单独 =ComputeVertexNormals= 归一化（归一化**无保护**，孤立粒子会 NaN，与 CPU 版一致）。
-     **不移植**：改"每顶点 gather 相邻三角形"，memset 那步也省掉。
-  4. =CollideParticles= 的 wrapper **内部顺带调 =ApplyDeltas_Kernel=**（.cu:384）。
-  5. **哈希四步**（=SpatialHashGPU.cu:159=）：=ComputeParticleHash= → **cub 基数排序** →
-     =FindCellStart=（共享内存）→ =CacheNeighbors=。邻居表 =neighbors[id + n*slot]=、
-     哨兵 =0xffffffff=；=cellStart= 用 =0xffffffff= 清空（=cudaMemsetAsync(cellStart, 0xffffffff, ...)=）。
-     **排序不移植**（cub 无对应物）：自写 bitonic sort，或换不需要排序的哈希方案。
-  6. **collision filtering**（.cu:116）：初始距离 ≤ =particleDiameter²= 的对直接跳过自碰撞。照搬。
+  1. **分散写入与原子累加（scatter / atomic）**：Velvet 让每条约束把修正写入相关粒子；
+     多线程可能写同一位置，因此使用浮点 =atomicAdd=，避免累加结果丢失。
+     当前 WGSL 拉伸原型不用浮点原子，改为每粒子收集自己的修正；其他阶段的实现尚未决定。
+  2. =AtomicAdd(deltas, idx, val, reorder)=（.cu:13）轮换 x/y/z 的加法顺序以减少热点串行。
+     这是源工程对原子累加的优化，不是当前 gather 路径的必做任务，也不是本项目已测性能结论。
+  3. **法线**：源先清零，再按三角形原子累加，最后按顶点归一化。
+     源的归一化缺少退化保护；不能因源如此就保留 NaN。按顶点收集相邻三角形是候选方案，尚未实现。
+  4. =CollideParticles= 的 wrapper 内部还调用 =ApplyDeltas_Kernel=（.cu:384）。
+     阅读调度时需注意这一步，不表示我们必须保留相同的函数组织。
+  5. **空间哈希**：源先计算哈希，再用 cub 基数排序、查找桶区间、缓存邻居。
+     邻居表为 =neighbors[id + n*slot]=，空槽标记为 =0xffffffff=。
+     GPU 版尚未实现，排序或其他邻居查找方式留到对应问题再选，不预先规定 bitonic sort。
+  6. **碰撞过滤**：源忽略初始距离 ≤ =particleDiameter²= 的粒子对，以避免相邻粒子不断互相排斥。
+     这是启发式规则，不是通用物理定律；跨布料或初态接近时的漏碰撞风险需另行验证。
 
-* 4. 每 phase 的 buffer 进出（作为 bind group layout 依据）
+* 4. 源计算阶段的数据读写（查阅表）
+  phase 指计算阶段，buffer 指 GPU 存储数组。下表按源函数接口概括，
+  不是当前 WGSL 的绑定表；碰撞 wrapper 内含的应用修正步骤也列在同一行。
+  =ApplyDeltas= 还会读取已有 predicted / deltas；不能只照表机械生成绑定。
 
   | phase | 读 | 写 |
   |-------+----+----|
@@ -74,7 +89,7 @@ M6 开工前对源工程 **GPU（CUDA）** 实现的观察，作为移植基准�
   | SolveStretch | =predicted=、=invMasses=、=stretchIndices/Lengths= | =deltas=、=deltaCounts= |
   | SolveBending | =predicted=、=invMasses=、=bendIndices/Angles= | =deltas=、=deltaCounts= |
   | SolveAttachment | =predicted=、=invMasses=、=attach*= | =deltas=、=deltaCounts= |
-  | ApplyDeltas | =deltaCounts= | =predicted=、=deltas=、=deltaCounts= |
+  | ApplyDeltas | =predicted=、=deltas=、=deltaCounts= | =predicted=、=deltas=、=deltaCounts= |
   | CollideSDF | =positions=、=sdfColliders= | =predicted= |
   | CollideParticles | =predicted=、=invMasses=、=neighbors=、=positions= | =deltas=、=deltaCounts=、=predicted= |
   | Finalize | =predicted=、=positions= | =velocities=、=positions= |
@@ -84,25 +99,24 @@ M6 开工前对源工程 **GPU（CUDA）** 实现的观察，作为移植基准�
   | FindCellStart | =particleHash= | =cellStart=、=cellEnd= |
   | CacheNeighbors | =particleIndex=、=cellStart=、=cellEnd=、=positions=、=initialPositions= | =neighbors= |
 
-* 5. 映射到 WGSL：能对上 / 必须另想办法
+* 5. WGSL 实现需要另行判断的事情
+  以下是查阅提示，不是现在要完成的任务清单。
 
-  **能直接对上**：per-phase dispatch、=@workgroup_size(256)=、constant→uniform、
-  =neighbors[id+n*slot]=、哨兵 =0xffffffff=、=SDFCollider=（mat3/mat4 → mat3x3/mat4x4）。
+  | 问题 | 当前做法或限制 | 尚需判断 |
+  |------+----------------+----------|
+  | 多线程写同一粒子 | 当前拉伸采用每粒子收集修正，不请求浮点原子扩展 | 其他阶段的并行方式必须结合正确性与测量选择 |
+  | 分阶段执行 | 当前用独立 dispatch 分隔求修正与应用修正 | 不可用同一工作组内的屏障代替整个设备的阶段边界 |
+  | 数据布局 | 当前将三维向量打包为四分量，统一参数放在 uniform 中 | 新数组与参数的对齐、读写权限和生命周期要独立核对 |
+  | 邻居查找 | GPU 路径尚未实现 | 先解释要查哪些邻居及如何验证，再决定是否排序 |
+  | 数组清空 | wgpu 的 =clear_buffer= 写零；源的空槽标记为全 1 | 若沿用非零标记，需另行填充；也可以在理解后改变表示 |
+  | 资源绑定 | 当前粒子布局有 3 个 storage，约束布局有 7 个 | 扩展时核对实际设备 limits，不把旧表当作完整阶段均已验证 |
+  | 渲染输出 | 当前只将位置和速度读回 CPU 作比较 | 读回再上传 Mesh 或渲染直接读 GPU 数组，尚未选择 |
 
-  **坑**：
+  原子操作是保证并发读改写不丢结果的操作。标准 WGSL 的原子类型为整数；
+  当前原型不依赖浮点原子扩展。这是现状，不预先替未来所有硬件和算法作决定。
 
-  | 坑 | 现状 | 备选 |
-  |----+------+------|
-  | **浮点 atomic** | 标准 WebGPU 的 =atomic= 只有 =i32/u32=；浮点 atomic 属扩展（wgpu 的 =SHADER_FLOAT32_ATOMIC=），**本项目不使用** | =Solve*= 与法线改 **gather**：每粒子/顶点一条线程遍历自己的入射约束/三角形，零原子 |
-  | **cub 基数排序** | WGSL 无现成排序 | 自写 bitonic sort，或换哈希方案（桶计数 / 不排序） |
-  | **=cudaMemset=** | wgpu =clear_buffer= 只写 0 | =cellStart=0xffffffff= 需专门填充 kernel |
-  | **绑定上限** | 8 storage/stage（默认 limits） | 每 phase 独立 layout，单 phase ≤8（已核对，最多 8） |
-  | **渲染取数** | Velvet 用 CUDA-GL 互操作 | Bevy：readback 到 Mesh，或 M3.5 自定义管线（storage buffer + 顶点着色器直读） |
-
-* 6. 待定与下一步
-
-  1. **为 gather 建入射表**：=stretch= / =bend= 的 per-particle CSR；=vertex→triangle= CSR；
-     attach 可按 =slot*n + p= 推导、不用表。这是 scatter→gather 的代价，属 [AGENT] 边界。
-  2. 用 §4 的表定下每个 phase 的 bind group layout（单 phase ≤ 8 storage）。
-  3. 定排序方案（自写 bitonic vs 换哈希）。
-  4. 只依赖标准 WebGPU 特性与默认 limits，**不请求任何扩展 feature**。
+* 6. 当前工作边界
+  下一步检查现有 GPU 原型到可视验证的缺口，先提出一小批框架改动，再由用户确认并运行验证。
+  具体步骤与验证方法只在 [[file:plan.org][plan.org]] 维护，不在本笔记另排课程或任务。
+  查询表已经有拉伸版本；不要求先建立所有阶段的表，也不同时补齐弯曲、排序和碰撞。
+  遇到数据或画面异常时，按实际数据流定位，需要哪个原理再查哪部分，不预先决定渲染方案。

@@ -1,32 +1,81 @@
-#+title: cloth simulation
+#+title: bevy_cloth — 高性能 GPU 布料模拟
 #+startup: content
 #+author: Gaeric
 #+HTML_HEAD: <link href="./worg.css" rel="stylesheet" type="text/css">
 #+HTML_HEAD: <link href="/static/css/worg.css" rel="stylesheet" type="text/css">
 #+OPTIONS: ^:{}
-* Intro
-  This unit chronicles the learning process of cloth simulation.
+* 项目目标
+  实现基于 Bevy compute shader 的高性能 GPU 布料模拟，同时让项目所有者掌握其理论，
+  能够解释、验证和修改实现。
 
-* 复现
+  布料模拟是目的，XPBD 是当前的主要实现算法；本项目不以建设通用 XPBD 求解框架为目标。
+  算法、数据结构和优化围绕布料的变形、碰撞及性能需求选择，不为了通用性扩展无关功能。
+
+  GPU 求解是主线，不是完成 CPU 演示之后的可选优化。CPU 实现用于小规模参考和诊断；
+  CPU/GPU 结果接近，不等于两者都正确，还需要能独立判断对错的小实验。
+
+  Velvet 是算法和工程参考，不再要求逐项复刻。保留或改变其中的设计，都要说明它解决什么问题。
+  放弃其特殊行为之前，要先讲清原理、修改方向，并用实验验证改善。
+
+* 怎样使用这些文档
+  - 本文件：项目入口、代码现状和运行方式。
+  - [[file:plan.org][plan.org]]：协作约定、当前问题和下一步；不把所有未来功能都展开成任务。
+  - [[file:m6-gpu-notes.org][m6-gpu-notes.org]]：Velvet GPU 实现的参考笔记，不是必须照搬的规格。
+
+  当前方向更新于 2026-10-28：不再执行“CPU 七场景完成后，才做可选 GPU 优化”的旧路线。
+  旧迁移计划与历史验收记录由 Git 保留。代码里的 M0–M6 等编号是历史标记，不是当前任务顺序。
+
+* 代码现在在哪里
+  | 目录 | 用途 | 当前边界 |
+  |------+------+----------|
+  | =src/sim/= | CPU 求解、网格与约束生成、碰撞和空间哈希 | 已有实现与测试，不是独立正确性标准 |
+  | =src/demo/= | 场景、面板、相机、抓取和 Mesh 写回 | 交互演示仍调用 CPU 求解器 |
+  | =src/gpu/= | GPU 数据布局、计算管线和 shader | 仅预测、拉伸修正、应用修正、更新位置与速度四阶段；未接交互渲染 |
+  | =tests/= | CPU 与外围测试 | 测试存在或曾通过，不等于全部物理目标已验收 |
+
+  GPU 示例是一次性无窗口对照实验，不是演示程序的 GPU 模式。
+  现有 gather 写法是“每个粒子收集自己的约束修正”，避免多个线程同时写同一粒子；
+  它是当前实现，不是已证明最优的方案。
+
+  与 Avian 的对象、算法用途和执行方式的区别见 [[file:plan.org::*与 Avian 的区别][计划中的比较说明]]。
+
+* 当前工作与协作方式
+  agent 推进一小批双方同意的框架代码，用户运行验证；发现问题后，双方共同定位，再决定下一批。
+  agent 要给出具体文件／函数、要检查的数据、正常关系，以及不同检查结果对应的下一步。
+  用户在参与开发和排查中熟悉项目，理论和公式按实际问题查询，不安排先授课、再答题的必经步骤。
+  CPU 求解器由用户编写，不要求重做已掌握的基本计算；求解核心仍由用户实现。
+
+  下一步是检查现有 GPU 原型到可视验证之间的缺口，提出首批最小框架改动供确认。
+  具体实现方式尚未选定，暂不同时补齐弯曲、自碰撞或七个场景；详见 [[file:plan.org][当前计划]]。
+
+* 运行现有程序
+  从 workspace 根目录运行；先阅读根 [[file:../AGENTS.md][AGENTS.md]]。
+  根 =Cargo.toml= 指向的 =../bevy_engines/bevy_0.20/= 必须存在，依赖也必须可解析。
+  以下是已有入口，不代表本次已运行验收；交互演示需要显示环境，GPU 实验也需要可用图形设备。
+
   #+begin_src bash
-    # 前置：root Cargo.toml 的 [patch.crates-io] 指向 ../bevy_engines/bevy_0.20/，该 checkout 必须存在
-    cargo run -p bevy_cloth --example velvet-00-sandbox     # M0：空场景 + 地面 + 球
-    cargo run -p bevy_cloth --example velvet-01-collision   # M3：单个场景（Cloth / SDF Collision）
-    cargo run -p bevy_cloth --example velvet-scenes         # M4/M5：调试面板 + 7 个场景
+    cargo run -j 2 -p bevy_cloth --example velvet-scenes         # CPU 七场景演示与面板
+    cargo run -j 2 -p bevy_cloth --example velvet-gpu            # GPU 拉伸子集，无窗口、一次性对照
+    cargo run -j 2 -p bevy_cloth --example velvet-00-sandbox      # 场景骨架，不是布料模拟验收
+    cargo run -j 2 -p bevy_cloth --example velvet-01-collision    # 历史入口，当前实际加载 Attach 场景
   #+end_src
 
-  按键（源 =GameInstance::ProcessKeyboard= / =GUI.cpp= 的等价物）：
-  =1–7= 切场景 · =R= 重载当前场景 · =Space= 暂停 · =S= 单步 · =H= 隐藏 GUI · =K= 画粒子 · =L= 线框。
-  鼠标：左键拖拽抓布料（=MouseGrabber=），中键拖拽转相机，滚轮缩放。
+  只有 =velvet-scenes= 安装了完整交互插件：
+  =1–7= 切场景 · =R= 重载 · =Space= 暂停 · =S= 单步 · =H= 隐藏参数列表 · =K= 画粒子 · =L= 线框。
+  鼠标左键拖拽布料，中键转相机，滚轮缩放。UI 控件获得焦点时，Space 不切换暂停。
+  操作与重载仍有已知限制，见下节；不要用入口名称代替检查实际场景。
 
-* 与源工程的差异 / 备注
-  | # | 事项 | 说明 |
-  |---+------+------|
-  | 1 | 迁移路径 | 落在 =bevy_unit/bevy_cloth=（workspace 成员），不是 =Velvet= 仓库内的 =velvet-bevy/= |
-  | 2 | 场景 3 的 substeps | 源 =ModifyParameter(numSubsteps, 3)= 紧跟 =(…, 8)=，实际生效 8，这里只写 8 |
-  | 3 | 布料纹理 V 朝向 | 源 =stbi_set_flip_vertically_on_load(true)=；Bevy 侧 UV 照抄，若图案上下颠倒再翻 v |
-  | 4 | 环境光 | Bevy 0.20 的 =AmbientLight= 是**相机组件**（=#[require(Camera)]=），单独 spawn 会多出一个相机实体；改用全局 =GlobalAmbientLight= 资源 |
-  | 5 | 立方体尺寸口径 | 源用 =transform.scale= 缩放**单位**立方体，故 =SdfCollider= 的 =scale = 2 × half_extent= |
-  | 6 | disabled collider | 源 =UpdateColliders= 对 disabled 只 =continue=，槽位保持 =resize= 的零值 → kernel 读成"原点处半径 =collisionMargin= 的球"；已 1:1 复刻（实际影响可忽略） |
-  | 7 | 暂停时不给抓取 | 源把 actor 的 =Update= / =FixedUpdate= 都放在 =if (!pause)= 内，所以暂停时不抓取；这里同样把抓取 gated 在 =simulation_should_run= |
-  | 8 | 无源数值对照 | 源工程（Windows/VS/CUDA）无法在 Linux 构建，缺 =velvet.exe= 黄金参照；以 =plan.org= §5.1 数值测试 + §1.7 定性判据为准 |
+* 已知限制与参考行为
+  以下记录现状，不是要求永久保留的设计，也不是当前要同时修复的任务清单。
+
+  - GPU 对照的“四角固定”未真正成立；CPU 参考删除了挂点约束，保留零逆质量并不能阻止预测阶段下落。
+    两边一致不能证明受固定点加载的拉伸正确。对照目前只打印最大差，缺少容差和非有限值拒绝条件。
+  - 切场景未清理旧抓取状态，释放时可能访问旧粒子索引；暂停期间松开鼠标也可能丢失释放事件。
+    =R= 尚未复位所有状态，不能把它理解为严格重现实验初值。
+  - 目前沿用了 disabled collider 的默认槽行为：不是彻底跳过，而是原点处半径为碰撞边距的小球。
+    这是待评估的源行为，不以“1:1 复刻”作为正确性理由。
+  - 场景 3 当前使用 8 个子步；布料立方体碰撞器的 =scale= 按 =2 × half_extent= 换算。
+    这些是现有参数和尺寸口径，不是新的理论要求。纹理 V 朝向尚待视觉确认。
+  - 本次没有运行 Velvet 可执行程序，也没有逐帧黄金数值对照。参考源码与现有 CPU 结果都不能替代独立验证。
+  - 2026-10-28 的检查为静态审查。容器未暴露 GPU 设备；离线测试在依赖解析阶段失败，未执行测试。
+    命令和失败原因见 [[file:plan.org::*验证记录与限制][验证记录]]，不能据此声称测试通过或性能达标。
