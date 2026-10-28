@@ -10,7 +10,7 @@ use bevy::{
 };
 use bevy_cloth::gpu::{SolverGpuPlugin, SolverResultSlot};
 
-fn main() {
+fn main() -> AppExit {
     App::new()
         .add_plugins(
             DefaultPlugins
@@ -27,7 +27,7 @@ fn main() {
         )))
         .add_plugins(SolverGpuPlugin)
         .add_systems(Update, report_and_exit)
-        .run();
+        .run()
 }
 
 fn report_and_exit(slot: Res<SolverResultSlot>, mut exit: MessageWriter<AppExit>) {
@@ -36,5 +36,10 @@ fn report_and_exit(slot: Res<SolverResultSlot>, mut exit: MessageWriter<AppExit>
     };
 
     info!("{report:?}");
-    exit.write(AppExit::Success);
+    if report.comparison_passed() {
+        exit.write(AppExit::Success);
+    } else {
+        error!("GPU/CPU comparison exceeded position 1e-3 or velocity 1e-2 tolerance");
+        exit.write(AppExit::error());
+    }
 }

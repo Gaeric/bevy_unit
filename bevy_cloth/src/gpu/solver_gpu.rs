@@ -1,4 +1,4 @@
-//! gpu solver (plan.org M6): upload the particle and stretch-incidence arrays, run the phase
+//! gpu solver: upload particles and stretch/attachment incidence arrays, run the phase
 //! schedule headless, read the result back and compare it with the cpu reference.
 
 use std::sync::{Arc, Mutex};
@@ -19,19 +19,23 @@ use glam::{Mat4, Vec3};
 
 use crate::{
     gpu::{
-        layout::{GpuParams, GpuVec3, pack_vec3, unpack_vec3},
+        layout::{GpuAttachEntry, GpuParams, GpuVec3, pack_vec3, unpack_vec3},
         pipeline::{SolverPipeline, WORKGROUP_SIZE, binding},
     },
-    sim::{mesh_gen::generate_cloth_mesh, params::SimParams, solver::Solver},
+    sim::{
+        constraints::AttachConstraints, mesh_gen::generate_cloth_mesh, params::SimParams,
+        solver::Solver,
+    },
 };
 
-/// `Time<Fixed>` at 60 Hz, same as `demo::FIXED_DELTA`.
-const DT: f32 = 1.0 / 60.0;
+/// One-time main-world clock snapshot, not a real-time FixedUpdate driver.
+#[derive(Resource, Clone, Copy)]
+struct SolverBatchTime(f32);
 const RES: u32 = 16;
 const STEPS: u32 = 60;
 const SUBSTEPS: u32 = 2;
 const ITERATIONS: u32 = 4;
-/// the four grid corners, pinned so gravity actually loads the stretch constraints.
+/// Four zero-rest attachment particles. Shared Jacobi counts allow residual pin drift.
 const CORNERS: [u32; 4] = [0, RES, RES * (RES + 1), RES * (RES + 1) + RES];
 
 /// the compare result, shared with the main world so its `Update` system can log it and exit.
@@ -45,6 +49,22 @@ pub struct SolverReport {
     pub iterations: u32,
     pub max_position_diff: f32,
     pub max_velocity_diff: f32,
+    pub step_time: f32,
+    pub substeps: u32,
+    pub gpu_max_pin_drift: f32,
+    pub cpu_max_pin_drift: f32,
+    pub gpu_max_lra_violation: f32,
+    pub cpu_max_lra_violation: f32,
+}
+
+impl SolverReport {
+    /// Diagnostic comparison tolerances, not proof of physical correctness or exact pinning.
+    pub fn comparison_passed(&self) -> bool {
+        self.max_position_diff.is_finite()
+            && self.max_velocity_diff.is_finite()
+            && self.max_position_diff <= 1e-3
+            && self.max_velocity_diff <= 1e-2
+    }
 }
 
 struct SolverBuffers {
@@ -58,9 +78,17 @@ struct SolverBuffers {
     _stretch_inc_offsets: Buffer,
     _stretch_inc_other: Buffer,
     _stretch_inc_rest: Buffer,
+    _attach_inc_offsets: Buffer,
+    _attach_inc_entries: Buffer,
+    _attach_slot_positions: Buffer,
     _params: Buffer,
     particle_bind_group: BindGroup,
     constraint_bind_group: BindGroup,
+    attachment_bind_group: BindGroup,
+    attachment: AttachConstraints,
+    inverse_masses: Vec<f32>,
+    long_range_stretchiness: f32,
+    step_time: f32,
     reference_positions: Vec<Vec3>,
     reference_velocities: Vec<Vec3>,
     num_particles: u32,
@@ -106,6 +134,41 @@ fn build_stretch_csr(solver: &Solver) -> StretchCsr {
     }
 }
 
+/// Stable particle grouping, independent of slot-major ordering or uniform incidence counts.
+/// Empty particle ranges and an empty constraint table are both represented by equal offsets.
+struct AttachCsr {
+    offsets: Vec<u32>,
+    entries: Vec<GpuAttachEntry>,
+}
+
+fn build_attach_csr(num_particles: usize, attach: &AttachConstraints) -> AttachCsr {
+    assert_eq!(attach.particle_ids.len(), attach.slot_ids.len());
+    assert_eq!(attach.particle_ids.len(), attach.distances.len());
+    let mut offsets = vec![0u32; num_particles + 1];
+    for &particle in &attach.particle_ids {
+        assert!((particle as usize) < num_particles);
+        offsets[particle as usize + 1] += 1;
+    }
+    for i in 0..num_particles {
+        offsets[i + 1] += offsets[i];
+    }
+    let mut cursor = offsets.clone();
+    let mut entries = vec![GpuAttachEntry::default(); attach.particle_ids.len()];
+    for ((&particle, &slot), &rest) in attach
+        .particle_ids
+        .iter()
+        .zip(&attach.slot_ids)
+        .zip(&attach.distances)
+    {
+        assert!((slot as usize) < attach.slot_positions.len());
+        assert!(rest.is_finite() && rest >= 0.0);
+        let index = cursor[particle as usize] as usize;
+        entries[index] = GpuAttachEntry { slot, rest };
+        cursor[particle as usize] += 1;
+    }
+    AttachCsr { offsets, entries }
+}
+
 fn storage_buffer(
     device: &RenderDevice,
     queue: &RenderQueue,
@@ -129,7 +192,9 @@ fn create_buffers(
     queue: &RenderQueue,
     cache: &PipelineCache,
     pipeline: &SolverPipeline,
+    step_time: f32,
 ) -> SolverBuffers {
+    assert!(step_time.is_finite() && step_time > 0.0);
     let mut params = SimParams {
         num_substeps: SUBSTEPS,
         num_iterations: ITERATIONS,
@@ -144,20 +209,20 @@ fn create_buffers(
             &generate_cloth_mesh(RES),
             Mat4::IDENTITY,
             &CORNERS,
-            DT,
+            step_time,
         )
         .expect("generated meshes are source-layout grids");
 
-    // the gpu implements stretch only so far, so the reference drops the other constraint tables.
-    // `inv_masses` keeps the pins, which stretch must respect.
+    // Same stretch + attachment inputs on both paths. No bending, colliders or self-collision.
+    // Zero-rest attachments restore pins through Jacobi averaging, not a hard position clamp.
     let mut reference = solver.clone();
     reference.constraints.bend = Default::default();
-    reference.constraints.attach = Default::default();
     for _ in 0..STEPS {
-        reference.step(&params, &[], DT);
+        reference.step(&params, &[], step_time);
     }
 
     let csr = build_stretch_csr(&solver);
+    let attach_csr = build_attach_csr(solver.num_particles(), &solver.constraints.attach);
     let num_particles = solver.num_particles() as u32;
     let zero_vec3 = vec![GpuVec3::default(); solver.num_particles()];
     let zero_counts = vec![0i32; solver.num_particles()];
@@ -217,7 +282,36 @@ fn create_buffers(
         bytemuck::cast_slice(&csr.rest),
     );
 
-    let gpu_params = GpuParams::new(&params, params.substep_time(DT));
+    let attach_inc_offsets = storage_buffer(
+        device,
+        queue,
+        "attachment incidence offsets",
+        bytemuck::cast_slice(&attach_csr.offsets),
+    );
+    // A runtime array must bind at least one complete element, even with zero incidences/slots.
+    let attach_entries = if attach_csr.entries.is_empty() {
+        vec![GpuAttachEntry::default()]
+    } else {
+        attach_csr.entries
+    };
+    let attach_inc_entries = storage_buffer(
+        device,
+        queue,
+        "attachment incidence slot and rest",
+        bytemuck::cast_slice(&attach_entries),
+    );
+    let mut slot_positions = pack_vec3(&solver.constraints.attach.slot_positions);
+    if slot_positions.is_empty() {
+        slot_positions.push(GpuVec3::default());
+    }
+    let attach_slot_positions = storage_buffer(
+        device,
+        queue,
+        "attachment slot positions",
+        bytemuck::cast_slice(&slot_positions),
+    );
+
+    let gpu_params = GpuParams::new(&params, params.substep_time(step_time));
     let params_buffer = device.create_buffer(&BufferDescriptor {
         label: Some("cloth solver params"),
         size: size_of::<GpuParams>() as u64,
@@ -263,6 +357,31 @@ fn create_buffers(
         )),
     );
 
+    let attachment_layout = cache.get_bind_group_layout(&pipeline.attachment_layout);
+    let attachment_bind_group = device.create_bind_group(
+        "cloth solver attachment bind group",
+        &attachment_layout,
+        &BindGroupEntries::with_indices((
+            (binding::PARAMS, params_buffer.as_entire_binding()),
+            (binding::PREDICTED, predicted.as_entire_binding()),
+            (binding::DELTAS, deltas.as_entire_binding()),
+            (binding::DELTA_COUNTS, delta_counts.as_entire_binding()),
+            (binding::INV_MASSES, inv_masses.as_entire_binding()),
+            (
+                binding::ATTACH_INC_OFFSETS,
+                attach_inc_offsets.as_entire_binding(),
+            ),
+            (
+                binding::ATTACH_INC_ENTRIES,
+                attach_inc_entries.as_entire_binding(),
+            ),
+            (
+                binding::ATTACH_SLOT_POSITIONS,
+                attach_slot_positions.as_entire_binding(),
+            ),
+        )),
+    );
+
     SolverBuffers {
         positions,
         velocities,
@@ -273,9 +392,17 @@ fn create_buffers(
         _stretch_inc_offsets: stretch_inc_offsets,
         _stretch_inc_other: stretch_inc_other,
         _stretch_inc_rest: stretch_inc_rest,
+        _attach_inc_offsets: attach_inc_offsets,
+        _attach_inc_entries: attach_inc_entries,
+        _attach_slot_positions: attach_slot_positions,
         _params: params_buffer,
         particle_bind_group,
         constraint_bind_group,
+        attachment_bind_group,
+        attachment: solver.constraints.attach,
+        inverse_masses: solver.constraints.inv_masses,
+        long_range_stretchiness: params.long_range_stretchiness,
+        step_time,
         reference_positions: reference.positions,
         reference_velocities: reference.velocities,
         num_particles,
@@ -317,10 +444,168 @@ fn read_vec3(
 }
 
 fn max_difference(a: &[Vec3], b: &[Vec3]) -> f32 {
+    assert_eq!(a.len(), b.len(), "diagnostic array length mismatch");
     a.iter()
         .zip(b)
-        .map(|(a, b)| (*a - *b).length())
+        .map(|(a, b)| {
+            assert!(a.is_finite() && b.is_finite(), "non-finite solver output");
+            let distance = (*a - *b).length();
+            assert!(distance.is_finite(), "non-finite diagnostic distance");
+            distance
+        })
         .fold(0.0, f32::max)
+}
+
+/// Positive-rest incidences on pinned particles are inactive, just as in the solver.
+/// Zero-rest incidences measure pin drift separately; neither metric assumes exact pinning.
+fn attachment_errors(
+    positions: &[Vec3],
+    attach: &AttachConstraints,
+    inverse_masses: &[f32],
+    stretchiness: f32,
+) -> (f32, f32) {
+    assert_eq!(positions.len(), inverse_masses.len());
+    let mut pin_drift = 0.0f32;
+    let mut lra_violation = 0.0f32;
+    for ((&particle, &slot), &rest) in attach
+        .particle_ids
+        .iter()
+        .zip(&attach.slot_ids)
+        .zip(&attach.distances)
+    {
+        let distance =
+            (positions[particle as usize] - attach.slot_positions[slot as usize]).length();
+        let target = rest * stretchiness;
+        assert!(distance.is_finite() && target.is_finite());
+        if rest == 0.0 {
+            pin_drift = pin_drift.max(distance);
+        } else if inverse_masses[particle as usize] != 0.0 || target <= 0.0 {
+            lra_violation = lra_violation.max((distance - target).max(0.0));
+        }
+    }
+    (pin_drift, lra_violation)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::solver::{apply_deltas, solve_attachment};
+
+    fn attachment_fixture() -> AttachConstraints {
+        AttachConstraints {
+            particle_ids: vec![2, 0, 2, 1, 0, 3],
+            slot_ids: vec![1, 0, 0, 0, 1, 0],
+            distances: vec![1.0, 0.0, 2.0, 2.0, 0.25, 1.0],
+            slot_positions: vec![Vec3::ZERO, Vec3::X],
+        }
+    }
+
+    #[test]
+    fn attachment_csr_preserves_table_order_and_empty_ranges() {
+        let csr = build_attach_csr(5, &attachment_fixture());
+        assert_eq!(csr.offsets, [0, 2, 3, 5, 6, 6]);
+        let pairs: Vec<_> = csr.entries.iter().map(|e| (e.slot, e.rest)).collect();
+        assert_eq!(
+            pairs,
+            [(0, 0.0), (1, 0.25), (0, 2.0), (1, 1.0), (0, 2.0), (0, 1.0)]
+        );
+        let empty = build_attach_csr(3, &AttachConstraints::default());
+        assert_eq!(empty.offsets, [0, 0, 0, 0]);
+        assert!(empty.entries.is_empty());
+    }
+
+    #[test]
+    fn attachment_gather_appends_like_cpu_and_preserves_pin_drift() {
+        let attach = attachment_fixture();
+        let csr = build_attach_csr(4, &attach);
+        // pin; slack; extended beyond both slots; exactly at scaled target.
+        let initial = vec![Vec3::Y, Vec3::X, Vec3::X * 5.0, Vec3::X * 1.5];
+        let masses = [0.0, 1.0, 1.0, 1.0];
+        let params = SimParams {
+            num_particles: 4,
+            long_range_stretchiness: 1.5,
+            ..default()
+        };
+        let mut cpu_pred = initial.clone();
+        let mut cpu_delta = vec![Vec3::ZERO, Vec3::Y, Vec3::Y, Vec3::ZERO];
+        let mut cpu_count = vec![2, 1, 1, 0];
+        let mut gathered = cpu_delta.clone();
+        let mut counts = cpu_count.clone();
+        for i in 0..initial.len() {
+            for entry in &csr.entries[csr.offsets[i] as usize..csr.offsets[i + 1] as usize] {
+                let target = entry.rest * params.long_range_stretchiness;
+                if masses[i] == 0.0 && target > 0.0 {
+                    continue;
+                }
+                let diff = initial[i] - attach.slot_positions[entry.slot as usize];
+                let dist = diff.length();
+                if dist > target {
+                    gathered[i] += -diff + diff / dist * target;
+                    counts[i] += 1;
+                }
+            }
+        }
+        solve_attachment(
+            &mut cpu_pred,
+            &mut cpu_delta,
+            &mut cpu_count,
+            &masses,
+            &attach,
+            &params,
+        );
+        assert_eq!(counts, [3, 1, 3, 0]);
+        assert_eq!(cpu_count, counts);
+        assert_eq!(max_difference(&cpu_delta, &gathered), 0.0);
+        assert_eq!(cpu_delta[0], -Vec3::Y);
+        assert_eq!(cpu_delta[2], Vec3::new(-4.5, 1.0, 0.0));
+        apply_deltas(&mut cpu_pred, &mut cpu_delta, &mut cpu_count, &params);
+        assert!((cpu_pred[0].y - 2.0 / 3.0).abs() < 1e-6);
+        let (pin, lra) = attachment_errors(&cpu_pred, &attach, &masses, 1.5);
+        assert!((pin - 2.0 / 3.0).abs() < 1e-6);
+        assert!(lra > 0.0 && lra.is_finite());
+    }
+
+    #[test]
+    fn attachment_zero_scale_uses_scaled_target_for_pin_skip() {
+        let attach = AttachConstraints {
+            particle_ids: vec![0],
+            slot_ids: vec![0],
+            distances: vec![2.0],
+            slot_positions: vec![Vec3::ZERO],
+        };
+        let csr = build_attach_csr(1, &attach);
+        let params = SimParams {
+            num_particles: 1,
+            long_range_stretchiness: 0.0,
+            ..default()
+        };
+        let mut pred = [Vec3::X];
+        let mut delta = [Vec3::ZERO];
+        let mut count = [0];
+        solve_attachment(&mut pred, &mut delta, &mut count, &[0.0], &attach, &params);
+        let target = csr.entries[0].rest * params.long_range_stretchiness;
+        assert_eq!(target, 0.0);
+        assert_eq!(delta, [-Vec3::X]);
+        assert_eq!(count, [1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "length mismatch")]
+    fn diagnostic_rejects_different_lengths() {
+        max_difference(&[Vec3::ZERO], &[]);
+    }
+
+    #[test]
+    #[should_panic(expected = "non-finite solver output")]
+    fn diagnostic_rejects_nan() {
+        max_difference(&[Vec3::splat(f32::NAN)], &[Vec3::ZERO]);
+    }
+
+    #[test]
+    #[should_panic(expected = "non-finite solver output")]
+    fn diagnostic_rejects_infinity() {
+        max_difference(&[Vec3::splat(f32::INFINITY)], &[Vec3::ZERO]);
+    }
 }
 
 pub struct SolverGpuPlugin;
@@ -338,9 +623,15 @@ impl Plugin for SolverGpuPlugin {
     }
 
     fn finish(&self, app: &mut App) {
+        let step_time = app
+            .world()
+            .resource::<Time<Fixed>>()
+            .timestep()
+            .as_secs_f32();
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
+        render_app.insert_resource(SolverBatchTime(step_time));
         render_app.init_resource::<SolverPipeline>();
     }
 }
@@ -352,17 +643,22 @@ fn run_solver(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     slot: Res<SolverResultSlot>,
+    batch_time: Res<SolverBatchTime>,
 ) {
     if slot.0.lock().expect("solver result slot").is_some() {
         return;
     }
 
-    let buffers = buffers.get_or_insert_with(|| create_buffers(&device, &queue, &cache, &pipeline));
+    let buffers = buffers
+        .get_or_insert_with(|| create_buffers(&device, &queue, &cache, &pipeline, batch_time.0));
 
     let Some(predict) = cache.get_compute_pipeline(pipeline.predict()) else {
         return;
     };
     let Some(solve_stretch) = cache.get_compute_pipeline(pipeline.solve_stretch()) else {
+        return;
+    };
+    let Some(solve_attachment) = cache.get_compute_pipeline(pipeline.solve_attachment()) else {
         return;
     };
     let Some(apply_deltas) = cache.get_compute_pipeline(pipeline.apply_deltas()) else {
@@ -387,10 +683,14 @@ fn run_solver(
                 pass.set_pipeline(predict);
                 pass.dispatch_workgroups(groups, 1, 1);
 
-                pass.set_bind_group(0, &buffers.constraint_bind_group, &[]);
                 for _ in 0..ITERATIONS {
+                    pass.set_bind_group(0, &buffers.constraint_bind_group, &[]);
                     pass.set_pipeline(solve_stretch);
                     pass.dispatch_workgroups(groups, 1, 1);
+                    pass.set_bind_group(0, &buffers.attachment_bind_group, &[]);
+                    pass.set_pipeline(solve_attachment);
+                    pass.dispatch_workgroups(groups, 1, 1);
+                    pass.set_bind_group(0, &buffers.constraint_bind_group, &[]);
                     pass.set_pipeline(apply_deltas);
                     pass.dispatch_workgroups(groups, 1, 1);
                 }
@@ -406,12 +706,32 @@ fn run_solver(
     let gpu_positions = read_vec3(&device, &queue, &buffers.positions, buffers.num_particles);
     let gpu_velocities = read_vec3(&device, &queue, &buffers.velocities, buffers.num_particles);
 
+    let max_position_diff = max_difference(&gpu_positions, &buffers.reference_positions);
+    let max_velocity_diff = max_difference(&gpu_velocities, &buffers.reference_velocities);
+    let (gpu_max_pin_drift, gpu_max_lra_violation) = attachment_errors(
+        &gpu_positions,
+        &buffers.attachment,
+        &buffers.inverse_masses,
+        buffers.long_range_stretchiness,
+    );
+    let (cpu_max_pin_drift, cpu_max_lra_violation) = attachment_errors(
+        &buffers.reference_positions,
+        &buffers.attachment,
+        &buffers.inverse_masses,
+        buffers.long_range_stretchiness,
+    );
     let report = SolverReport {
         num_particles: buffers.num_particles,
         steps: STEPS,
         iterations: ITERATIONS,
-        max_position_diff: max_difference(&gpu_positions, &buffers.reference_positions),
-        max_velocity_diff: max_difference(&gpu_velocities, &buffers.reference_velocities),
+        max_position_diff,
+        max_velocity_diff,
+        step_time: buffers.step_time,
+        substeps: SUBSTEPS,
+        gpu_max_pin_drift,
+        cpu_max_pin_drift,
+        gpu_max_lra_violation,
+        cpu_max_lra_violation,
     };
     *slot.0.lock().expect("solver result slot") = Some(report);
 }

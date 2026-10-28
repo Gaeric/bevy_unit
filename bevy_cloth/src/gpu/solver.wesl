@@ -14,7 +14,7 @@ struct Params {
   max_speed: f32,
   damping: f32,
   relaxation_factor: f32,
-  pad0: f32,
+  long_range_stretchiness: f32,
   pad1: f32,
   pad2: f32,
 };
@@ -31,6 +31,14 @@ struct Params {
 @group(0) @binding(7) var<storage, read> stretch_inc_offsets: array<u32>;
 @group(0) @binding(8) var<storage, read> stretch_inc_other: array<u32>;
 @group(0) @binding(9) var<storage, read> stretch_inc_rest: array<f32>;
+
+struct AttachEntry {
+  slot: u32,
+  rest: f32,
+};
+@group(0) @binding(10) var<storage, read> attach_inc_offsets: array<u32>;
+@group(0) @binding(11) var<storage, read> attach_inc_entries: array<AttachEntry>;
+@group(0) @binding(12) var<storage, read> attach_slot_positions: array<vec4<f32>>;
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn predict(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -78,6 +86,36 @@ fn solve_stretch(@builtin(global_invocation_id) gid: vec3<u32>) {
     count = count + 1;
   }
 
+  deltas[i] = vec4<f32>(delta, 0.0);
+  delta_counts[i] = count;
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE)
+fn solve_attachment(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  if (i >= params.num_particles) {
+    return;
+  }
+
+  // Append AFTER stretch, keeping its contributions (including zero corrections at pins).
+  var delta = deltas[i].xyz;
+  var count = delta_counts[i];
+  let start = attach_inc_offsets[i];
+  let end = attach_inc_offsets[i + 1u];
+  for (var k = start; k < end; k = k + 1u) {
+    let entry = attach_inc_entries[k];
+    let target_dist = entry.rest * params.long_range_stretchiness;
+    // CPU/CUDA test the scaled target, not the raw rest length.
+    if (inv_masses[i] == 0.0 && target_dist > 0.0) {
+      continue;
+    }
+    let diff = predicted[i].xyz - attach_slot_positions[entry.slot].xyz;
+    let dist = length(diff);
+    if (dist > target_dist) {
+      delta += -diff + diff / dist * target_dist;
+      count = count + 1;
+    }
+  }
   deltas[i] = vec4<f32>(delta, 0.0);
   delta_counts[i] = count;
 }

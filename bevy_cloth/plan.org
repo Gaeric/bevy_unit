@@ -16,16 +16,16 @@
 * 协作方法与职责
   - [决定] 通过实际开发与共同排查问题熟悉项目，不采用先授课、再答题或通过知识考核才能推进的方式。
     CPU 求解器由用户编写，不默认用户需要重学其中的基本计算；实现时按需要查询公式和参考。
-  - agent 推进一小批双方同意的框架代码，包括插件、资源、GPU 上传与读取、管线接线、渲染和诊断工具。
-    求解公式等核心仍由用户实现；涉及算法数据布局、求解顺序或边界不明确的改动，先讨论，不包装成普通接线。
+  - [决定，2026-10-28] 用户授权 agent 实现完整 GPU 求解器，包括 WGSL 约束 kernel、数据上传、调度和 CUDA 浮点 atomic 的替代。
+    用户运行验证，双方共同诊断；CPU 参考和 Velvet 仓库保持不变。解释算法、布局及调度变化，不包装成普通接线。
   - 用户运行、观察和验证，带回异常现象、日志或数据；双方共同定位，而不是 agent 直接猜原因并给出补丁。
     agent 具体说明文件和函数、该看哪些数据、正常值或应满足的关系，以及不同结果分别指向的下一项检查。
   - 每批改动交付：改了哪些文件、预期行为、运行方式、验证方法和已知限制。
     验证后再决定下一批；失败时先定位，不靠继续叠加功能绕过问题。
   - 理论解释服务于具体问题与方案判断，需要时用通俗语言、公式或数字说明，不安排脱离开发的必修练习。
     小测试和手算仍可作诊断工具，但不要求重复用户已掌握的内容。
-  - 改代码前说明文件、区域、目的与范围，等待用户确认；每项逻辑改动单独给出可审阅替换。
-    不顺手扩展任务，不未经确认替用户实现核心。
+  - 改代码前说明文件、区域、目的与范围；已授权批次直接推进，每项逻辑改动单独给出可审阅替换。
+    不顺手扩展任务；未来未决定的算法变化仍先讨论。
   - 记录时区分 [代码事实]、[手算预期]、[实验结果]、[决定]、[待验证]。
     未运行不记测试通过，未实测不记性能达标；不替用户宣称已经掌握，也不以答题作为验收。
   - 工作流遵守根 [[file:../AGENTS.md][AGENTS.md]]；测试必须带 =-j 2=，避免 Bevy 编译、链接耗尽内存。
@@ -34,37 +34,46 @@
   | 类别 | 代码现状 | 验收边界 |
   |------+----------+----------|
   | CPU | 已有 demo、求解器及场景代码 | 只作为现有基础，未经运行重新验收 |
-  | GPU | 已有无窗口、仅拉伸约束的四阶段计算：预测位置 → 求拉伸修正 → 应用修正 → 更新位置与速度 | 未接渲染；未经运行重新验收 |
-  | 当前工作 | 准备将现有 GPU 原型推进到可视验证 | 首批框架改动方案尚待检查与确认，未实现 |
+  | GPU | 无窗口：预测 → 每轮拉伸 gather → 挂点/LRA gather → 统一应用修正 → 更新位置与速度 | 上传、绑定、kernel、dispatch 已实现；编译/运行未验收 |
+  | 当前工作 | 求解器优先；本批完成 attachment/LRA 实现与诊断 | 不含弯曲、碰撞、自碰撞或渲染 |
 
-* 下一步：检查 GPU 原型到可视验证的缺口
-  [决定] 不再把“两粒子手算”作为开发的必经步骤。以现有代码为起点，
-  由 agent 提出并推进小批框架改动，用户运行验证，双方根据观察定位问题。
+* 当前批次：attachment/LRA（实现完成，运行待验）
+  - [代码事实] 改动 =src/gpu/layout.rs=、=pipeline.rs=、=solver_gpu.rs=、=solver.wesl= 和
+    =examples/velvet-gpu.rs=；CPU 求解器与 Velvet 不改。CPU 对照仅删除 bend，保留 attach；碰撞器为空，自碰撞关闭。
+  - [布局决定] attachment 使用稳定 CSR：=offsets= 为 N+1 个 u32，=entries= 为
+    ={slot:u32, rest:f32}=（8 字节 stride），slot position 为 vec4（16 字节）。
+    每粒子的 entry 保持 CPU 原始表序，支持非均匀、乱序及空表；不假设 slot-major 或每粒子固定条数。
+    attachment 独立 bind group：predicted、deltas、counts、invMass、offsets、entries、slots 共 7 个 storage。
+  - [算法事实] 每粒子一个 invocation，读取本轮不变的 predicted；在 stretch 的 delta/count 上追加。
+    target=rest×long_range_stretchiness；零逆质量且 target>0 跳过；仅 dist>target 才累加
+    =-diff + diff/dist*target= 和 count。条件与 CPU/CUDA 一致，不用浮点 atomic。
+  - [调度事实] 每子步 predict；每轮 stretch → attachment → apply；最后 finalize。
+    独立 dispatch 提供阶段边界。零 rest 挂点通过共享计数修正，不新增硬钳制；残余 pin drift 是保留语义。
+  - [时间决定] 插件 finish 时从主世界 =Time<Fixed>::timestep()= 取一次配置，传给初始化、CPU step
+    和 GPU substep uniform；未覆盖 Bevy 默认值时为 1/64 秒。60 步、2 子步、4 轮仍一次批量提交，
+    不是 FixedUpdate 实时推进；示例 schedule runner 的 60Hz 仅控制轮询节奏。运行中改 timestep 不会同步。
 
-** 先调查，再确定首批改动
-   - 检查范围：=src/gpu/solver_gpu.rs= 的创建、执行和读回，=examples/velvet-gpu.rs= 的运行入口，
-     以及 =src/demo/render.rs= 的 Mesh 更新。以上路径相对 =bevy_cloth/=。
-   - 当前 GPU 一次计算 60 步后退出；要看到输出，需要确认数据怎样送到渲染，以及显示的是哪一步。
-     不预先把一次性结果显示、逐步推进或逐帧读回视为已经选定的方案。
-   - agent 给出首批改动的文件范围、预期画面或日志、运行命令、检查数据和已知限制，用户确认后再实现。
-   - 当前固定点语义有缺口；方案必须明确使用什么初始状态、能验证什么，不能假称已有悬挂布料。
-     若需要修改核心算法或求解顺序，另行讨论，不混入框架改动。
-   - 不同时补齐弯曲、自碰撞、七个场景或进行大规模重构；读回用于验证不等于最终高性能路径。
-
-** 验证与共同定位
-   - 先确认 GPU 输出确实进入显示或诊断数据；仅看到静态布面，不能证明 GPU 已执行。
-     明确显示数据的步骤编号、粒子数量，以及选定粒子的初值与输出，检查数值是否有限。
-   - 出现问题时按数据流逐段检查：CPU 初值 → 上传的 GPU 数组 → 计算执行 → GPU 输出 → 渲染数据。
-     实际排查时，agent 必须把每段落实到文件／函数、数据字段和预期关系，不只给抽象流程。
-   - 例如“没有移动”，要区分计算未执行、输出未变化、结果未传到显示、相机看不到差异等情况；
-     根据检查结果选择下一项，不直接把原因归到求解公式。
-   - 记录运行条件、观察、定位证据和仍未确认的部分，再共同决定下一批工作。
-     当前尚无这批改动的实现或运行结果，不标记完成。
+** 用户运行与共同定位
+   #+begin_src bash
+     cargo test -j 2 -p bevy_cloth --lib gpu:: -- --nocapture
+     cargo run -j 2 -p bevy_cloth --example velvet-gpu
+   #+end_src
+   - [预期／待验证] 日志 =SolverReport= 应包含 289 粒子、60 步、2 子步、4 轮、step_time=0.015625（默认时）。
+     =max_position_diff<=1e-3=、=max_velocity_diff<=1e-2= 才成功退出；非有限数据或长度不符直接拒绝。
+     这些是诊断容差，不是物理正确性或精确固定的验收标准。
+   - 检查 =gpu/cpu_max_pin_drift= 和 =gpu/cpu_max_lra_violation=：前者为零 rest 到槽的距离，
+     后者为活动正 rest 约束超 target 的最大值。非零不自动判错，先比较两边与迭代数关系。
+   - 若两边差异过大：查 =build_attach_csr= 的 offsets/entries、slot positions 与 upload bindings；
+     核对默认网格每粒子 4 条 incidence、总数 1156、末 offset=1156，再查 shader 的 target、skip 与追加 count。
+     若仅 pin drift 较大而两边接近，检查 stretch 的零修正是否仍计数与 apply 的平均，不能直接改成硬钳制。
+   - 本批无 Mesh 输出。后续渲染必须 GPU-direct 写 Mesh，参考 Bevy =shader_advanced/compute_mesh.rs=；
+     不增加 CPU Mesh 读回路径。现有批末位置/速度读回仅用于数值诊断。
+   - 下一步先收集运行日志、共同诊断本批，再决定后续求解器小批；不自动扩展弯曲或碰撞。
 
 * 后续方向（不是并行展开的任务清单）
-  - 先让现有 GPU 输出可观察、可定位，再根据验证结果逐项完善布料变形、碰撞与渲染，并测量性能。
-    需要判断柔度、乘子或并行策略时，再围绕具体代码与现象查原理，不设先学完整理论的前置要求。
-  - 每一批的范围和验证标准都先讨论，不预先选择并行算法、碰撞结构或渲染接法。
+  - [决定] 先推进完整 GPU 求解器，数值诊断随批次提供；可视化不作为本批前置条件。
+    根据验证结果逐项完善布料变形、碰撞与 GPU-direct 渲染，并测量性能，不设必修理论课程。
+  - 每一批的范围和验证标准都先讨论；尚未实现的并行算法与碰撞结构不预先承诺。
     CPU 参考按诊断需要使用，不重做已知计算，也不补做旧七场景清单。
   - [待验证] “高性能”需要硬件、粒子与约束规模、时间步、子步与迭代参数、误差和耗时证据。
     区分求解、数据传输与渲染耗时；比较 CPU/GPU 时记录相同问题和可比的误差标准。
@@ -77,16 +86,19 @@
       cargo test --offline -j 2 -p bevy_cloth --test solver_smoke -- --nocapture
     #+end_src
     源码缓存存在不等于离线依赖解析可行；不能据此声称本次测试通过。
-  - [代码事实／验收缺口] GPU 对照中的四角未固定；删除 CPU 的 attach（挂点约束）后两边一致，
-    也不能证明原场景的固定点正确。参考初值与约束必须先一致，并分别满足预期。
-  - [代码事实／验收缺口] max diff（最大位置差）缺少阈值断言，以及 NaN（非数）、无穷值等拒绝条件；
-    打印差异不等于具备通过标准。
+  - [本批实现，待运行] GPU/CPU 均启用挂点/LRA；保持共享 Jacobi 计数下的残余 pin drift，而非精确钳制。
+    已加长度/非有限值拒绝、比较容差与 pin/LRA 指标；不得据此声称物理或设备运行已通过。
+  - [本批执行] =rustfmt --edition 2024 --check=（四个改动 Rust 文件）与 =git diff --check= 均通过（exit 0）。
+    =cargo check --offline -j 2 -p bevy_cloth --all-targets= 和
+    =cargo test --offline -j 2 -p bevy_cloth --lib gpu:: -- --nocapture= 均在依赖解析阶段失败：
+    =no matching package named avian3d found=，由 workspace 的 =bevy_waltz= 引入；没有编译或执行测试。
+    =/dev/dri= 不存在，未尝试 GPU 运行；Cargo.lock 未改动。
   - [代码事实／验收缺口] 子步测试只要求差值小于 1，不能据此宣称子步无关性。
     子步是把一次时间推进拆成更小步；其误差标准需随具体问题讨论。
-  - 这些限制用于防止误读现有测试。是否在下一批处理，按可视验证需要讨论，不默认同时修复所有问题。
+  - 这些限制用于防止误读现有测试。是否在下一批处理，按求解器诊断需要讨论，不默认同时修复所有问题。
 
 * 命令与路径
-  - 以下命令从 workspace 根目录运行，执行前先读根 [[file:../AGENTS.md][AGENTS.md]]；本次文档调整不运行构建。
+  - 以下命令从 workspace 根目录运行，执行前先读根 [[file:../AGENTS.md][AGENTS.md]]。
     #+begin_src bash
       cargo check -j 2 -p bevy_cloth --all-targets
       cargo test -j 2 -p bevy_cloth --test solver_smoke -- --nocapture

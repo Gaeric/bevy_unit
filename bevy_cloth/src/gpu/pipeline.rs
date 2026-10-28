@@ -30,6 +30,9 @@ pub mod binding {
     pub const STRETCH_INC_OFFSETS: u32 = 7;
     pub const STRETCH_INC_OTHER: u32 = 8;
     pub const STRETCH_INC_REST: u32 = 9;
+    pub const ATTACH_INC_OFFSETS: u32 = 10;
+    pub const ATTACH_INC_ENTRIES: u32 = 11;
+    pub const ATTACH_SLOT_POSITIONS: u32 = 12;
 }
 
 #[derive(Resource)]
@@ -38,8 +41,11 @@ pub struct SolverPipeline {
     pub particle_layout: BindGroupLayoutDescriptor,
     /// `solve_stretch` / `apply_deltas`: params + the arrays the constraint walk reads and writes.
     pub constraint_layout: BindGroupLayoutDescriptor,
+    /// `solve_attachment`: seven storage buffers, independently of the stretch layout.
+    pub attachment_layout: BindGroupLayoutDescriptor,
     predict: CachedComputePipelineId,
     solve_stretch: CachedComputePipelineId,
+    solve_attachment: CachedComputePipelineId,
     apply_deltas: CachedComputePipelineId,
     finalize: CachedComputePipelineId,
 }
@@ -51,6 +57,10 @@ impl SolverPipeline {
 
     pub fn solve_stretch(&self) -> CachedComputePipelineId {
         self.solve_stretch
+    }
+
+    pub fn solve_attachment(&self) -> CachedComputePipelineId {
+        self.solve_attachment
     }
 
     pub fn apply_deltas(&self) -> CachedComputePipelineId {
@@ -108,6 +118,35 @@ impl FromWorld for SolverPipeline {
             ),
         );
 
+        let attachment_layout = BindGroupLayoutDescriptor::new(
+            "cloth solver attachment layout",
+            &BindGroupLayoutEntries::with_indices(
+                ShaderStages::COMPUTE,
+                (
+                    (binding::PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::PREDICTED, storage_buffer_sized(false, None)),
+                    (binding::DELTAS, storage_buffer_sized(false, None)),
+                    (binding::DELTA_COUNTS, storage_buffer_sized(false, None)),
+                    (
+                        binding::INV_MASSES,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                    (
+                        binding::ATTACH_INC_OFFSETS,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                    (
+                        binding::ATTACH_INC_ENTRIES,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                    (
+                        binding::ATTACH_SLOT_POSITIONS,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                ),
+            ),
+        );
+
         let cache = world.resource::<PipelineCache>();
         let make =
             |entry: &'static str, label: &'static str, layout: &BindGroupLayoutDescriptor| {
@@ -130,6 +169,11 @@ impl FromWorld for SolverPipeline {
                 "cloth solver solve_stretch",
                 &constraint_layout,
             ),
+            solve_attachment: make(
+                "solve_attachment",
+                "cloth solver solve_attachment",
+                &attachment_layout,
+            ),
             apply_deltas: make(
                 "apply_deltas",
                 "cloth solver apply_deltas",
@@ -138,6 +182,7 @@ impl FromWorld for SolverPipeline {
             finalize: make("finalize", "cloth solver finalize", &particle_layout),
             particle_layout,
             constraint_layout,
+            attachment_layout,
         }
     }
 }
