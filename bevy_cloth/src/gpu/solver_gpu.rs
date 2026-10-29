@@ -1450,7 +1450,7 @@ impl SolverBuffers {
     }
 }
 
-/// Private live facade: no probes, reference stepping or readback.
+/// Private live facade: no probes, reference stepping or blocking particle readback.
 pub(super) struct LiveSolver(SolverBuffers);
 
 impl LiveSolver {
@@ -1489,6 +1489,14 @@ impl LiveSolver {
 
     pub(super) fn num_particles(&self) -> u32 {
         self.0.num_particles
+    }
+
+    pub(super) fn neighbor_stats(&self) -> &Buffer {
+        &self.0.neighbor_search.stats
+    }
+
+    pub(super) fn neighbor_capacity(&self) -> u32 {
+        self.0.neighbor_search.config.capacity
     }
 
     /// Submit each requested tick separately: queue writes are applied at the *next* submit.

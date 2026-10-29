@@ -21,14 +21,14 @@ use bevy::{
         },
         render_asset::RenderAssets,
         render_resource::{
-            AsBindGroup, BindGroupEntries, BindGroupLayoutEntries, BufferDescriptor, BufferUsages,
-            ComputePassDescriptor, PipelineCache, ShaderStages, SpecializedMeshPipelineError,
-            VertexFormat,
+            AsBindGroup, BindGroupEntries, BindGroupLayoutEntries, Buffer, BufferDescriptor,
+            BufferUsages, CommandEncoderDescriptor, ComputePassDescriptor, MapMode, PipelineCache,
+            PollType, ShaderStages, SpecializedMeshPipelineError, VertexFormat,
             binding_types::{
                 storage_buffer_read_only_sized, storage_buffer_sized, uniform_buffer_sized,
             },
         },
-        renderer::{RenderContext, RenderGraph, RenderGraphSystems, RenderQueue},
+        renderer::{RenderContext, RenderDevice, RenderGraph, RenderGraphSystems, RenderQueue},
     },
     shader::ShaderRef,
 };
@@ -38,6 +38,7 @@ use std::{
 };
 
 use super::{
+    layout::NeighborStats,
     pipeline::{SolverPipeline, WORKGROUP_SIZE},
     solver_gpu::{LiveSolver, RES, main_cloth_fixture},
 };
@@ -93,6 +94,133 @@ fn request_tick(time: Res<Time<Fixed>>, controls: ResMut<Controls>, ticks: Res<L
         &mut controls.single_steps,
         time.timestep().as_secs_f32(),
     );
+}
+
+const STATS_INTERVAL_TICKS: u64 = 64;
+
+/// CPU scheduling counts, not GPU timing measurements.
+#[derive(Default)]
+struct StatsClock {
+    total_ticks: u64,
+    window_ticks: u64,
+}
+
+impl StatsClock {
+    fn advance(&mut self, ticks: u64) {
+        self.total_ticks = self.total_ticks.saturating_add(ticks);
+        self.window_ticks = self.window_ticks.saturating_add(ticks);
+    }
+
+    fn take_window(&mut self, busy: bool) -> Option<(u64, u64)> {
+        if busy || self.window_ticks < STATS_INTERVAL_TICKS {
+            return None;
+        }
+        Some((self.total_ticks, std::mem::take(&mut self.window_ticks)))
+    }
+}
+
+/// One reusable staging buffer; callback only reports completion, never waits for the GPU.
+#[derive(Default)]
+struct LiveStats {
+    clock: StatsClock,
+    staging: Option<Buffer>,
+    completion: Arc<Mutex<Option<Result<(), String>>>>,
+    pending: Option<(u64, u64)>,
+    disabled: bool,
+}
+
+impl LiveStats {
+    fn collect(&mut self, device: &RenderDevice) {
+        if self.disabled || self.pending.is_none() {
+            return;
+        }
+        // Poll is nonblocking. Continue even while paused so the last sample can complete.
+        if let Err(error) = device.poll(PollType::Poll) {
+            self.disabled = true;
+            warn!(%error, "GPU cloth neighbor telemetry disabled: device poll failed");
+            return;
+        }
+        let result = self
+            .completion
+            .lock()
+            .expect("live stats completion")
+            .take();
+        let Some(result) = result else {
+            return;
+        };
+        let (total_ticks, window_ticks) = self.pending.take().expect("pending stats sample");
+        let staging = self.staging.as_ref().expect("stats staging buffer");
+        let stats = result.and_then(|()| {
+            let slice = staging.slice(..);
+            let data = slice
+                .get_mapped_range()
+                .map_err(|error| error.to_string())?;
+            Ok(bytemuck::pod_read_unaligned::<NeighborStats>(&data))
+        });
+        staging.unmap();
+        match stats {
+            Ok(stats) => {
+                info!(
+                    total_ticks,
+                    window_ticks,
+                    overflow_rows = stats.overflow_rows,
+                    max_required = stats.max_required,
+                    stored_entries = stats.stored_entries,
+                    invalid_coordinates = stats.invalid_coordinates,
+                    "GPU cloth neighbor window (not GPU timing or contact counts)"
+                );
+                if stats.overflow_rows > 0 || stats.invalid_coordinates > 0 {
+                    warn!(
+                        overflow_rows = stats.overflow_rows,
+                        invalid_coordinates = stats.invalid_coordinates,
+                        "GPU cloth neighbor search lost candidates; inspect capacity/particle coordinates"
+                    );
+                }
+            }
+            Err(error) => {
+                self.disabled = true;
+                warn!(%error, "GPU cloth neighbor telemetry disabled: readback failed");
+            }
+        }
+    }
+
+    fn sample(&mut self, device: &RenderDevice, queue: &RenderQueue, solver: &LiveSolver) {
+        if self.disabled {
+            return;
+        }
+        let Some(window) = self.clock.take_window(self.pending.is_some()) else {
+            return;
+        };
+        let byte_len = size_of::<NeighborStats>() as u64;
+        let staging = self.staging.get_or_insert_with(|| {
+            device.create_buffer(&BufferDescriptor {
+                label: Some("cloth asynchronous neighbor stats"),
+                size: byte_len,
+                usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("cloth neighbor stats snapshot and reset"),
+        });
+        // Ordered after all submitted ticks, before future ticks. Reset diagnostic counters
+        // only: neither neighbor candidates nor solver positions are touched.
+        encoder.copy_buffer_to_buffer(solver.neighbor_stats(), 0, staging, 0, byte_len);
+        encoder.clear_buffer(solver.neighbor_stats(), 0, None);
+        queue.submit(Some(encoder.finish()));
+        self.pending = Some(window);
+        let completion = self.completion.clone();
+        staging.slice(..).map_async(MapMode::Read, move |result| {
+            *completion.lock().expect("live stats completion") =
+                Some(result.map_err(|error| error.to_string()));
+        });
+        info!(
+            total_ticks = window.0,
+            window_ticks = window.1,
+            capacity = solver.neighbor_capacity(),
+            "GPU cloth neighbor sample requested (16 bytes)"
+        );
+    }
 }
 
 #[derive(Resource, Clone, ExtractResource)]
@@ -243,7 +371,9 @@ fn simulate_and_output(
     ticks: Res<LiveTicks>,
     dt: Res<InitialDt>,
     mut solver: Local<Option<LiveSolver>>,
+    mut stats: Local<LiveStats>,
 ) {
+    stats.collect(context.render_device());
     let mut requests = ticks.0.lock().expect("live cloth ticks");
     // Startup is gated, but readiness stays latched once active: temporary missing assets
     // must not suppress new fixed ticks or discard requests already queued.
@@ -288,6 +418,7 @@ fn simulate_and_output(
     requests.ready = true;
     let pending = requests.take();
     drop(requests);
+    let submitted_ticks = pending.len() as u64;
     for step_time in pending {
         solver.submit_step(
             context.render_device(),
@@ -297,6 +428,8 @@ fn simulate_and_output(
             step_time,
         );
     }
+    stats.clock.advance(submitted_ticks);
+    stats.sample(context.render_device(), &queue, solver);
     // No simulation tick is required for output: paused/newly allocated meshes still get copied.
     for (slice, range) in targets {
         let device = context.render_device();
@@ -422,6 +555,46 @@ fn setup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stats_window_waits_for_tick_threshold() {
+        let mut clock = StatsClock::default();
+        assert_eq!(clock.take_window(false), None);
+        clock.advance(STATS_INTERVAL_TICKS - 1);
+        assert_eq!(clock.take_window(false), None);
+        clock.advance(1);
+        assert_eq!(
+            clock.take_window(false),
+            Some((STATS_INTERVAL_TICKS, STATS_INTERVAL_TICKS))
+        );
+        assert_eq!(clock.take_window(false), None);
+        assert_eq!(clock.total_ticks, STATS_INTERVAL_TICKS);
+    }
+
+    #[test]
+    fn stats_busy_readback_preserves_entire_window() {
+        let mut clock = StatsClock::default();
+        clock.advance(64);
+        assert_eq!(clock.take_window(true), None);
+        clock.advance(7);
+        assert_eq!(clock.take_window(false), Some((71, 71)));
+        clock.advance(64);
+        assert_eq!(clock.take_window(false), Some((135, 64)));
+    }
+
+    #[test]
+    fn stats_multiple_tick_frames_and_pause_do_not_lose_ticks() {
+        let mut clock = StatsClock::default();
+        clock.advance(63);
+        clock.advance(4);
+        assert_eq!(clock.take_window(false), Some((67, 67)));
+        clock.advance(0);
+        assert_eq!(clock.take_window(false), None);
+        clock.advance(5);
+        assert_eq!(clock.take_window(false), None);
+        clock.advance(59);
+        assert_eq!(clock.take_window(false), Some((131, 64)));
+    }
 
     #[test]
     fn ticks_wait_for_ready_without_consuming_single_steps() {

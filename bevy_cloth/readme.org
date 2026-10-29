@@ -30,7 +30,7 @@
   |------+------+----------|
   | =src/sim/= | CPU 求解、网格与约束生成、碰撞和空间哈希 | 已有实现与测试，不是独立正确性标准 |
   | =src/demo/= | 场景、面板、相机、抓取和 Mesh 写回 | 交互演示仍调用 CPU 求解器 |
-  | =src/gpu/= | GPU 求解、动态邻居查找、诊断与 live 输出 | headless 自碰撞批次已通过主机对照；新增 live 路径待主机运行 |
+  | =src/gpu/= | GPU 求解、动态邻居查找、诊断与 live 输出 | headless 已通过主机对照，live 视觉符合用户预期；新增遥测待主机验证 |
   | =tests/= | CPU 与外围测试 | 测试存在或曾通过，不等于全部物理目标已验收 |
 
   =velvet-gpu= 是一次性无窗口对照；=velvet-gpu-live= 是独立实时入口，不是 CPU 演示的模式开关。
@@ -49,7 +49,8 @@
   2026-10-28 用户授权 agent 实现完整 GPU 求解器，包括约束 kernel 和浮点 atomic 的替代。
 
   用户主机 check/test 无错误，完整 60 步动态自碰撞对照、邻居专项及粒子碰撞专项已通过。
-  最新批次新增 =SolverLivePlugin= 与 GPU-direct 线框输出，用户尚未运行；当前下一步是 live 编译与视觉/时钟验证。
+  用户于 2026-10-29 确认 GPU live 视觉表现符合预期；不据此推断暂停/单步专项、长时稳定性或性能。
+  最新批次新增 live 邻居统计的低频异步读回；当前下一步是主机编译与遥测窗口验证。
   CPU 参考不改，保留 Jacobi 路径；已验证批次不等于物理正确性或性能证明。数值与验证边界见 [[file:plan.org][当前计划]]。
 
 * 运行现有程序
@@ -60,7 +61,7 @@
   #+begin_src bash
     cargo run -j 2 -p bevy_cloth --example velvet-scenes         # CPU 七场景演示与面板
     cargo run -j 2 -p bevy_cloth --example velvet-gpu            # headless 60 步对照 + 邻居/粒子碰撞专项
-    cargo run -j 2 -p bevy_cloth --example velvet-gpu-live       # 实时 GPU 线框；新增入口待主机验证
+    cargo run -j 2 -p bevy_cloth --example velvet-gpu-live       # 实时 GPU 线框；邻居遥测待主机验证
     cargo run -j 2 -p bevy_cloth --example velvet-00-sandbox      # 场景骨架，不是布料模拟验收
     cargo run -j 2 -p bevy_cloth --example velvet-01-collision    # 历史入口，当前实际加载 Attach 场景
   #+end_src
@@ -73,6 +74,10 @@
   =velvet-gpu-live= 只提供 =Space= 暂停/继续、暂停时 =S= 请求一个 fixed tick。
   它按 =FixedUpdate= 的 =Time<Fixed>= 排队每次 dt（默认 64Hz），就绪前不积压启动 tick。
   两片不同颜色的线框直接由 GPU 写 Mesh；无重置、相机环绕、碰撞器代理显示或 CPU Mesh 读回。
+  live 每累计至少 64 个已提交 fixed tick 异步读取 16 字节邻居统计并清零计数；最多一个请求在途。
+  日志 =GPU cloth neighbor window= 中 =max_required= 是窗口峰值，=stored_entries= 是跨重建累计条目，
+  =overflow_rows= 是溢出行事件数，=invalid_coordinates= 是无效坐标事件数；后二者非零会警告。
+  这不是接触计数或 GPU 耗时；没有阻塞式等待，也没有粒子位置读回。
 
 * 已知限制与参考行为
   以下记录现状，不是要求永久保留的设计，也不是当前要同时修复的任务清单。
@@ -93,7 +98,9 @@
     日志 max_sdf_correction 为最终位置的投影修正残差，不是真实穿透深度；运动历史已有主机模型测试，GPU 示例仅静态上传。
   - 主布料已启用动态自碰撞；容量 64 的已测批次峰值需求 27、无溢出或无效坐标。
     统计跨重建累计；初始有向接触数来自 CPU 输入诊断，不是 GPU 运行接触计数。固定候选表专项仍只作诊断。
-  - live 使用 POSITION-only、12 字节 stride 的 LineList，无需法线、光照或阴影；主路径无读回。
-    max-speed 仍为初始化时的上限，碰撞器变换静态；没有 GPU 溢出监控/live 遥测，未测性能。
-  - 用户已验证 headless 批次，未运行最新 live。agent 无 GPU，离线 Cargo 被 avian3d 解析阻塞；
-    提取模型测试和独立 output shader harness 不等于 Bevy 集成或材质/设备编译通过。详见 [[file:plan.org::*验证记录与限制][验证记录]]。
+  - live 使用 POSITION-only、12 字节 stride 的 LineList，无需法线、光照或阴影；粒子/Mesh 不读回，仅异步读取诊断统计。
+    max-speed 仍为初始化时的上限，碰撞器变换静态；邻居遥测待设备验证，未测性能。
+    不足 64 tick 的尾窗口不单独采样；读回未完成时延长窗口，无超时告警，极端延迟仍有 u32 计数回绕风险。
+    映射/poll 失败会警告并停止遥测，不停止求解；无日志不能视为没有异常。
+  - 用户已验证 headless 批次及 live 视觉。agent 容器无 GPU，私有 target 的离线 Cargo 被 avian3d 解析阻塞；
+    本批 3 项提取调度测试通过，不等于新增读回的 Bevy 集成或设备运行通过。详见 [[file:plan.org::*验证记录与限制][验证记录]]。

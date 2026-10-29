@@ -35,11 +35,20 @@
   |------+----------+----------|
   | CPU | 现有 demo/参考求解器；独立暴力邻居诊断 | 不参与生产 GPU 邻居生成，不是独立正确性证明 |
   | GPU headless | 完整求解、动态自碰撞、60 步对照与两类专项 | 用户主机 check/test 无错误，运行报告通过；无性能/物理正确性结论 |
-  | 当前工作 | 独立 SolverLivePlugin、FixedUpdate 实时推进、GPU-direct 双色线框 | 代码已加入，用户尚未运行；Bevy 集成、材质与设备编译待验证 |
+  | GPU live | 独立 SolverLivePlugin、FixedUpdate、GPU-direct 双色线框 | 用户确认视觉符合预期；不推断交互专项、长期稳定性或性能 |
+  | 当前工作 | live 邻居统计的窗口化异步读回 | 新增代码待主机编译和设备验证 |
 
-* 当前批次：live 路径已加入，下一步主机验证
-  - [代码事实] 新增 =examples/velvet-gpu-live.rs=、=src/gpu/live.rs=、=output.wesl=、=live_material.wesl=；
-    =mod.rs= 导出独立 =SolverLivePlugin=，=solver_gpu.rs= 共享 =record_step=。CPU/Velvet 不改。
+* 当前批次：live 邻居遥测，下一步主机验证
+  - [用户反馈，2026-10-29] 已观看 GPU live，认为符合预期；只记录视觉确认，不补记未报告的交互或性能结论。
+  - [本批改动] =src/gpu/solver_gpu.rs= 暴露私有统计 buffer/容量；=src/gpu/live.rs= 新增异步统计采样与 3 项调度测试；
+    =readme.org=、本计划更新状态。CPU/Velvet、约束算法、邻居布局和求解顺序不改。
+  - [采样事实] 每累计至少 64 个已提交 tick，在本帧 tick 提交后 copy 16 字节统计 → clear 诊断计数 → submit → map_async。
+    单个可复用 staging buffer，最多一个请求在途；以非阻塞 Poll 收取完成结果，暂停时仍收取已请求的结果。
+    GPU-direct Mesh 输出不变，不读回粒子；headless 仍使用原有累计统计，不经过 live 清零路径。
+  - [日志语义] =total_ticks/window_ticks= 是 CPU 提交计数，不是 GPU 完成时钟或耗时；=max_required= 是窗口需求峰值，
+    =stored_entries= 跨窗口内重建累计，=overflow_rows/invalid_coordinates= 是事件数；后二者非零发出警告。
+  - [限制] 不足 64 tick 的尾窗口不单独采样；在途读回延迟时继续积累，没有超时监控，极端延迟仍可能回绕 u32。
+    poll/map 失败会警告并禁用遥测，不停止求解；无日志不能证明没有异常。
   - [已实现] GPU counting hash → 分层 scan → 桶散布 → 27 个真实 cell 查询；邻居 ID 排序去重，
     检查容量溢出与无效坐标。CPU 独立暴力模型仅用于诊断，生产路径不上传 CPU 邻居表。
   - [调度事实] 每整步 SDF 预稳定；每子步 predict → 按间隔重建邻居 → collide_particles → apply → SDF
@@ -51,7 +60,7 @@
     使用 =NoFrustumCulling=；每帧重新获取实际分配范围并检查布局/字节边界，避免旧 AABB 或 allocator 迁移失配。
     主路径无 CPU Mesh 读回、法线、光照或阴影；没有重置、相机环绕或碰撞器代理显示。
   - [边界] headless 仍保留全部专项、CPU 参考及一次性 60 步批量对照；不把诊断读回接入 live。
-    live max-speed 仍为初始化上限，碰撞器变换静态；没有 GPU 溢出监控/live 遥测，未作性能结论。
+    live max-speed 仍为初始化上限，碰撞器变换静态；本批邻居遥测尚待主机验证，未作性能结论。
 
 ** 用户运行与共同定位
    #+begin_src bash
@@ -60,8 +69,14 @@
      cargo run -j 2 -p bevy_cloth --example velvet-gpu-live
      cargo run -j 2 -p bevy_cloth --example velvet-gpu  # headless 回归诊断
    #+end_src
-   - [待验证] 最新 live 的 Bevy 集成、WESL 材质/设备编译及可见结果；先保存首个编译或 pipeline 错误，不猜测通过。
-     预期显示两片不同颜色、随 fixed tick 运动的线框；Space 应冻结，暂停时 S 只推进一个 fixed tick，再次 Space 恢复。
+   - [待验证] 本批新增遥测的 Bevy 编译、异步映射与窗口日志；先保存首个编译/设备错误，不猜测通过。
+     连续运行数秒，默认 64Hz 下约每秒一个窗口（不是按墙钟精确一秒）；窗口通常 64 tick，允许因多 tick 帧或读回忙而更大。
+     =max_required<=capacity= 且 =overflow_rows=0=、=invalid_coordinates=0= 是本批正常关系，不预设运行中峰值等于 headless 的 27。
+     画面应保持原样；Space 应冻结，暂停时 S 只推进一个 fixed tick，再次 Space 恢复。尾窗口不足阈值不应期待新日志。
+   - 没有日志：查 =live.rs::simulate_and_output= 的已提交 tick 数、=StatsClock::take_window= 和 =LiveStats::collect= 完成状态。
+     tick 未到 64 则继续运行；有 sample requested 但无 window 则查 map 回调/poll 错误，不能解释为零异常。
+   - 溢出非零：查窗口 =max_required= 与 =capacity=，确认候选表截断；先保存日志和配置再讨论容量或算法，不直接放宽。
+     无效坐标非零：查 =solver.wesl::count_hash/valid_cell= 的坐标合法性及输入 predicted 是否有限/在 cell 整数范围内，先定位数值异常。
    - 黑屏/不动：查 =live.rs::simulate_and_output= 的 pipeline readiness、两个 mesh allocation 与 POSITION-only 布局。
      布局应为 Float32x3、stride=12，count/offset 应落在实际 allocation 与粒子范围内；
      pipeline 报错先查对应 shader，布局失败查 Mesh 构建，均就绪再查 tick 请求与输出 dispatch。
@@ -69,10 +84,10 @@
      默认每 tick=.015625，启动未就绪不应积压，每个请求应独立提交，暂停后无新请求时位置不应继续改变。
    - headless 保留位置差 <=1e-3、速度差 <=1e-2 及专项通过条件；失败先定位，不放宽容差。
      =max_sdf_correction= 是同一 CPU 投影函数对最终位置的残余修正量，不是真实穿透深度，也不要求为零。
-   - 当前先验证 live；根据实际结果共同定位，再决定下一批，不预设新功能或必修课程。
+   - 当前先验证本批遥测；根据实际结果共同定位，再决定下一批，不预设新功能或必修课程。
 
 * 后续方向（不是并行展开的任务清单）
-  - [决定] 当前先验证已加入的 live 路径；根据运行结果再讨论求解、碰撞、渲染或性能测量的小批。
+  - [决定] live 视觉已获用户确认；当前先验证邻居遥测，根据结果再讨论求解、碰撞、渲染或性能测量的小批。
     不把未来优化提前定为任务，也不设必修理论课程。
   - 每一批的范围和验证标准都先讨论；尚未实现的并行算法与碰撞结构不预先承诺。
     CPU 参考按诊断需要使用，不重做已知计算，也不补做旧七场景清单。
@@ -92,10 +107,12 @@
   - [用户实测，专项] neighbor probe：9 cases、36 rebuilds、3 个故意溢出 case，pass=true；
     particle probe：2 cases、32 粒子、28 有向接触，delta/位置最大差均 0，counts_match=true、pass=true。
     这些证据验证本批数值与诊断条件，不证明物理正确性、长时稳定性或性能。
-  - [最新 live，局部证据] 新增 6 项主机 helper 的提取模型测试通过（不是实际 Bevy 集成测试）；
-    独立 output shader harness 退出码 0。自定义材质 WESL 尚未完整验证，不能据此声称材质或设备 pipeline 编译通过。
-    格式检查与 git diff --check 通过；用户尚未运行最新 live，不记视觉/交互验收。
-  - [agent 环境] 无 GPU；私有 target 的离线 Cargo check/test 在 avian3d 依赖解析时阻塞，未执行正式集成验证。
+  - [live 证据] 前批 6 项 helper 提取模型测试通过，独立 output shader harness 退出码 0；这些本身不是集成验证。
+    用户于 2026-10-29 报告已观看 GPU live 且符合预期，记录视觉确认；未提供暂停/单步专项或性能数据。
+  - [本批局部证据] 从实际源码提取的 3 项 StatsClock 调度测试通过；rustfmt 检查与 git diff --check 通过。
+    只读源码复核未发现队列顺序或 wgpu 30 API 的阻塞问题；不替代新增读回的集成编译或设备验证。
+  - [agent 环境] 已检查 /.dockerenv，当前为 Docker、无 GPU；CARGO_TARGET_DIR=/tmp/cargo-target 的离线 Cargo check
+    在 workspace avian3d 依赖解析时阻塞，未编译到本批代码，未执行正式集成验证。
     源码缓存不等于离线依赖可解析，局部 harness 不替代 Cargo/Bevy/设备运行；没有性能测量。
   - [代码事实／验收缺口] 子步测试只要求差值小于 1，不能据此宣称子步无关性。
     子步是把一次时间推进拆成更小步；其误差标准需随具体问题讨论。
