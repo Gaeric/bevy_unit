@@ -21,10 +21,11 @@ use glam::{Mat4, Quat, Vec3};
 use crate::{
     gpu::{
         layout::{
-            GpuAttachEntry, GpuBendConstraint, GpuParams, GpuVec3, NeighborParams, NeighborStats,
-            ParticleCollisionParams, SdfParams, pack_colliders, pack_vec3, unpack_vec3,
+            GpuAttachEntry, GpuBendConstraint, GpuParams, GpuSdfCollider, GpuVec3, NeighborParams,
+            NeighborStats, ParticleCollisionParams, SdfParams, pack_colliders, pack_vec3,
+            unpack_vec3,
         },
-        pipeline::{SolverPipeline, WORKGROUP_SIZE, binding},
+        pipeline::{SolverPipeline, TimingSample, TimingStage, WORKGROUP_SIZE, binding},
     },
     sim::{
         collide::SdfCollider,
@@ -44,7 +45,98 @@ const STEPS: u32 = 60;
 const SUBSTEPS: u32 = 2;
 const ITERATIONS: u32 = 4;
 /// Four zero-rest attachment particles. Shared Jacobi counts allow residual pin drift.
+#[cfg(test)]
 const CORNERS: [u32; 4] = [0, RES, RES * (RES + 1), RES * (RES + 1) + RES];
+
+/// Live workload controls. Resolution changes diameter and the derived speed cap while
+/// retaining unit inverse masses; different resolutions are not physically equivalent cloth.
+#[derive(Resource, Clone, Debug)]
+pub struct LiveConfig {
+    pub resolution: u32,
+    pub layers: u32,
+    pub substeps: u32,
+    pub iterations: u32,
+    pub neighbor_capacity: u32,
+    pub hash_interval: u32,
+    pub self_collision: bool,
+    pub start_paused: bool,
+    pub gpu_timing: bool,
+}
+
+impl Default for LiveConfig {
+    fn default() -> Self {
+        Self {
+            resolution: RES,
+            layers: 2,
+            substeps: SUBSTEPS,
+            iterations: ITERATIONS,
+            neighbor_capacity: 64,
+            hash_interval: 3,
+            self_collision: true,
+            start_paused: false,
+            gpu_timing: false,
+        }
+    }
+}
+
+impl LiveConfig {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !(2..=128).contains(&self.resolution) {
+            return Err("resolution must be in 2..=128");
+        }
+        if !(1..=8).contains(&self.layers) {
+            return Err("layers must be in 1..=8");
+        }
+        if !(1..=16).contains(&self.substeps) {
+            return Err("substeps must be in 1..=16");
+        }
+        if !(1..=64).contains(&self.iterations) {
+            return Err("iterations must be in 1..=64");
+        }
+        if !(1..=256).contains(&self.neighbor_capacity) {
+            return Err("neighbor capacity must be in 1..=256");
+        }
+        if !(1..=64).contains(&self.hash_interval) {
+            return Err("hash interval must be in 1..=64");
+        }
+        let side = self.resolution.checked_add(1).ok_or("grid size overflow")?;
+        let count = side
+            .checked_mul(side)
+            .and_then(|n| n.checked_mul(self.layers))
+            .ok_or("particle count overflow")?;
+        let entries = count
+            .checked_mul(self.neighbor_capacity)
+            .ok_or("neighbor table index overflow")?;
+        let bytes = u64::from(entries)
+            .checked_mul(size_of::<u32>() as u64)
+            .ok_or("neighbor table byte size overflow")?;
+        usize::try_from(bytes).map_err(|_| "neighbor table exceeds host address space")?;
+        Ok(())
+    }
+
+    /// Call after validation (fixture construction also validates).
+    pub fn layer_particles(&self) -> u32 {
+        (self.resolution + 1) * (self.resolution + 1)
+    }
+
+    /// Call after validation.
+    pub fn particle_count(&self) -> u32 {
+        self.layer_particles() * self.layers
+    }
+
+    /// Conservative bound for solver-owned storage bindings in this grid fixture.
+    /// Mesh allocator slabs are checked separately against the actual output allocation.
+    fn required_storage_binding_bytes(&self) -> u64 {
+        let n = u64::from(self.particle_count());
+        // At most four attachment incidences per particle; bend constraints have four
+        // roles and one constraint per grid cell; stretch has at most eight endpoints/row.
+        let csr_bound = n * (size_of::<GpuBendConstraint>() as u64).max(32);
+        (n * u64::from(self.neighbor_capacity) * size_of::<u32>() as u64)
+            .max(csr_bound)
+            .max((n + 1) * size_of::<u32>() as u64)
+            .max(fixture_colliders(1.0 / 64.0).len() as u64 * size_of::<GpuSdfCollider>() as u64)
+    }
+}
 
 /// the compare result, shared with the main world so its `Update` system can log it and exit.
 #[derive(Resource, Clone, Default)]
@@ -165,6 +257,9 @@ struct SolverBuffers {
     _neighbors: Buffer,
     neighbor_search: NeighborBuffers,
     hash_interval: u32,
+    substeps: u32,
+    iterations: u32,
+    self_collision: bool,
     initial_directed_contacts: u32,
     particle_collision_bind_group: BindGroup,
     colliders: Vec<SdfCollider>,
@@ -953,54 +1048,59 @@ fn run_neighbor_probe(
     report
 }
 
-pub(super) fn main_cloth_fixture(step_time: f32) -> (Solver, SimParams) {
+/// Identical layer rest meshes at .5 spacing, translated to .1 live spacing without
+/// modifying original positions or rest constraints. Resolution is a workload control,
+/// not a physically equivalent refinement: add_cloth derives diameter/mass/speed as before.
+pub(super) fn configured_fixture(step_time: f32, config: &LiveConfig) -> (Solver, SimParams) {
+    config.validate().expect("valid live cloth configuration");
     assert!(step_time.is_finite() && step_time > 0.0);
     let mut params = SimParams {
-        num_substeps: SUBSTEPS,
-        num_iterations: ITERATIONS,
-        enable_self_collision: true,
+        num_substeps: config.substeps,
+        num_iterations: config.iterations,
+        max_num_neighbors: config.neighbor_capacity,
+        interleaved_hash: config.hash_interval,
+        enable_self_collision: config.self_collision,
         bend_compliance: 1e-4,
         ..default()
     };
-
+    let res = config.resolution;
+    let corners = [0, res, res * (res + 1), res * (res + 1) + res];
+    let mesh = generate_cloth_mesh(res);
     let mut solver = Solver::default();
-    solver
-        .add_cloth(
-            &mut params,
-            &generate_cloth_mesh(RES),
-            Mat4::IDENTITY,
-            &CORNERS,
-            step_time,
-        )
-        .expect("generated meshes are source-layout grids");
-
-    let second = solver
-        .add_cloth(
-            &mut params,
-            &generate_cloth_mesh(RES),
-            Mat4::from_translation(Vec3::new(0.0, 0.0, 0.5)),
-            &CORNERS,
-            step_time,
-        )
-        .expect("second generated grid");
-    let translation = Vec3::new(0.0, 0.0, -0.4);
-    for position in &mut solver.positions[second as usize..] {
-        *position += translation;
-    }
-    for slot in &mut solver.constraints.attach.slot_positions[CORNERS.len()..] {
-        *slot += translation;
+    for layer in 0..config.layers {
+        let first_slot = solver.constraints.attach.slot_positions.len();
+        let first = solver
+            .add_cloth(
+                &mut params,
+                &mesh,
+                if layer == 0 {
+                    Mat4::IDENTITY
+                } else {
+                    Mat4::from_translation(Vec3::new(0.0, 0.0, 0.5 * layer as f32))
+                },
+                &corners,
+                step_time,
+            )
+            .expect("generated meshes are source-layout grids");
+        // Leave layer zero untouched to preserve the exact default fixture arithmetic.
+        if layer != 0 {
+            let translation = Vec3::new(0.0, 0.0, -0.4 * layer as f32);
+            for position in &mut solver.positions[first as usize..] {
+                *position += translation;
+            }
+            for slot in &mut solver.constraints.attach.slot_positions[first_slot..] {
+                *slot += translation;
+            }
+        }
     }
     solver.predicted.copy_from_slice(&solver.positions);
-    // Rest constraints and original positions remain unchanged. Move both the second cloth and
-    // its pins as a rigid translation; the .1 live gap is below the .1875 diameter, while the
-    // .5 rest gap passes the original-distance filter. Both layers have the same smooth bump.
     for (i, position) in solver.positions.iter_mut().enumerate() {
         if solver.constraints.inv_masses[i] == 0.0 {
             continue;
         }
-        let local = i as u32 % ((RES + 1) * (RES + 1));
-        let u = (local % (RES + 1)) as f32 / RES as f32;
-        let v = (local / (RES + 1)) as f32 / RES as f32;
+        let local = i as u32 % config.layer_particles();
+        let u = (local % (res + 1)) as f32 / res as f32;
+        let v = (local / (res + 1)) as f32 / res as f32;
         position.z += 0.3 * 16.0 * u * (1.0 - u) * v * (1.0 - v);
         solver.predicted[i] = *position;
     }
@@ -1014,7 +1114,15 @@ fn create_buffers(
     pipeline: &SolverPipeline,
     step_time: f32,
 ) -> SolverBuffers {
-    initialize_buffers(device, queue, cache, pipeline, step_time, true)
+    initialize_buffers(
+        device,
+        queue,
+        cache,
+        pipeline,
+        step_time,
+        true,
+        &LiveConfig::default(),
+    )
 }
 
 fn initialize_buffers(
@@ -1024,15 +1132,44 @@ fn initialize_buffers(
     pipeline: &SolverPipeline,
     step_time: f32,
     run_reference: bool,
+    live_config: &LiveConfig,
 ) -> SolverBuffers {
-    let (solver, params) = main_cloth_fixture(step_time);
+    live_config
+        .validate()
+        .expect("valid live cloth configuration");
+    let required = live_config.required_storage_binding_bytes();
+    let limits = device.limits();
+    assert!(
+        required <= u64::from(limits.max_storage_buffer_binding_size)
+            && required <= limits.max_buffer_size,
+        "cloth storage binding requires up to {required} bytes, device binding limit is {} bytes and buffer limit is {} bytes; reduce resolution/layers/neighbor capacity",
+        limits.max_storage_buffer_binding_size,
+        limits.max_buffer_size,
+    );
+    let (solver, params) = configured_fixture(step_time, live_config);
     let initial_max_bend_angle_error =
         max_bend_angle_error(&solver.positions, &solver.constraints.bend);
-    assert!(initial_max_bend_angle_error > 0.0);
     let colliders = fixture_colliders(step_time);
     let (initial_max_sdf_correction, initially_affected_particles) =
         sdf_correction_diagnostic(&solver.positions, &colliders, params.collision_margin);
-    assert!(initial_max_sdf_correction > 0.0 && initially_affected_particles > 0);
+    if run_reference {
+        assert!(initial_max_bend_angle_error > 0.0);
+        assert!(initial_max_sdf_correction > 0.0 && initially_affected_particles > 0);
+    }
+    info!(
+        num_particles = params.num_particles,
+        stretch_constraints = solver.constraints.stretch.indices.len(),
+        bend_constraints = solver.constraints.bend.indices.len(),
+        substeps = params.num_substeps,
+        iterations = params.num_iterations,
+        dt = step_time,
+        max_speed = params.max_speed,
+        diameter = params.particle_diameter,
+        self_collision = params.enable_self_collision,
+        neighbor_capacity = params.max_num_neighbors,
+        hash_interval = params.effective_interleaved_hash(),
+        "GPU cloth solver initialized"
+    );
     let config = neighbor_config(&params);
     let initial_directed_contacts = if run_reference {
         let (initial_neighbors, initial_stats) =
@@ -1057,12 +1194,15 @@ fn initialize_buffers(
     };
     // Independent membership diagnostic, unchanged CPU physics kernels and identical phase order.
     // Zero-rest attachments restore pins through Jacobi averaging, not a hard position clamp.
-    let mut reference = solver.clone();
-    if run_reference {
+    let (reference_positions, reference_velocities) = if run_reference {
+        let mut reference = solver.clone();
         for _ in 0..STEPS {
             reference_step(&mut reference, &params, &colliders, step_time);
         }
-    }
+        (reference.positions, reference.velocities)
+    } else {
+        (Vec::new(), Vec::new())
+    };
 
     let csr = build_stretch_csr(&solver);
     let attach_csr = build_attach_csr(solver.num_particles(), &solver.constraints.attach);
@@ -1378,6 +1518,9 @@ fn initialize_buffers(
         _neighbors: neighbors,
         neighbor_search,
         hash_interval: params.effective_interleaved_hash(),
+        substeps: params.num_substeps,
+        iterations: params.num_iterations,
+        self_collision: params.enable_self_collision,
         initial_directed_contacts,
         particle_collision_bind_group,
         colliders,
@@ -1396,8 +1539,8 @@ fn initialize_buffers(
         inverse_masses: solver.constraints.inv_masses,
         long_range_stretchiness: params.long_range_stretchiness,
         step_time,
-        reference_positions: reference.positions,
-        reference_velocities: reference.velocities,
+        reference_positions,
+        reference_velocities,
         num_particles,
     }
 }
@@ -1408,44 +1551,58 @@ impl SolverBuffers {
         pass: &mut ComputePass<'_>,
         cache: &PipelineCache,
         pipeline: &SolverPipeline,
+        mut timing: Option<&mut TimingSample>,
     ) {
         let groups = self.num_particles.div_ceil(WORKGROUP_SIZE);
-        let mut dispatch = |id, bind_group: &BindGroup| {
+        let dispatch = |pass: &mut ComputePass<'_>, id, bind_group: &BindGroup| {
             pass.set_bind_group(0, bind_group, &[]);
             pass.set_pipeline(cache.get_compute_pipeline(id).expect("ready solver"));
             pass.dispatch_workgroups(groups, 1, 1);
         };
-        dispatch(pipeline.stabilize_sdf(), &self.sdf_bind_group);
-        for substep in 0..SUBSTEPS {
-            // Release the closure's mutable pass borrow before the hierarchical hash scan.
-            pass.set_bind_group(0, &self.particle_bind_group, &[]);
-            pass.set_pipeline(
-                cache
-                    .get_compute_pipeline(pipeline.predict())
-                    .expect("ready solver"),
-            );
-            pass.dispatch_workgroups(groups, 1, 1);
-            if substep % self.hash_interval == 0 {
-                self.neighbor_search.record(pass, cache, pipeline);
+        dispatch(pass, pipeline.stabilize_sdf(), &self.sdf_bind_group);
+        for substep in 0..self.substeps {
+            dispatch(pass, pipeline.predict(), &self.particle_bind_group);
+            if self.self_collision {
+                if substep % self.hash_interval == 0 {
+                    if let Some(sample) = timing.as_deref_mut() {
+                        sample.begin_stage(pass, TimingStage::Neighbor);
+                    }
+                    self.neighbor_search.record(pass, cache, pipeline);
+                    if let Some(sample) = timing.as_deref_mut() {
+                        sample.end_stage(pass, TimingStage::Neighbor);
+                    }
+                }
+                if let Some(sample) = timing.as_deref_mut() {
+                    sample.begin_stage(pass, TimingStage::ParticleCollision);
+                }
+                dispatch(
+                    pass,
+                    pipeline.collide_particles(),
+                    &self.particle_collision_bind_group,
+                );
+                dispatch(pass, pipeline.apply_deltas(), &self.constraint_bind_group);
+                if let Some(sample) = timing.as_deref_mut() {
+                    sample.end_stage(pass, TimingStage::ParticleCollision);
+                }
             }
-            let mut dispatch = |id, bind_group: &BindGroup| {
-                pass.set_bind_group(0, bind_group, &[]);
-                pass.set_pipeline(cache.get_compute_pipeline(id).expect("ready solver"));
-                pass.dispatch_workgroups(groups, 1, 1);
-            };
-            dispatch(
-                pipeline.collide_particles(),
-                &self.particle_collision_bind_group,
-            );
-            dispatch(pipeline.apply_deltas(), &self.constraint_bind_group);
-            dispatch(pipeline.collide_sdf(), &self.sdf_bind_group);
-            for _ in 0..ITERATIONS {
-                dispatch(pipeline.solve_stretch(), &self.constraint_bind_group);
-                dispatch(pipeline.solve_attachment(), &self.attachment_bind_group);
-                dispatch(pipeline.solve_bending(), &self.bending_bind_group);
-                dispatch(pipeline.apply_deltas(), &self.constraint_bind_group);
+            dispatch(pass, pipeline.collide_sdf(), &self.sdf_bind_group);
+            if let Some(sample) = timing.as_deref_mut() {
+                sample.begin_stage(pass, TimingStage::Constraints);
             }
-            dispatch(pipeline.finalize(), &self.particle_bind_group);
+            for _ in 0..self.iterations {
+                dispatch(pass, pipeline.solve_stretch(), &self.constraint_bind_group);
+                dispatch(
+                    pass,
+                    pipeline.solve_attachment(),
+                    &self.attachment_bind_group,
+                );
+                dispatch(pass, pipeline.solve_bending(), &self.bending_bind_group);
+                dispatch(pass, pipeline.apply_deltas(), &self.constraint_bind_group);
+            }
+            if let Some(sample) = timing.as_deref_mut() {
+                sample.end_stage(pass, TimingStage::Constraints);
+            }
+            dispatch(pass, pipeline.finalize(), &self.particle_bind_group);
         }
     }
 }
@@ -1477,9 +1634,10 @@ impl LiveSolver {
         cache: &PipelineCache,
         pipeline: &SolverPipeline,
         dt: f32,
+        config: &LiveConfig,
     ) -> Self {
         Self(initialize_buffers(
-            device, queue, cache, pipeline, dt, false,
+            device, queue, cache, pipeline, dt, false, config,
         ))
     }
 
@@ -1508,13 +1666,14 @@ impl LiveSolver {
         cache: &PipelineCache,
         pipeline: &SolverPipeline,
         dt: f32,
+        mut timing: Option<&mut TimingSample>,
     ) {
         assert!(dt.is_finite() && dt > 0.0);
         let mut params = self.0.gpu_params;
         // Preserve the fixture's initialized speed cap when the fixed clock changes.
         // add_cloth derives that cap from the initial dt/diameter; only integration and
         // compliance timing change here, not the configured velocity-clamp policy.
-        params.substep_time = dt / SUBSTEPS as f32;
+        params.substep_time = dt / self.0.substeps as f32;
         queue.write_buffer(&self.0._params, 0, bytemuck::bytes_of(&params));
         queue.write_buffer(
             &self.0._sdf_params,
@@ -1533,11 +1692,18 @@ impl LiveSolver {
         {
             let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                 label: Some("live cloth fixed tick"),
-                timestamp_writes: None,
+                timestamp_writes: timing.as_ref().map(|sample| sample.tick_writes()),
             });
-            self.0.record_step(&mut pass, cache, pipeline);
+            self.0
+                .record_step(&mut pass, cache, pipeline, timing.as_deref_mut());
+        }
+        if let Some(sample) = timing.as_ref() {
+            sample.resolve(&mut encoder);
         }
         queue.submit(Some(encoder.finish()));
+        if let Some(sample) = timing {
+            sample.map_after_submit();
+        }
     }
 }
 
@@ -1996,6 +2162,190 @@ fn attachment_errors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_config_rejects_invalid_bounds_and_accepts_endpoints() {
+        for (field, minimum, maximum) in [
+            (0, 2, 128),
+            (1, 1, 8),
+            (2, 1, 16),
+            (3, 1, 64),
+            (4, 1, 256),
+            (5, 1, 64),
+        ] {
+            for value in [0, minimum - 1, maximum + 1, u32::MAX] {
+                let mut config = LiveConfig::default();
+                let fields = [
+                    &mut config.resolution,
+                    &mut config.layers,
+                    &mut config.substeps,
+                    &mut config.iterations,
+                    &mut config.neighbor_capacity,
+                    &mut config.hash_interval,
+                ];
+                *fields.into_iter().nth(field).unwrap() = value;
+                assert!(config.validate().is_err(), "field {field}, value {value}");
+            }
+            for value in [minimum, maximum] {
+                let mut config = LiveConfig::default();
+                let fields = [
+                    &mut config.resolution,
+                    &mut config.layers,
+                    &mut config.substeps,
+                    &mut config.iterations,
+                    &mut config.neighbor_capacity,
+                    &mut config.hash_interval,
+                ];
+                *fields.into_iter().nth(field).unwrap() = value;
+                assert!(config.validate().is_ok());
+            }
+        }
+        assert_eq!(LiveConfig::default().particle_count(), 578);
+    }
+
+    #[test]
+    fn configured_fixture_sizes_layers_and_preserves_rest_spacing() {
+        for layers in [1, 3] {
+            let config = LiveConfig {
+                resolution: 8,
+                layers,
+                ..default()
+            };
+            let (solver, params) = configured_fixture(1.0 / 64.0, &config);
+            let n = config.particle_count() as usize;
+            assert_eq!(solver.num_particles(), n);
+            assert_eq!(params.num_particles, n as u32);
+            assert_eq!(
+                solver.constraints.stretch.indices.len(),
+                (layers * (4 * 64 + 16)) as usize
+            );
+            assert_eq!(
+                solver.constraints.bend.indices.len(),
+                (layers * 64) as usize
+            );
+            assert_eq!(
+                solver.constraints.attach.slot_positions.len(),
+                (layers * 4) as usize
+            );
+            assert_eq!(solver.constraints.attach.particle_ids.len(), n * 4);
+            assert_eq!(solver.positions, solver.predicted);
+            let stretch = build_stretch_csr(&solver);
+            let attach = build_attach_csr(n, &solver.constraints.attach);
+            let bend = build_bend_csr(n, &solver.constraints.bend);
+            let bound = config.required_storage_binding_bytes();
+            for bytes in [
+                stretch.other.len() * size_of::<u32>(),
+                attach.entries.len() * size_of::<GpuAttachEntry>(),
+                bend.entries.len() * size_of::<u32>(),
+                bend.constraints.len() * size_of::<GpuBendConstraint>(),
+                fixture_colliders(1.0 / 64.0).len() * size_of::<GpuSdfCollider>(),
+            ] {
+                assert!(bytes as u64 <= bound);
+            }
+            for layer in 0..layers as usize {
+                let i = layer * config.layer_particles() as usize;
+                assert_eq!(solver.initial_positions[i].z, 0.5 * layer as f32);
+                assert_eq!(
+                    solver.positions[i].z,
+                    0.5 * layer as f32 - 0.4 * layer as f32
+                );
+                assert_eq!(
+                    solver.constraints.attach.slot_positions[layer * 4],
+                    solver.positions[i]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn default_wrapper_matches_legacy_fixture_exactly() {
+        let dt = 1.0 / 64.0;
+        let (actual, actual_params) = main_cloth_fixture(dt);
+        let (configured, _) = configured_fixture(dt, &LiveConfig::default());
+        assert_eq!(actual.positions, configured.positions);
+        // Reconstruct the previous fixed fixture independently of configured_fixture.
+        let mut params = SimParams {
+            num_substeps: SUBSTEPS,
+            num_iterations: ITERATIONS,
+            enable_self_collision: true,
+            bend_compliance: 1e-4,
+            ..default()
+        };
+        let mut legacy = Solver::default();
+        legacy
+            .add_cloth(
+                &mut params,
+                &generate_cloth_mesh(RES),
+                Mat4::IDENTITY,
+                &CORNERS,
+                dt,
+            )
+            .unwrap();
+        let second = legacy
+            .add_cloth(
+                &mut params,
+                &generate_cloth_mesh(RES),
+                Mat4::from_translation(Vec3::new(0.0, 0.0, 0.5)),
+                &CORNERS,
+                dt,
+            )
+            .unwrap();
+        for point in &mut legacy.positions[second as usize..] {
+            *point += Vec3::new(0.0, 0.0, -0.4);
+        }
+        for point in &mut legacy.constraints.attach.slot_positions[4..] {
+            *point += Vec3::new(0.0, 0.0, -0.4);
+        }
+        legacy.predicted.copy_from_slice(&legacy.positions);
+        for (i, point) in legacy.positions.iter_mut().enumerate() {
+            if legacy.constraints.inv_masses[i] == 0.0 {
+                continue;
+            }
+            let local = i as u32 % ((RES + 1) * (RES + 1));
+            let u = (local % (RES + 1)) as f32 / RES as f32;
+            let v = (local / (RES + 1)) as f32 / RES as f32;
+            point.z += 0.3 * 16.0 * u * (1.0 - u) * v * (1.0 - v);
+            legacy.predicted[i] = *point;
+        }
+        assert_eq!(actual.positions, legacy.positions);
+        assert_eq!(actual.predicted, legacy.predicted);
+        assert_eq!(actual.initial_positions, legacy.initial_positions);
+        assert_eq!(
+            actual.constraints.attach.slot_positions,
+            legacy.constraints.attach.slot_positions
+        );
+        assert_eq!(
+            actual.constraints.stretch.lengths,
+            legacy.constraints.stretch.lengths
+        );
+        assert_eq!(
+            actual.constraints.bend.angles,
+            legacy.constraints.bend.angles
+        );
+        assert_eq!(actual_params.particle_diameter, params.particle_diameter);
+        assert_eq!(actual_params.max_speed, params.max_speed);
+    }
+
+    #[test]
+    fn configured_fixture_applies_runtime_solver_controls() {
+        let config = LiveConfig {
+            resolution: 2,
+            layers: 1,
+            substeps: 3,
+            iterations: 7,
+            neighbor_capacity: 12,
+            hash_interval: 5,
+            self_collision: false,
+            ..default()
+        };
+        let (_, params) = configured_fixture(1.0 / 64.0, &config);
+        assert!(!params.enable_self_collision);
+        assert_eq!(params.num_substeps, 3);
+        assert_eq!(params.num_iterations, 7);
+        assert_eq!(params.max_num_neighbors, 12);
+        assert_eq!(params.effective_interleaved_hash(), 5);
+        assert_eq!(params.num_particles, 9);
+    }
 
     fn host_hash_neighbors(
         points: &[Vec3],
@@ -3276,7 +3626,7 @@ fn run_solver(
             timestamp_writes: None,
         });
         for _ in 0..STEPS {
-            buffers.record_step(&mut pass, &cache, &pipeline);
+            buffers.record_step(&mut pass, &cache, &pipeline, None);
         }
     }
     queue.submit(Some(encoder.finish()));

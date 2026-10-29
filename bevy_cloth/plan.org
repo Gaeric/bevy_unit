@@ -38,12 +38,29 @@
   | GPU headless | 完整求解、动态自碰撞、60 步对照与两类专项 | 用户主机 check/test 无错误，运行报告通过；无性能/物理正确性结论 |
   | GPU live | 独立 SolverLivePlugin、FixedUpdate、GPU-direct 双色线框 | 用户确认视觉符合预期；不推断交互专项、长期稳定性或性能 |
   | live 遥测 | 邻居统计的窗口化异步读回 | 用户确认编译无问题；异步映射、窗口数据、异常告警待运行验证 |
-  | 当前工作 | 静态碰撞器本体线框参照、C 键显隐 | 3 项几何提取测试通过；集成编译、显示和交互待验证 |
+  | 静态碰撞器参照 | 本体线框、C 键显隐 | 3 项几何提取测试通过；集成编译、显示和交互待验证 |
+  | 当前工作 | live 启动配置、暂停重置、GPU 采样计时 | 局部 CPU 测试通过；本批完整编译、设备功能与数值/视觉回归待验证 |
 
-* 当前批次：静态碰撞器参照；保留遥测待验证项
-  - [用户反馈，2026-10-29] 前批 live 视觉符合预期，遥测批次编译无问题；用户强调编译不证明功能正常，暂缓运行验证并授权继续。
-  - [本批改动] =src/gpu/solver_gpu.rs= 共享既有 =fixture_colliders=；=src/gpu/live.rs= 新增本体线框、C 键显隐和 3 项几何测试；
-    =readme.org=、本计划更新状态。CPU/Velvet、碰撞参数、约束算法、邻居布局和求解顺序不改。
+* 当前批次：启动配置 + 可重复初态 + GPU 计时
+  - [用户授权，2026-10-29] 合并推进建议1/2/3；前批遥测/碰撞器参照待验证项继续保留，编译成功不等于运行验收。
+  - [改动文件] =Cargo.toml=（wgpu30 query 类型）、=src/gpu/mod.rs=（导出 LiveConfig）、=solver_gpu.rs=（配置/阶段标记）、
+    =live.rs=（代号/重置/采样）、=pipeline.rs=（异步计时辅助）、=examples/velvet-gpu-live.rs=（CLI）及 readme/本计划。
+    CPU/Velvet 不改，Jacobi 约束计算/碰撞参数不改；headless 使用默认配置并保留原60步对照/专项和容差。
+  - [启动配置] LiveConfig 默认 res16/layers2/substeps2/iterations4/neighbors64/hash_interval3、自碰撞开、运行中、计时关。
+    CLI 见 readme/--help；只在启动生效，不提供运行时改参。校验边界/索引大小、solver-owned binding 和实际输出 slab 的设备限制。
+    层间 rest 间距.5/live间距.1保持既有构造；分辨率改变直径、总质量与速度上限，不是物理等价细化，也不保证所有规模稳定。
+  - [重置] R 清空待提交 tick、复位 readiness、递增 generation，render 重建同配置 GPU buffers，停在暂停状态。
+    计数/预热重新开始；邻居统计与计时保留旧在途资源至完成，旧结果按代号丢弃，不保证跨设备逐位确定性。
+  - [计时] --timing 仅检查设备已启用的 TIMESTAMP_QUERY，不强制申请；不支持时只禁用计时。
+    每代前64 tick预热，第65 tick起采样。pass边界测总求解；支持 INSIDE_PASSES 时标记邻居重建、粒子碰撞+apply、每子步全部约束轮次。
+    每次阶段使用独立query对，跨子步求和；总时间独立测量，不等于这些阶段之和（未细分predict/SDF/finalize等）。
+    输出按现有每层pass记录，另报所有层之和 ms/frame，暂停也可输出；不是整帧光栅渲染耗时。
+    query resolve/copy 在pass后，tick提交后映射，输出使用map_buffer_on_submit；非阻塞收取，每类64完成样本报avg/min/max及skipped。
+  - [计时限制] tick和output合计最多3样本在途，忙则跳过；每样本新分配资源，不是预分配基准框架。
+    不测CPU、排队、上传/读回耗时；timestamp本身和采样可能扰动负载，窗口不足不汇总，无超时监控。
+    map/poll/解码错误禁用计时但不禁用求解；不支持详细阶段时日志对应项为None，不以CPU墙钟冒充GPU时间。无性能结论。
+
+** 保留：静态碰撞器参照与运行待验证项
   - [参照事实] 启动时与 GPU 上传使用同一静态碰撞器定义，世界坐标端点使用 POSITION-only LineList 和既有 LiveMaterial。
     地面为 y=-2.15 的有限网格（求解平面仍无限）；球体中心 (0,-1,0)、半径 .35，以三个大圆表示；
     盒体中心 (.65,-1,.1)、完整尺寸 (.4,.6,.4)、原有旋转，画十二条边。C 只改变这些参照的 Visibility。
@@ -53,12 +70,13 @@
 
 ** 保留：邻居遥测实现与运行待验证项
   - [前批事实] 私有统计 buffer/容量接口、异步采样和 3 项 StatsClock 测试已加入；用户仅确认编译通过。
-  - [采样事实] 每累计至少 64 个已提交 tick，在本帧 tick 提交后 copy 16 字节统计 → clear 诊断计数 → submit → map_async。
+  - [采样事实] 默认累计64个已提交tick后，在本帧tick提交后copy16字节统计 → clear诊断计数 → submit → map_async。
+    本批大负载阈值按floor(u32::MAX / (4 × N × capacity × ceil(substeps/hash_interval)))限制在1..64，预留4倍余量。
     单个可复用 staging buffer，最多一个请求在途；以非阻塞 Poll 收取完成结果，暂停时仍收取已请求的结果。
     GPU-direct Mesh 输出不变，不读回粒子；headless 仍使用原有累计统计，不经过 live 清零路径。
   - [日志语义] =total_ticks/window_ticks= 是 CPU 提交计数，不是 GPU 完成时钟或耗时；=max_required= 是窗口需求峰值，
     =stored_entries= 跨窗口内重建累计，=overflow_rows/invalid_coordinates= 是事件数；后二者非零发出警告。
-  - [限制] 不足 64 tick 的尾窗口不单独采样；在途读回延迟时继续积累，没有超时监控，极端延迟仍可能回绕 u32。
+  - [限制] 不足配置阈值的尾窗口不单独采样；多tick帧/在途读回延迟时继续积累，没有超时监控，极端延迟仍可能回绕u32。
     poll/map 失败会警告并禁用遥测，不停止求解；无日志不能证明没有异常。
   - [已实现] GPU counting hash → 分层 scan → 桶散布 → 27 个真实 cell 查询；邻居 ID 排序去重，
     检查容量溢出与无效坐标。CPU 独立暴力模型仅用于诊断，生产路径不上传 CPU 邻居表。
@@ -67,14 +85,23 @@
   - [时间事实] live 在 =FixedUpdate= 按 =Time<Fixed>::timestep()= 排队每次 dt，默认 1/64 秒。
     shader/mesh 就绪前不积压启动 tick；就绪后保留请求，每个 dt 单独更新 uniform 并提交，避免多步共用最后一次 uniform 值。
     =Space= 暂停/继续，暂停时 =S= 请求一个 fixed tick；不是每显示帧强推一步。
-  - [渲染事实] 两片不同颜色的 =LineList=，仅 POSITION，stride=12；compute 在 =camera_driver= 前直接写 Mesh。
+  - [渲染事实] 配置层数的彩色 =LineList=，仅 POSITION，stride=12；compute 在 =camera_driver= 前直接写 Mesh。
     使用 =NoFrustumCulling=；每帧重新获取实际分配范围并检查布局/字节边界，避免旧 AABB 或 allocator 迁移失配。
-    主路径无 CPU Mesh 读回、法线、光照或阴影；没有重置或相机环绕，本批新增独立静态碰撞器参照。
+    主路径无 CPU Mesh 读回、法线、光照或阴影；无相机环绕，有独立静态碰撞器参照及本批R重置。
   - [边界] headless 仍保留全部专项、CPU 参考及一次性 60 步批量对照；不把粒子对照读回接入 live。
     live max-speed 仍为初始化上限，碰撞器变换静态；邻居遥测运行尚待验证，未作性能结论。
 
 ** 暂缓验证清单（有条件时运行，不要求当前补跑）
-   - [待验证，碰撞器参照] 本批集成编译、显示和 C 键显隐。预期显示中性色地面网格、球体三大圆与旋转盒体；
+   - [待验证，本批集成] 编译/测试新增配置、重置和计时；默认headless数值容差/专项不变，不放宽以适应重构。
+     以 --resolution 8 --layers 1 --paused 和 --resolution 32 --layers 3 --paused 分别检查81/3267粒子及对应输出层数。
+     空参数仍为578粒子/两层；自碰撞关只跳过邻居重建与粒子碰撞+apply，不跳过SDF或形变约束。
+   - [待验证，重置] 运行后R应回到初态并暂停，S只推进一tick；反复R、启动未就绪时R、读回在途时R均不混旧数据。
+     查 TickQueue::generation/pending、LiveStats.pending的代号、GpuTimings.collect；新代tick应重新计数并重新预热。
+   - [待验证，计时] --timing 前64tick不采样，随后每类64完成样本汇总；不支持功能时降级、不影响求解。
+     支持详细阶段时才有阶段值，输出单位ms/frame，求解ms/tick，skipped非零说明采样不完整，不冒充每tick覆盖。
+     查 pipeline.rs::TimingSample 的written/query容量、resolve/map顺序、period_ns和u64差；测量值须有限非负，不能由局部测试推定实际耗时。
+     暂停后仍收旧采样/输出，R不得混代；多fixed tick帧每tick独立提交uniform、独立采样，不把输出耗时乘进每tick。
+   - [待验证，碰撞器参照] 前批集成编译、显示和 C 键显隐。预期显示中性色地面网格、球体三大圆与旋转盒体；
      C 只隐藏/显示参照，不改变彩色布料、暂停状态、tick 或统计。
      若位置/尺寸不符，查 =live.rs::collider_guide_lines= 与 =solver_gpu.rs::fixture_colliders=；
      盒体局部端点应为 ±.5，世界变换使用 cur_transform（已含缩放），不可再乘一次 scale。
@@ -82,28 +109,29 @@
    #+begin_src bash
      cargo check -j 2 -p bevy_cloth --all-targets
      cargo test -j 2 -p bevy_cloth --lib gpu:: -- --nocapture
-     cargo run -j 2 -p bevy_cloth --example velvet-gpu-live
+     cargo test -j 2 -p bevy_cloth --example velvet-gpu-live
+     cargo run -j 2 -p bevy_cloth --example velvet-gpu-live -- --resolution 32 --layers 3 --substeps 4 --iterations 6 --paused --timing
      cargo run -j 2 -p bevy_cloth --example velvet-gpu  # headless 回归诊断
    #+end_src
    - [待验证，遥测] 前批用户确认编译无问题；异步映射、窗口日志及异常告警仍未运行验收，不以编译成功替代。
-     连续运行数秒，默认 64Hz 下约每秒一个窗口（不是按墙钟精确一秒）；窗口通常 64 tick，允许因多 tick 帧或读回忙而更大。
+     连续运行数秒，默认配置/64Hz下约每秒一个窗口（不是墙钟精确一秒）；大负载会缩短阈值，多tick帧/读回忙可使窗口更大。
      =max_required<=capacity= 且 =overflow_rows=0=、=invalid_coordinates=0= 是本批正常关系，不预设运行中峰值等于 headless 的 27。
      画面应保持原样；Space 应冻结，暂停时 S 只推进一个 fixed tick，再次 Space 恢复。尾窗口不足阈值不应期待新日志。
    - 没有日志：查 =live.rs::simulate_and_output= 的已提交 tick 数、=StatsClock::take_window= 和 =LiveStats::collect= 完成状态。
      tick 未到 64 则继续运行；有 sample requested 但无 window 则查 map 回调/poll 错误，不能解释为零异常。
    - 溢出非零：查窗口 =max_required= 与 =capacity=，确认候选表截断；先保存日志和配置再讨论容量或算法，不直接放宽。
      无效坐标非零：查 =solver.wesl::count_hash/valid_cell= 的坐标合法性及输入 predicted 是否有限/在 cell 整数范围内，先定位数值异常。
-   - 黑屏/不动：查 =live.rs::simulate_and_output= 的 pipeline readiness、两个 mesh allocation 与 POSITION-only 布局。
+   - 黑屏/不动：查 =live.rs::simulate_and_output= 的 pipeline readiness、配置层数的 mesh allocation 与 POSITION-only 布局。
      布局应为 Float32x3、stride=12，count/offset 应落在实际 allocation 与粒子范围内；
      pipeline 报错先查对应 shader，布局失败查 Mesh 构建，均就绪再查 tick 请求与输出 dispatch。
    - 时间异常：查 =request_tick=、=TickQueue= 的逐请求 dt 与 =LiveSolver::submit_step=；
      默认每 tick=.015625，启动未就绪不应积压，每个请求应独立提交，暂停后无新请求时位置不应继续改变。
    - headless 保留位置差 <=1e-3、速度差 <=1e-2 及专项通过条件；失败先定位，不放宽容差。
      =max_sdf_correction= 是同一 CPU 投影函数对最终位置的残余修正量，不是真实穿透深度，也不要求为零。
-   - 遥测运行与参照集成验证暂缓，要求保留；恢复验证后按实际结果共同定位，不以继续开发抵消验收缺口。
+   - 遥测运行、参照集成与本批配置/重置/计时验证暂缓，要求保留；恢复后按实际结果共同定位，不以继续开发抵消验收缺口。
 
 * 后续方向（不是并行展开的任务清单）
-  - [决定] 前批 live 视觉已获用户确认；遥测编译通过、运行暂缓。本批参照独立于遥测结果，尚待集成验证。
+  - [决定] 前批 live 视觉已获用户确认；遥测编译通过、运行暂缓。参照及本批配置/重置/计时尚待集成验证。
     可按用户授权继续独立小批；不依赖未验证行为做算法或性能结论，后续范围另定。
     不把未来优化提前定为任务，也不设必修理论课程。
   - 每一批的范围和验证标准都先讨论；尚未实现的并行算法与碰撞结构不预先承诺。
@@ -127,9 +155,14 @@
   - [live 证据] 前批 6 项 helper 提取模型测试通过，独立 output shader harness 退出码 0；这些本身不是集成验证。
     用户于 2026-10-29 报告已观看 GPU live 且符合预期，记录视觉确认；未提供暂停/单步专项或性能数据。
   - [遥测证据] 前批 3 项 StatsClock 提取调度测试通过，用户确认编译无问题；窗口统计、异步映射和异常告警运行仍待验证。
-  - [本批局部证据] 使用实际 collider_guide_lines、SdfCollider 定义和 3 项几何测试的临时 rustc harness 全部通过；
-    验证平面高度、scale.x 球半径、旋转/非均匀缩放盒体的十二条唯一边。未调用 compute_sdf 作为几何判据。
-    rustfmt 检查与 git diff --check 通过；只读源码复核未发现具体问题，不替代 Bevy 集成编译、显示或 C 键交互验证。
+  - [参照局部证据] 使用实际 collider_guide_lines、SdfCollider 定义和3项几何测试的临时rustc harness通过；
+    验证平面高度、scale.x球半径、旋转/非均匀缩放盒体十二条唯一边，不调用compute_sdf作几何判据；不替代显示/C键验证。
+  - [本批局部证据] 配置/fixture4项和CLI2项实际源码提取测试通过，另1项临时最小网格SDF容量检查通过；
+    实际CPU sim模块只读导入，默认初态与独立重建旧fixture逐项比较一致。
+    tick/统计窗口8项及timestamp解码/汇总3项提取测试通过（合计11），与上述7项合并harness共18项通过。
+    另以实际wgpu30类型在/tmp隔离crate编译完整计时辅助及求解pass借用模式，4项CPU测试通过（含部分重复覆盖）；
+    RenderDevice/Queue用薄包装、日志为占位，不创建adapter/device，不执行GPU工作，不能代替完整Bevy或异步映射/reset设备验证。
+    rustfmt与git diff --check通过；完整Cargo --offline -j2 --all-targets检查在avian3d解析处阻塞，尚未编译到本批代码；没有性能实测。
   - [agent 环境] 已检查 /.dockerenv，当前为 Docker、无 GPU；CARGO_TARGET_DIR=/tmp/cargo-target 的离线 Cargo check
     在 workspace avian3d 依赖解析时阻塞，未编译到本批代码，未执行正式集成验证。
     源码缓存不等于离线依赖可解析，局部 harness 不替代 Cargo/Bevy/设备运行；没有性能测量。

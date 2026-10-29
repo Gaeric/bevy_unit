@@ -39,8 +39,8 @@ use std::{
 
 use super::{
     layout::NeighborStats,
-    pipeline::{SolverPipeline, WORKGROUP_SIZE},
-    solver_gpu::{LiveSolver, RES, fixture_colliders, main_cloth_fixture},
+    pipeline::{GpuTimings, SolverPipeline, WORKGROUP_SIZE},
+    solver_gpu::{LiveConfig, LiveSolver, configured_fixture, fixture_colliders},
 };
 use crate::sim::{
     collide::{ColliderKind, SdfCollider},
@@ -50,6 +50,7 @@ use crate::sim::{
 #[derive(Default)]
 struct TickQueue {
     ready: bool,
+    generation: u64,
     pending: VecDeque<f32>,
 }
 
@@ -68,6 +69,15 @@ impl TickQueue {
     fn take(&mut self) -> VecDeque<f32> {
         std::mem::take(&mut self.pending)
     }
+
+    fn reset(&mut self) {
+        self.pending.clear();
+        self.ready = false;
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("live experiment generation");
+    }
 }
 
 #[derive(Resource, Clone, Default)]
@@ -85,8 +95,16 @@ struct ColliderGuide;
 fn controls(
     keys: Res<ButtonInput<KeyCode>>,
     mut controls: ResMut<Controls>,
+    ticks: Res<LiveTicks>,
     mut guides: Query<&mut Visibility, With<ColliderGuide>>,
 ) {
+    if keys.just_pressed(KeyCode::KeyR) {
+        controls.paused = true;
+        controls.single_steps = 0;
+        ticks.0.lock().expect("live cloth ticks").reset();
+        info!("GPU cloth reset requested; experiment restarts paused");
+        return;
+    }
     if keys.just_pressed(KeyCode::KeyC) {
         for mut visibility in &mut guides {
             *visibility = if *visibility == Visibility::Hidden {
@@ -116,6 +134,19 @@ fn request_tick(time: Res<Time<Fixed>>, controls: ResMut<Controls>, ticks: Res<L
 }
 
 const STATS_INTERVAL_TICKS: u64 = 64;
+const TIMING_WARMUP_TICKS: u64 = 64;
+
+/// Leave 4x counter headroom for multi-tick frames / delayed collection; no guarantee
+/// against an indefinitely stalled readback. Default workload still uses 64 ticks.
+fn stats_interval(config: &LiveConfig) -> u64 {
+    let rebuilds = u64::from(config.substeps.div_ceil(config.hash_interval));
+    let max_entries_per_tick =
+        u64::from(config.particle_count()) * u64::from(config.neighbor_capacity) * rebuilds;
+    if !config.self_collision {
+        return STATS_INTERVAL_TICKS;
+    }
+    (u64::from(u32::MAX) / (4 * max_entries_per_tick)).clamp(1, STATS_INTERVAL_TICKS)
+}
 
 /// CPU scheduling counts, not GPU timing measurements.
 #[derive(Default)]
@@ -130,8 +161,13 @@ impl StatsClock {
         self.window_ticks = self.window_ticks.saturating_add(ticks);
     }
 
+    #[cfg(test)]
     fn take_window(&mut self, busy: bool) -> Option<(u64, u64)> {
-        if busy || self.window_ticks < STATS_INTERVAL_TICKS {
+        self.take_window_at(busy, STATS_INTERVAL_TICKS)
+    }
+
+    fn take_window_at(&mut self, busy: bool, interval: u64) -> Option<(u64, u64)> {
+        if busy || self.window_ticks < interval {
             return None;
         }
         Some((self.total_ticks, std::mem::take(&mut self.window_ticks)))
@@ -144,12 +180,17 @@ struct LiveStats {
     clock: StatsClock,
     staging: Option<Buffer>,
     completion: Arc<Mutex<Option<Result<(), String>>>>,
-    pending: Option<(u64, u64)>,
+    pending: Option<(u64, u64, u64)>,
     disabled: bool,
 }
 
 impl LiveStats {
-    fn collect(&mut self, device: &RenderDevice) {
+    fn reset(&mut self) {
+        self.clock = StatsClock::default();
+        // Keep pending staging/callback ownership until its map completes.
+    }
+
+    fn collect(&mut self, device: &RenderDevice, generation: u64) {
         if self.disabled || self.pending.is_none() {
             return;
         }
@@ -167,8 +208,13 @@ impl LiveStats {
         let Some(result) = result else {
             return;
         };
-        let (total_ticks, window_ticks) = self.pending.take().expect("pending stats sample");
+        let (sample_generation, total_ticks, window_ticks) =
+            self.pending.take().expect("pending stats sample");
         let staging = self.staging.as_ref().expect("stats staging buffer");
+        if sample_generation != generation {
+            staging.unmap();
+            return;
+        }
         let stats = result.and_then(|()| {
             let slice = staging.slice(..);
             let data = slice
@@ -180,6 +226,7 @@ impl LiveStats {
         match stats {
             Ok(stats) => {
                 info!(
+                    generation,
                     total_ticks,
                     window_ticks,
                     overflow_rows = stats.overflow_rows,
@@ -203,11 +250,18 @@ impl LiveStats {
         }
     }
 
-    fn sample(&mut self, device: &RenderDevice, queue: &RenderQueue, solver: &LiveSolver) {
+    fn sample(
+        &mut self,
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        solver: &LiveSolver,
+        generation: u64,
+        interval: u64,
+    ) {
         if self.disabled {
             return;
         }
-        let Some(window) = self.clock.take_window(self.pending.is_some()) else {
+        let Some(window) = self.clock.take_window_at(self.pending.is_some(), interval) else {
             return;
         };
         let byte_len = size_of::<NeighborStats>() as u64;
@@ -227,13 +281,14 @@ impl LiveStats {
         encoder.copy_buffer_to_buffer(solver.neighbor_stats(), 0, staging, 0, byte_len);
         encoder.clear_buffer(solver.neighbor_stats(), 0, None);
         queue.submit(Some(encoder.finish()));
-        self.pending = Some(window);
+        self.pending = Some((generation, window.0, window.1));
         let completion = self.completion.clone();
         staging.slice(..).map_async(MapMode::Read, move |result| {
             *completion.lock().expect("live stats completion") =
                 Some(result.map_err(|error| error.to_string()));
         });
         info!(
+            generation,
             total_ticks = window.0,
             window_ticks = window.1,
             capacity = solver.neighbor_capacity(),
@@ -256,8 +311,21 @@ impl Plugin for SolverLivePlugin {
         embedded_asset!(app, "solver.wesl");
         embedded_asset!(app, "output.wesl");
         embedded_asset!(app, "live_material.wesl");
+        app.init_resource::<LiveConfig>();
+        let config = app.world().resource::<LiveConfig>();
+        config
+            .validate()
+            .expect("valid live cloth startup configuration");
+        let start_paused = config.start_paused;
+        info!(
+            ?config,
+            "GPU cloth startup configuration (not physically equivalent across resolutions)"
+        );
+        app.insert_resource(Controls {
+            paused: start_paused,
+            single_steps: 0,
+        });
         app.init_resource::<LiveTicks>()
-            .init_resource::<Controls>()
             .add_plugins((
                 MaterialPlugin::<LiveMaterial>::default(),
                 ExtractResourcePlugin::<LiveMeshes>::default(),
@@ -266,13 +334,17 @@ impl Plugin for SolverLivePlugin {
             .add_systems(PreUpdate, controls.after(bevy::input::InputSystems))
             .add_systems(FixedUpdate, request_tick);
         let ticks = app.world().resource::<LiveTicks>().clone();
+        let config = app.world().resource::<LiveConfig>().clone();
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.insert_resource(ticks).add_systems(
-                RenderGraph,
-                simulate_and_output
-                    .in_set(RenderGraphSystems::Render)
-                    .before(camera_driver),
-            );
+            render_app
+                .insert_resource(config)
+                .insert_resource(ticks)
+                .add_systems(
+                    RenderGraph,
+                    simulate_and_output
+                        .in_set(RenderGraphSystems::Render)
+                        .before(camera_driver),
+                );
         }
     }
 
@@ -389,11 +461,30 @@ fn simulate_and_output(
     queue: Res<RenderQueue>,
     ticks: Res<LiveTicks>,
     dt: Res<InitialDt>,
+    config: Res<LiveConfig>,
     mut solver: Local<Option<LiveSolver>>,
     mut stats: Local<LiveStats>,
+    mut timings: Local<Option<GpuTimings>>,
+    mut active_generation: Local<u64>,
+    mut output_frame: Local<u64>,
 ) {
-    stats.collect(context.render_device());
     let mut requests = ticks.0.lock().expect("live cloth ticks");
+    let generation = requests.generation;
+    let timings = timings
+        .get_or_insert_with(|| GpuTimings::new(context.render_device(), &queue, config.gpu_timing));
+    if *active_generation != generation {
+        *solver = None;
+        stats.reset();
+        timings.reset();
+        *output_frame = 0;
+        *active_generation = generation;
+        info!(
+            generation,
+            "GPU cloth new experiment; restoring startup fixture"
+        );
+    }
+    stats.collect(context.render_device(), generation);
+    timings.collect(context.render_device(), generation);
     // Startup is gated, but readiness stays latched once active: temporary missing assets
     // must not suppress new fixed ticks or discard requests already queued.
     let Some(meshes) = meshes else {
@@ -405,7 +496,7 @@ fn simulate_and_output(
     if !LiveSolver::ready(&cache, &pipeline) {
         return;
     }
-    let n = 2 * (RES + 1) * (RES + 1);
+    let n = config.particle_count();
     // Re-fetch allocations and layouts: allocator slabs may be replaced/grown between frames.
     let mut targets = Vec::new();
     for (handle, offset, count) in &meshes.layers {
@@ -419,6 +510,17 @@ fn simulate_and_output(
             error!("GPU cloth output requires an uncompressed POSITION-only Float32x3 mesh");
             return;
         }
+        if slice.buffer.size()
+            > u64::from(
+                context
+                    .render_device()
+                    .limits()
+                    .max_storage_buffer_binding_size,
+            )
+        {
+            error!("GPU cloth mesh allocator slab exceeds the device storage binding limit");
+            return;
+        }
         let Some(range) =
             OutputRange::checked(slice.range.clone(), *offset, *count, n, slice.buffer.size())
         else {
@@ -427,28 +529,59 @@ fn simulate_and_output(
         };
         targets.push((slice, range));
     }
-    if targets.len() != 2 {
+    if targets.len() != config.layers as usize {
         return;
     }
     let solver = solver.get_or_insert_with(|| {
-        LiveSolver::new(context.render_device(), &queue, &cache, &pipeline, dt.0)
+        LiveSolver::new(
+            context.render_device(),
+            &queue,
+            &cache,
+            &pipeline,
+            dt.0,
+            &config,
+        )
     });
     assert_eq!(solver.num_particles(), n);
     requests.ready = true;
     let pending = requests.take();
     drop(requests);
-    let submitted_ticks = pending.len() as u64;
     for step_time in pending {
+        let tick = stats.clock.total_ticks + 1;
+        let mut sample = (tick > TIMING_WARMUP_TICKS)
+            .then(|| timings.begin_tick(context.render_device(), generation, tick, config.substeps))
+            .flatten();
         solver.submit_step(
             context.render_device(),
             &queue,
             &cache,
             &pipeline,
             step_time,
+            sample.as_mut(),
         );
+        if let Some(sample) = sample {
+            timings.track(sample);
+        }
+        stats.clock.advance(1);
     }
-    stats.clock.advance(submitted_ticks);
-    stats.sample(context.render_device(), &queue, solver);
+    stats.sample(
+        context.render_device(),
+        &queue,
+        solver,
+        generation,
+        stats_interval(&config),
+    );
+    *output_frame = output_frame.saturating_add(1);
+    let mut output_sample = (stats.clock.total_ticks > TIMING_WARMUP_TICKS)
+        .then(|| {
+            timings.begin_output(
+                context.render_device(),
+                generation,
+                *output_frame,
+                config.layers,
+            )
+        })
+        .flatten();
     // No simulation tick is required for output: paused/newly allocated meshes still get copied.
     for (slice, range) in targets {
         let device = context.render_device();
@@ -472,11 +605,16 @@ fn simulate_and_output(
             .command_encoder()
             .begin_compute_pass(&ComputePassDescriptor {
                 label: Some("cloth positions to current mesh slab"),
-                timestamp_writes: None,
+                timestamp_writes: output_sample.as_mut().map(|sample| sample.output_writes()),
             });
         pass.set_pipeline(output_pipeline);
         pass.set_bind_group(0, &group, &[]);
         pass.dispatch_workgroups(range.count.div_ceil(WORKGROUP_SIZE), 1, 1);
+    }
+    if let Some(sample) = output_sample {
+        sample.resolve(context.command_encoder());
+        sample.map_on_submit(context.command_encoder());
+        timings.track(sample);
     }
 }
 
@@ -568,9 +706,10 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<LiveMaterial>>,
     time: Res<Time<Fixed>>,
+    config: Res<LiveConfig>,
 ) {
-    let (fixture, _) = main_cloth_fixture(time.timestep().as_secs_f32());
-    let source = generate_cloth_mesh(RES);
+    let (fixture, _) = configured_fixture(time.timestep().as_secs_f32(), &config);
+    let source = generate_cloth_mesh(config.resolution);
     // Indexed lines keep vertex/particle identity, unlike expanding each line endpoint.
     let mut edges = Vec::new();
     for triangle in source.indices.chunks_exact(3) {
@@ -585,14 +724,15 @@ fn setup(
     }
     let count = source.positions.len() as u32;
     let mut layers = Vec::new();
-    for (layer, color) in [
+    let colors = [
         LinearRgba::new(0.1, 0.7, 1.0, 1.0),
         LinearRgba::new(1.0, 0.35, 0.1, 1.0),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let offset = layer as u32 * count;
+        LinearRgba::new(0.4, 1.0, 0.3, 1.0),
+        LinearRgba::new(0.8, 0.3, 1.0, 1.0),
+    ];
+    for layer in 0..config.layers {
+        let color = colors[layer as usize % colors.len()];
+        let offset = layer * count;
         let initial: Vec<[f32; 3]> = fixture.positions[offset as usize..(offset + count) as usize]
             .iter()
             .map(|p| p.to_array())
@@ -631,13 +771,77 @@ fn setup(
         Transform::from_xyz(2.8, 0.4, 4.0).looking_at(Vec3::new(0.0, -1.0, 0.1), Vec3::Y),
     ));
     info!(
-        "Real-time GPU cloth: Space pause/resume, S single fixed tick, C collider body guides (no margin); default Fixed clock is unchanged"
+        "Real-time GPU cloth: Space pause/resume, S single fixed tick, R reset to paused initial state, C collider body guides (no margin); default Fixed clock is unchanged"
     );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stats_interval_bounds_normal_window_at_largest_workload() {
+        assert_eq!(stats_interval(&LiveConfig::default()), 64);
+        let config = LiveConfig {
+            resolution: 128,
+            layers: 8,
+            substeps: 16,
+            hash_interval: 1,
+            neighbor_capacity: 256,
+            ..default()
+        };
+        config.validate().unwrap();
+        let interval = stats_interval(&config);
+        assert_eq!(interval, 1);
+        let worst_entries = u64::from(config.particle_count())
+            * u64::from(config.neighbor_capacity)
+            * u64::from(config.substeps)
+            * interval;
+        assert!(worst_entries <= u64::from(u32::MAX) / 4);
+        let mut clock = StatsClock::default();
+        clock.advance(interval);
+        assert_eq!(clock.take_window_at(true, interval), None);
+        assert_eq!(clock.take_window_at(false, interval), Some((1, 1)));
+    }
+
+    #[test]
+    fn reset_discards_queued_ticks_and_gates_new_steps_until_ready() {
+        let mut queue = TickQueue {
+            ready: true,
+            ..default()
+        };
+        let mut steps = 0;
+        queue.push(false, &mut steps, 0.01);
+        queue.reset();
+        assert_eq!(queue.generation, 1);
+        assert!(queue.take().is_empty());
+        steps = 1;
+        queue.push(true, &mut steps, 0.02);
+        assert_eq!(steps, 1);
+        assert!(queue.take().is_empty());
+        queue.ready = true;
+        queue.push(true, &mut steps, 0.03);
+        assert_eq!(steps, 0);
+        assert_eq!(queue.take(), VecDeque::from([0.03]));
+        queue.reset();
+        assert_eq!(queue.generation, 2);
+    }
+
+    #[test]
+    fn stats_reset_keeps_old_request_ownership_but_clears_tick_window() {
+        let mut stats = LiveStats::default();
+        stats.clock.advance(70);
+        stats.pending = Some((4, 64, 64));
+        let completion = stats.completion.clone();
+        stats.reset();
+        assert_eq!(stats.clock.total_ticks, 0);
+        assert_eq!(stats.clock.window_ticks, 0);
+        assert_eq!(stats.pending, Some((4, 64, 64)));
+        assert!(Arc::ptr_eq(&stats.completion, &completion));
+        stats.clock.advance(65);
+        assert_eq!(stats.clock.take_window(stats.pending.is_some()), None);
+        assert_eq!(stats.clock.window_ticks, 65);
+    }
 
     #[test]
     fn plane_guide_is_a_finite_patch_at_solver_height() {

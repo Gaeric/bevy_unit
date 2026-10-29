@@ -15,3 +15,5 @@ bevy = { version = "0.20.0", features = [
 glam = "0.33"
 rand = "0.10.0"
 bytemuck = { version = "1", features = ["derive"] }
+# Timestamp query types match the locally patched Bevy renderer; no extra backend features.
+wgpu = { version = "30", default-features = false }

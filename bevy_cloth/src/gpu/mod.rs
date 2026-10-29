@@ -8,4 +8,4 @@ pub mod solver_gpu;
 pub use layout::GpuParams;
 pub use live::SolverLivePlugin;
 pub use pipeline::{SolverPipeline, WORKGROUP_SIZE};
-pub use solver_gpu::{SolverGpuPlugin, SolverReport, SolverResultSlot};
+pub use solver_gpu::{LiveConfig, SolverGpuPlugin, SolverReport, SolverResultSlot};
