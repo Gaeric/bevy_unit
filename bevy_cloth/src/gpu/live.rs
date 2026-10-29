@@ -40,9 +40,12 @@ use std::{
 use super::{
     layout::NeighborStats,
     pipeline::{SolverPipeline, WORKGROUP_SIZE},
-    solver_gpu::{LiveSolver, RES, main_cloth_fixture},
+    solver_gpu::{LiveSolver, RES, fixture_colliders, main_cloth_fixture},
 };
-use crate::sim::mesh_gen::generate_cloth_mesh;
+use crate::sim::{
+    collide::{ColliderKind, SdfCollider},
+    mesh_gen::generate_cloth_mesh,
+};
 
 #[derive(Default)]
 struct TickQueue {
@@ -76,7 +79,23 @@ struct Controls {
     single_steps: u32,
 }
 
-fn controls(keys: Res<ButtonInput<KeyCode>>, mut controls: ResMut<Controls>) {
+#[derive(Component)]
+struct ColliderGuide;
+
+fn controls(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut controls: ResMut<Controls>,
+    mut guides: Query<&mut Visibility, With<ColliderGuide>>,
+) {
+    if keys.just_pressed(KeyCode::KeyC) {
+        for mut visibility in &mut guides {
+            *visibility = if *visibility == Visibility::Hidden {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
+        }
+    }
     if keys.just_pressed(KeyCode::Space) {
         controls.paused = !controls.paused;
         controls.single_steps = 0;
@@ -492,6 +511,58 @@ impl Material for LiveMaterial {
     }
 }
 
+/// Body outlines only: no collision margin or rounded-cube projection envelope.
+/// World-space endpoints deliberately stay outside LiveMeshes and GPU output dispatches.
+fn collider_guide_lines(collider: &SdfCollider) -> Vec<[f32; 3]> {
+    let mut vertices = Vec::new();
+    let mut line = |a: Vec3, b: Vec3| {
+        vertices.push(a.to_array());
+        vertices.push(b.to_array());
+    };
+    match collider.kind {
+        ColliderKind::Plane => {
+            // Solver planes are horizontal and infinite, regardless of rotation/scale.
+            const EXTENT: f32 = 3.0;
+            let y = collider.position.y;
+            for i in -6..=6 {
+                let offset = i as f32 * 0.5;
+                line(Vec3::new(-EXTENT, y, offset), Vec3::new(EXTENT, y, offset));
+                line(Vec3::new(offset, y, -EXTENT), Vec3::new(offset, y, EXTENT));
+            }
+        }
+        ColliderKind::Sphere => {
+            const SEGMENTS: u32 = 48;
+            for (u, v) in [(Vec3::X, Vec3::Y), (Vec3::Y, Vec3::Z), (Vec3::Z, Vec3::X)] {
+                let point = |i: u32| {
+                    let angle = std::f32::consts::TAU * i as f32 / SEGMENTS as f32;
+                    collider.position + collider.scale.x * (angle.cos() * u + angle.sin() * v)
+                };
+                for i in 0..SEGMENTS {
+                    line(point(i), point(i + 1));
+                }
+            }
+        }
+        ColliderKind::Cube => {
+            for corner in 0u32..8 {
+                let local = Vec3::new(
+                    if corner & 1 == 0 { -0.5 } else { 0.5 },
+                    if corner & 2 == 0 { -0.5 } else { 0.5 },
+                    if corner & 4 == 0 { -0.5 } else { 0.5 },
+                );
+                for (bit, axis) in [(1, Vec3::X), (2, Vec3::Y), (4, Vec3::Z)] {
+                    if corner & bit == 0 {
+                        line(
+                            collider.position + collider.cur_transform * local,
+                            collider.position + collider.cur_transform * (local + axis),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    vertices
+}
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -543,18 +614,109 @@ fn setup(
         ));
     }
     commands.insert_resource(LiveMeshes { layers });
+    let guide_material = materials.add(LiveMaterial {
+        color: LinearRgba::new(0.35, 0.45, 0.35, 1.0),
+    });
+    for collider in fixture_colliders(time.timestep().as_secs_f32()) {
+        let mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::RENDER_WORLD)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, collider_guide_lines(&collider));
+        commands.spawn((
+            ColliderGuide,
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(guide_material.clone()),
+        ));
+    }
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(2.8, 0.4, 4.0).looking_at(Vec3::new(0.0, -1.0, 0.1), Vec3::Y),
     ));
     info!(
-        "Real-time GPU cloth: Space pause/resume, S single fixed tick while paused; default Fixed clock is unchanged"
+        "Real-time GPU cloth: Space pause/resume, S single fixed tick, C collider body guides (no margin); default Fixed clock is unchanged"
     );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plane_guide_is_a_finite_patch_at_solver_height() {
+        let collider = SdfCollider::from_transform(
+            ColliderKind::Plane,
+            Mat4::from_scale_rotation_translation(
+                Vec3::splat(2.0),
+                Quat::from_rotation_z(0.7),
+                Vec3::new(5.0, -2.15, 7.0),
+            ),
+            0.02,
+        );
+        let vertices = collider_guide_lines(&collider);
+        assert_eq!(vertices.len(), 52);
+        for vertex in vertices {
+            let point = Vec3::from_array(vertex);
+            assert_eq!(point.y, -2.15);
+            assert!(point.x.abs() <= 3.0 && point.z.abs() <= 3.0);
+        }
+    }
+
+    #[test]
+    fn sphere_guide_uses_scale_x_as_radius_without_margin() {
+        let collider = SdfCollider::from_transform(
+            ColliderKind::Sphere,
+            Mat4::from_scale_rotation_translation(
+                Vec3::new(0.35, 0.6, 0.8),
+                Quat::from_rotation_y(0.4),
+                Vec3::new(0.2, -1.0, 0.1),
+            ),
+            0.02,
+        );
+        let vertices = collider_guide_lines(&collider);
+        assert_eq!(vertices.len(), 3 * 48 * 2);
+        for vertex in &vertices {
+            let radius = (Vec3::from_array(*vertex) - collider.position).length();
+            assert!((radius - 0.35).abs() < 1e-6);
+        }
+        for circle in vertices.chunks_exact(48 * 2) {
+            assert!((Vec3::from_array(circle[0]) - Vec3::from_array(circle[95])).length() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn cube_guide_has_twelve_transformed_unit_cube_edges() {
+        let collider = SdfCollider::cube(
+            Vec3::new(0.65, -1.0, 0.1),
+            Vec3::new(0.4, 0.6, 0.4),
+            Quat::from_rotation_z(0.35) * Quat::from_rotation_y(0.25),
+            0.02,
+        );
+        let vertices = collider_guide_lines(&collider);
+        assert_eq!(vertices.len(), 24);
+        let mut edges = Vec::new();
+        for edge in vertices.chunks_exact(2) {
+            let a = collider
+                .inv_cur_transform
+                .transform_point3(Vec3::from_array(edge[0]));
+            let b = collider
+                .inv_cur_transform
+                .transform_point3(Vec3::from_array(edge[1]));
+            for point in [a, b] {
+                for value in point.to_array() {
+                    assert!((value.abs() - 0.5).abs() < 1e-6);
+                }
+            }
+            let delta = (b - a).abs();
+            assert!((delta.element_sum() - 1.0).abs() < 1e-6);
+            let key = |point: Vec3| {
+                u8::from(point.x > 0.0)
+                    | (u8::from(point.y > 0.0) << 1)
+                    | (u8::from(point.z > 0.0) << 2)
+            };
+            let pair = (key(a), key(b));
+            assert!(pair.0 < pair.1);
+            assert!(!edges.contains(&pair));
+            edges.push(pair);
+        }
+    }
 
     #[test]
     fn stats_window_waits_for_tick_threshold() {

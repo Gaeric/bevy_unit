@@ -653,7 +653,7 @@ impl NeighborBuffers {
 }
 
 /// Static shared inputs: no CPU-only animation or implicit per-frame upload.
-fn fixture_colliders(step_time: f32) -> Vec<SdfCollider> {
+pub(super) fn fixture_colliders(step_time: f32) -> Vec<SdfCollider> {
     vec![
         SdfCollider::plane(-2.15, step_time),
         SdfCollider::sphere(Vec3::new(0.0, -1.0, 0.0), 0.35, step_time),
