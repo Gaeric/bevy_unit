@@ -39,7 +39,7 @@ use crate::{
 /// One-time main-world clock snapshot, not a real-time FixedUpdate driver.
 #[derive(Resource, Clone, Copy)]
 struct SolverBatchTime(f32);
-const RES: u32 = 16;
+pub(super) const RES: u32 = 16;
 const STEPS: u32 = 60;
 const SUBSTEPS: u32 = 2;
 const ITERATIONS: u32 = 4;
@@ -157,6 +157,7 @@ struct SolverBuffers {
     _bend_inc_entries: Buffer,
     _bend_constraints: Buffer,
     _params: Buffer,
+    gpu_params: GpuParams,
     _sdf_params: Buffer,
     _sdf_colliders: Buffer,
     sdf_bind_group: BindGroup,
@@ -432,25 +433,68 @@ impl NeighborBuffers {
         assert!((config.spacing * config.spacing).is_finite());
         assert!(config.diameter_squared.is_finite() && config.diameter_squared >= 0.0);
         assert!(initial.iter().all(|point| point.is_finite()));
-        let table_len = config.num_particles.checked_mul(config.capacity).expect("neighbor table size");
+        let table_len = config
+            .num_particles
+            .checked_mul(config.capacity)
+            .expect("neighbor table size");
         // Dispatch sizes and cumulative u32 counters must fit; allocation is checked by wgpu.
         assert!(config.num_particles.div_ceil(WORKGROUP_SIZE) <= 65535);
         assert!(config.num_buckets.div_ceil(WORKGROUP_SIZE) <= 65535);
         let zeros = vec![0u32; config.num_buckets as usize];
-        let counts = storage_buffer(device, queue, "cloth bucket counts", bytemuck::cast_slice(&zeros));
-        let cursors = storage_buffer(device, queue, "cloth bucket cursors", bytemuck::cast_slice(&zeros));
-        let ids = storage_buffer(device, queue, "cloth bucket ids", bytemuck::cast_slice(&vec![0u32; initial.len()]));
-        let initial = storage_buffer(device, queue, "cloth original positions", bytemuck::cast_slice(&pack_vec3(initial)));
-        let neighbors = storage_buffer(device, queue, "cloth dynamic neighbors", bytemuck::cast_slice(&vec![EMPTY; table_len.max(1) as usize]));
-        let stats = storage_buffer(device, queue, "cloth cumulative neighbor stats", bytemuck::bytes_of(&NeighborStats::default()));
+        let counts = storage_buffer(
+            device,
+            queue,
+            "cloth bucket counts",
+            bytemuck::cast_slice(&zeros),
+        );
+        let cursors = storage_buffer(
+            device,
+            queue,
+            "cloth bucket cursors",
+            bytemuck::cast_slice(&zeros),
+        );
+        let ids = storage_buffer(
+            device,
+            queue,
+            "cloth bucket ids",
+            bytemuck::cast_slice(&vec![0u32; initial.len()]),
+        );
+        let initial = storage_buffer(
+            device,
+            queue,
+            "cloth original positions",
+            bytemuck::cast_slice(&pack_vec3(initial)),
+        );
+        let neighbors = storage_buffer(
+            device,
+            queue,
+            "cloth dynamic neighbors",
+            bytemuck::cast_slice(&vec![EMPTY; table_len.max(1) as usize]),
+        );
+        let stats = storage_buffer(
+            device,
+            queue,
+            "cloth cumulative neighbor stats",
+            bytemuck::bytes_of(&NeighborStats::default()),
+        );
         let uniform = uniform_buffer(device, queue, &config);
         let mut levels: Vec<ScanLevel> = Vec::new();
         let mut length = config.num_buckets;
         loop {
             let groups = length.div_ceil(WORKGROUP_SIZE);
             let level_uniform = uniform_buffer(device, queue, &[length, 0u32, 0, 0]);
-            let output = storage_buffer(device, queue, "cloth scan offsets", bytemuck::cast_slice(&vec![0u32; length as usize]));
-            let sums = storage_buffer(device, queue, "cloth scan block sums", bytemuck::cast_slice(&vec![0u32; groups as usize]));
+            let output = storage_buffer(
+                device,
+                queue,
+                "cloth scan offsets",
+                bytemuck::cast_slice(&vec![0u32; length as usize]),
+            );
+            let sums = storage_buffer(
+                device,
+                queue,
+                "cloth scan block sums",
+                bytemuck::cast_slice(&vec![0u32; groups as usize]),
+            );
             let input = levels.last().map_or(&counts, |level| &level._sums);
             let scan = device.create_bind_group(
                 "cloth scan level",
@@ -462,8 +506,17 @@ impl NeighborBuffers {
                     (binding::SCAN_SUMS, sums.as_entire_binding()),
                 )),
             );
-            levels.push(ScanLevel { _uniform: level_uniform, output, _sums: sums, scan, add: None, groups });
-            if groups == 1 { break; }
+            levels.push(ScanLevel {
+                _uniform: level_uniform,
+                output,
+                _sums: sums,
+                scan,
+                add: None,
+                groups,
+            });
+            if groups == 1 {
+                break;
+            }
             length = groups;
         }
         for index in 0..levels.len() - 1 {
@@ -471,9 +524,18 @@ impl NeighborBuffers {
                 "cloth scan propagate offsets",
                 &cache.get_bind_group_layout(&pipeline.scan_add_layout),
                 &BindGroupEntries::with_indices((
-                    (binding::SCAN_PARAMS, levels[index]._uniform.as_entire_binding()),
-                    (binding::SCAN_INPUT, levels[index + 1].output.as_entire_binding()),
-                    (binding::SCAN_OUTPUT, levels[index].output.as_entire_binding()),
+                    (
+                        binding::SCAN_PARAMS,
+                        levels[index]._uniform.as_entire_binding(),
+                    ),
+                    (
+                        binding::SCAN_INPUT,
+                        levels[index + 1].output.as_entire_binding(),
+                    ),
+                    (
+                        binding::SCAN_OUTPUT,
+                        levels[index].output.as_entire_binding(),
+                    ),
                 )),
             ));
         }
@@ -485,7 +547,10 @@ impl NeighborBuffers {
                 (binding::PREDICTED, predicted.as_entire_binding()),
                 (binding::BUCKET_COUNTS, counts.as_entire_binding()),
                 (binding::BUCKET_CURSORS, cursors.as_entire_binding()),
-                (binding::BUCKET_OFFSETS, levels[0].output.as_entire_binding()),
+                (
+                    binding::BUCKET_OFFSETS,
+                    levels[0].output.as_entire_binding(),
+                ),
                 (binding::BUCKET_IDS, ids.as_entire_binding()),
                 (binding::NEIGHBOR_STATS, stats.as_entire_binding()),
             )),
@@ -497,36 +562,73 @@ impl NeighborBuffers {
                 (binding::NEIGHBOR_PARAMS, uniform.as_entire_binding()),
                 (binding::PREDICTED, predicted.as_entire_binding()),
                 (binding::BUCKET_COUNTS, counts.as_entire_binding()),
-                (binding::BUCKET_OFFSETS, levels[0].output.as_entire_binding()),
+                (
+                    binding::BUCKET_OFFSETS,
+                    levels[0].output.as_entire_binding(),
+                ),
                 (binding::BUCKET_IDS, ids.as_entire_binding()),
                 (binding::INITIAL_POSITIONS, initial.as_entire_binding()),
                 (binding::NEIGHBOR_OUTPUT, neighbors.as_entire_binding()),
                 (binding::NEIGHBOR_STATS, stats.as_entire_binding()),
             )),
         );
-        Self { _uniform: uniform, _counts: counts, _cursors: cursors, _ids: ids,
-            _initial: initial, levels, hash, cache: neighbor_cache, neighbors, stats, config }
+        Self {
+            _uniform: uniform,
+            _counts: counts,
+            _cursors: cursors,
+            _ids: ids,
+            _initial: initial,
+            levels,
+            hash,
+            cache: neighbor_cache,
+            neighbors,
+            stats,
+            config,
+        }
     }
 
     fn ready(cache: &PipelineCache, pipeline: &SolverPipeline) -> bool {
-        [pipeline.clear_hash, pipeline.count_hash, pipeline.scan_blocks, pipeline.scan_add,
-            pipeline.scatter_hash, pipeline.cache_neighbors]
-            .iter().all(|&id| cache.get_compute_pipeline(id).is_some())
+        [
+            pipeline.clear_hash,
+            pipeline.count_hash,
+            pipeline.scan_blocks,
+            pipeline.scan_add,
+            pipeline.scatter_hash,
+            pipeline.cache_neighbors,
+        ]
+        .iter()
+        .all(|&id| cache.get_compute_pipeline(id).is_some())
     }
 
     fn record(&self, pass: &mut ComputePass<'_>, cache: &PipelineCache, pipeline: &SolverPipeline) {
         let groups = self.config.num_particles.div_ceil(WORKGROUP_SIZE);
         pass.set_bind_group(0, &self.hash, &[]);
-        pass.set_pipeline(cache.get_compute_pipeline(pipeline.clear_hash).expect("ready hash"));
+        pass.set_pipeline(
+            cache
+                .get_compute_pipeline(pipeline.clear_hash)
+                .expect("ready hash"),
+        );
         pass.dispatch_workgroups(self.config.num_buckets.div_ceil(WORKGROUP_SIZE), 1, 1);
-        pass.set_pipeline(cache.get_compute_pipeline(pipeline.count_hash).expect("ready hash"));
+        pass.set_pipeline(
+            cache
+                .get_compute_pipeline(pipeline.count_hash)
+                .expect("ready hash"),
+        );
         pass.dispatch_workgroups(groups, 1, 1);
-        pass.set_pipeline(cache.get_compute_pipeline(pipeline.scan_blocks).expect("ready scan"));
+        pass.set_pipeline(
+            cache
+                .get_compute_pipeline(pipeline.scan_blocks)
+                .expect("ready scan"),
+        );
         for level in &self.levels {
             pass.set_bind_group(0, &level.scan, &[]);
             pass.dispatch_workgroups(level.groups, 1, 1);
         }
-        pass.set_pipeline(cache.get_compute_pipeline(pipeline.scan_add).expect("ready scan"));
+        pass.set_pipeline(
+            cache
+                .get_compute_pipeline(pipeline.scan_add)
+                .expect("ready scan"),
+        );
         for level in self.levels.iter().rev() {
             if let Some(add) = &level.add {
                 pass.set_bind_group(0, add, &[]);
@@ -534,10 +636,18 @@ impl NeighborBuffers {
             }
         }
         pass.set_bind_group(0, &self.hash, &[]);
-        pass.set_pipeline(cache.get_compute_pipeline(pipeline.scatter_hash).expect("ready hash"));
+        pass.set_pipeline(
+            cache
+                .get_compute_pipeline(pipeline.scatter_hash)
+                .expect("ready hash"),
+        );
         pass.dispatch_workgroups(groups, 1, 1);
         pass.set_bind_group(0, &self.cache, &[]);
-        pass.set_pipeline(cache.get_compute_pipeline(pipeline.cache_neighbors).expect("ready cache"));
+        pass.set_pipeline(
+            cache
+                .get_compute_pipeline(pipeline.cache_neighbors)
+                .expect("ready cache"),
+        );
         pass.dispatch_workgroups(groups, 1, 1);
     }
 }
@@ -619,7 +729,11 @@ fn reference_neighbors(
 fn neighbor_config(params: &SimParams) -> NeighborParams {
     NeighborParams {
         num_particles: params.num_particles,
-        num_buckets: params.num_particles.checked_mul(2).expect("bucket count").max(1),
+        num_buckets: params
+            .num_particles
+            .checked_mul(2)
+            .expect("bucket count")
+            .max(1),
         capacity: params.max_num_neighbors,
         spacing: params.particle_diameter * params.hash_cell_size_scalar,
         diameter_squared: params.particle_diameter * params.particle_diameter,
@@ -636,28 +750,65 @@ fn reference_step(s: &mut Solver, params: &SimParams, colliders: &[SdfCollider],
     for substep in 0..params.num_substeps {
         solver::predict_positions(&mut s.predicted, &mut s.velocities, &s.positions, params, h);
         if substep % params.effective_interleaved_hash() == 0 {
-            let (table, stats) = reference_neighbors(&s.predicted, &s.initial_positions, neighbor_config(params));
-            assert_eq!(stats.overflow_rows, 0, "CPU diagnostic neighbor capacity exceeded");
-            assert_eq!(stats.invalid_coordinates, 0, "CPU diagnostic invalid coordinates");
+            let (table, stats) =
+                reference_neighbors(&s.predicted, &s.initial_positions, neighbor_config(params));
+            assert_eq!(
+                stats.overflow_rows, 0,
+                "CPU diagnostic neighbor capacity exceeded"
+            );
+            assert_eq!(
+                stats.invalid_coordinates, 0,
+                "CPU diagnostic invalid coordinates"
+            );
             s.hash.neighbors = table;
         }
-        solver::collide_particles(&mut s.deltas, &mut s.delta_counts, &mut s.predicted,
-            &s.constraints.inv_masses, &s.hash.neighbors, &s.positions, params);
+        solver::collide_particles(
+            &mut s.deltas,
+            &mut s.delta_counts,
+            &mut s.predicted,
+            &s.constraints.inv_masses,
+            &s.hash.neighbors,
+            &s.positions,
+            params,
+        );
         solver::collide_sdf(&mut s.predicted, &s.positions, colliders, params, h);
         for _ in 0..params.num_iterations {
-            solver::solve_stretch(&mut s.predicted, &mut s.deltas, &mut s.delta_counts,
-                &s.constraints.inv_masses, &s.constraints.stretch, params);
-            solver::solve_attachment(&mut s.predicted, &mut s.deltas, &mut s.delta_counts,
-                &s.constraints.inv_masses, &s.constraints.attach, params);
-            solver::solve_bending(&mut s.predicted, &mut s.deltas, &mut s.delta_counts,
-                &s.constraints.inv_masses, &s.constraints.bend, params, h);
+            solver::solve_stretch(
+                &mut s.predicted,
+                &mut s.deltas,
+                &mut s.delta_counts,
+                &s.constraints.inv_masses,
+                &s.constraints.stretch,
+                params,
+            );
+            solver::solve_attachment(
+                &mut s.predicted,
+                &mut s.deltas,
+                &mut s.delta_counts,
+                &s.constraints.inv_masses,
+                &s.constraints.attach,
+                params,
+            );
+            solver::solve_bending(
+                &mut s.predicted,
+                &mut s.deltas,
+                &mut s.delta_counts,
+                &s.constraints.inv_masses,
+                &s.constraints.bend,
+                params,
+                h,
+            );
             solver::apply_deltas(&mut s.predicted, &mut s.deltas, &mut s.delta_counts, params);
         }
         solver::finalize(&mut s.velocities, &mut s.positions, &s.predicted, params, h);
     }
 }
 
-fn read_neighbor_stats(device: &RenderDevice, queue: &RenderQueue, buffer: &Buffer) -> NeighborStats {
+fn read_neighbor_stats(
+    device: &RenderDevice,
+    queue: &RenderQueue,
+    buffer: &Buffer,
+) -> NeighborStats {
     let bytes = read_bytes(device, queue, buffer, size_of::<NeighborStats>() as u64);
     bytemuck::pod_read_unaligned(&bytes)
 }
@@ -675,26 +826,56 @@ fn run_neighbor_probe(
     cache: &PipelineCache,
     pipeline: &SolverPipeline,
 ) -> NeighborProbeReport {
-    let mut report = NeighborProbeReport { pass: true, ..default() };
+    let mut report = NeighborProbeReport {
+        pass: true,
+        ..default()
+    };
     // Last two particles test the strict radius boundary, not a near-threshold tolerance.
     let points = vec![
-        Vec3::new(-1.01, 0.0, 0.0), Vec3::new(-0.99, 0.0, 0.0),
-        Vec3::new(-0.1, 0.1, 0.0), Vec3::new(0.0, 0.0, 0.0),
-        Vec3::new(0.01, 0.0, 0.0), Vec3::new(0.02, 0.0, 0.0),
-        Vec3::new(0.03, 0.0, 0.0), Vec3::new(0.04, 0.0, 0.0),
-        Vec3::new(0.05, 0.0, 0.0), Vec3::new(0.06, 0.0, 0.0),
-        Vec3::new(5.0, 0.0, 0.0), Vec3::new(6.0, 0.0, 0.0),
+        Vec3::new(-1.01, 0.0, 0.0),
+        Vec3::new(-0.99, 0.0, 0.0),
+        Vec3::new(-0.1, 0.1, 0.0),
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.01, 0.0, 0.0),
+        Vec3::new(0.02, 0.0, 0.0),
+        Vec3::new(0.03, 0.0, 0.0),
+        Vec3::new(0.04, 0.0, 0.0),
+        Vec3::new(0.05, 0.0, 0.0),
+        Vec3::new(0.06, 0.0, 0.0),
+        Vec3::new(5.0, 0.0, 0.0),
+        Vec3::new(6.0, 0.0, 0.0),
     ];
     let n = points.len() as u32;
     let mut initial: Vec<Vec3> = (0..n).map(|i| Vec3::X * (i * 4) as f32).collect();
     initial[1] = initial[0]; // Original-distance exclusion, despite live proximity.
     initial[3] = initial[2] + Vec3::X * 0.25; // Exact original diameter is excluded.
-    for (buckets, capacity) in [(1, 0), (1, 1), (2, 3), (7, 11),
-        (255, 11), (256, 11), (257, 11), (1156, 11), (65537, 11)] {
-        let config = NeighborParams { num_particles: n, num_buckets: buckets, capacity,
-            spacing: 1.0, diameter_squared: 0.0625, pad: [0; 3] };
-        let predicted = storage_buffer(device, queue, "neighbor probe predicted", bytemuck::cast_slice(&pack_vec3(&points)));
-        let search = NeighborBuffers::new(device, queue, cache, pipeline, &predicted, &initial, config);
+    for (buckets, capacity) in [
+        (1, 0),
+        (1, 1),
+        (2, 3),
+        (7, 11),
+        (255, 11),
+        (256, 11),
+        (257, 11),
+        (1156, 11),
+        (65537, 11),
+    ] {
+        let config = NeighborParams {
+            num_particles: n,
+            num_buckets: buckets,
+            capacity,
+            spacing: 1.0,
+            diameter_squared: 0.0625,
+            pad: [0; 3],
+        };
+        let predicted = storage_buffer(
+            device,
+            queue,
+            "neighbor probe predicted",
+            bytemuck::cast_slice(&pack_vec3(&points)),
+        );
+        let search =
+            NeighborBuffers::new(device, queue, cache, pipeline, &predicted, &initial, config);
         let mut cumulative = NeighborStats::default();
         let mut overflow = false;
         for snapshot in 0..4 {
@@ -715,17 +896,32 @@ fn run_neighbor_probe(
             let (expected, stats) = reference_neighbors(&moved, &initial, config);
             overflow |= stats.overflow_rows > 0;
             accumulate_neighbor_stats(&mut cumulative, stats);
-            let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: Some("neighbor probe") });
+            let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("neighbor probe"),
+            });
             {
-                let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("neighbor probe"), timestamp_writes: None });
+                let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("neighbor probe"),
+                    timestamp_writes: None,
+                });
                 search.record(&mut pass, cache, pipeline);
             }
             queue.submit(Some(encoder.finish()));
-            let words = read_bytes(device, queue, &search.neighbors, u64::from((n * capacity).max(1)) * 4);
+            let words = read_bytes(
+                device,
+                queue,
+                &search.neighbors,
+                u64::from((n * capacity).max(1)) * 4,
+            );
             let found: &[u32] = bytemuck::cast_slice(&words);
             let measured = read_neighbor_stats(device, queue, &search.stats);
             let count_bytes = read_bytes(device, queue, &search._counts, u64::from(buckets) * 4);
-            let offset_bytes = read_bytes(device, queue, &search.levels[0].output, u64::from(buckets) * 4);
+            let offset_bytes = read_bytes(
+                device,
+                queue,
+                &search.levels[0].output,
+                u64::from(buckets) * 4,
+            );
             let counts: &[u32] = bytemuck::cast_slice(&count_bytes);
             let offsets: &[u32] = bytemuck::cast_slice(&offset_bytes);
             let mut prefix = 0;
@@ -734,10 +930,19 @@ fn run_neighbor_probe(
                 prefix += count;
                 matches
             });
-            let matches = found[..expected.len()] == expected && measured == cumulative
-                && prefix_matches && prefix == n - stats.invalid_coordinates;
+            let matches = found[..expected.len()] == expected
+                && measured == cumulative
+                && prefix_matches
+                && prefix == n - stats.invalid_coordinates;
             if !matches {
-                warn!(buckets, capacity, snapshot, ?measured, ?cumulative, "GPU neighbor probe mismatch");
+                warn!(
+                    buckets,
+                    capacity,
+                    snapshot,
+                    ?measured,
+                    ?cumulative,
+                    "GPU neighbor probe mismatch"
+                );
             }
             report.pass &= matches;
             report.rebuilds += 1;
@@ -748,7 +953,7 @@ fn run_neighbor_probe(
     report
 }
 
-fn main_cloth_fixture(step_time: f32) -> (Solver, SimParams) {
+pub(super) fn main_cloth_fixture(step_time: f32) -> (Solver, SimParams) {
     assert!(step_time.is_finite() && step_time > 0.0);
     let mut params = SimParams {
         num_substeps: SUBSTEPS,
@@ -769,10 +974,15 @@ fn main_cloth_fixture(step_time: f32) -> (Solver, SimParams) {
         )
         .expect("generated meshes are source-layout grids");
 
-    let second = solver.add_cloth(
-        &mut params, &generate_cloth_mesh(RES),
-        Mat4::from_translation(Vec3::new(0.0, 0.0, 0.5)), &CORNERS, step_time,
-    ).expect("second generated grid");
+    let second = solver
+        .add_cloth(
+            &mut params,
+            &generate_cloth_mesh(RES),
+            Mat4::from_translation(Vec3::new(0.0, 0.0, 0.5)),
+            &CORNERS,
+            step_time,
+        )
+        .expect("second generated grid");
     let translation = Vec3::new(0.0, 0.0, -0.4);
     for position in &mut solver.positions[second as usize..] {
         *position += translation;
@@ -804,6 +1014,17 @@ fn create_buffers(
     pipeline: &SolverPipeline,
     step_time: f32,
 ) -> SolverBuffers {
+    initialize_buffers(device, queue, cache, pipeline, step_time, true)
+}
+
+fn initialize_buffers(
+    device: &RenderDevice,
+    queue: &RenderQueue,
+    cache: &PipelineCache,
+    pipeline: &SolverPipeline,
+    step_time: f32,
+    run_reference: bool,
+) -> SolverBuffers {
     let (solver, params) = main_cloth_fixture(step_time);
     let initial_max_bend_angle_error =
         max_bend_angle_error(&solver.positions, &solver.constraints.bend);
@@ -813,23 +1034,34 @@ fn create_buffers(
         sdf_correction_diagnostic(&solver.positions, &colliders, params.collision_margin);
     assert!(initial_max_sdf_correction > 0.0 && initially_affected_particles > 0);
     let config = neighbor_config(&params);
-    let (initial_neighbors, initial_stats) = reference_neighbors(
-        &solver.positions, &solver.initial_positions, config,
-    );
-    assert_eq!(initial_stats.overflow_rows, 0);
-    let initial_directed_contacts = (0..solver.num_particles()).map(|i| {
-        (0..config.capacity as usize).filter(|&slot| {
-            let j = initial_neighbors[i + solver.num_particles() * slot];
-            j != EMPTY && solver.positions[i].distance_squared(solver.positions[j as usize])
-                < config.diameter_squared
-        }).count() as u32
-    }).sum::<u32>();
-    assert!(initial_directed_contacts > 0, "fixture must exercise real particle contacts");
+    let initial_directed_contacts = if run_reference {
+        let (initial_neighbors, initial_stats) =
+            reference_neighbors(&solver.positions, &solver.initial_positions, config);
+        assert_eq!(initial_stats.overflow_rows, 0);
+        let contacts = (0..solver.num_particles())
+            .map(|i| {
+                (0..config.capacity as usize)
+                    .filter(|&slot| {
+                        let j = initial_neighbors[i + solver.num_particles() * slot];
+                        j != EMPTY
+                            && solver.positions[i].distance_squared(solver.positions[j as usize])
+                                < config.diameter_squared
+                    })
+                    .count() as u32
+            })
+            .sum::<u32>();
+        assert!(contacts > 0, "fixture must exercise real particle contacts");
+        contacts
+    } else {
+        0
+    };
     // Independent membership diagnostic, unchanged CPU physics kernels and identical phase order.
     // Zero-rest attachments restore pins through Jacobi averaging, not a hard position clamp.
     let mut reference = solver.clone();
-    for _ in 0..STEPS {
-        reference_step(&mut reference, &params, &colliders, step_time);
+    if run_reference {
+        for _ in 0..STEPS {
+            reference_step(&mut reference, &params, &colliders, step_time);
+        }
     }
 
     let csr = build_stretch_csr(&solver);
@@ -963,7 +1195,13 @@ fn create_buffers(
     queue.write_buffer(&params_buffer, 0, bytemuck::bytes_of(&gpu_params));
 
     let neighbor_search = NeighborBuffers::new(
-        device, queue, cache, pipeline, &predicted, &solver.initial_positions, config,
+        device,
+        queue,
+        cache,
+        pipeline,
+        &predicted,
+        &solver.initial_positions,
+        config,
     );
     let neighbors = neighbor_search.neighbors.clone();
     let particle_collision_params = device.create_buffer(&BufferDescriptor {
@@ -1132,6 +1370,7 @@ fn create_buffers(
         _bend_inc_entries: bend_inc_entries,
         _bend_constraints: bend_constraints,
         _params: params_buffer,
+        gpu_params,
         _sdf_params: sdf_params_buffer,
         _sdf_colliders: sdf_colliders,
         sdf_bind_group,
@@ -1160,6 +1399,137 @@ fn create_buffers(
         reference_positions: reference.positions,
         reference_velocities: reference.velocities,
         num_particles,
+    }
+}
+
+impl SolverBuffers {
+    fn record_step(
+        &self,
+        pass: &mut ComputePass<'_>,
+        cache: &PipelineCache,
+        pipeline: &SolverPipeline,
+    ) {
+        let groups = self.num_particles.div_ceil(WORKGROUP_SIZE);
+        let mut dispatch = |id, bind_group: &BindGroup| {
+            pass.set_bind_group(0, bind_group, &[]);
+            pass.set_pipeline(cache.get_compute_pipeline(id).expect("ready solver"));
+            pass.dispatch_workgroups(groups, 1, 1);
+        };
+        dispatch(pipeline.stabilize_sdf(), &self.sdf_bind_group);
+        for substep in 0..SUBSTEPS {
+            // Release the closure's mutable pass borrow before the hierarchical hash scan.
+            pass.set_bind_group(0, &self.particle_bind_group, &[]);
+            pass.set_pipeline(
+                cache
+                    .get_compute_pipeline(pipeline.predict())
+                    .expect("ready solver"),
+            );
+            pass.dispatch_workgroups(groups, 1, 1);
+            if substep % self.hash_interval == 0 {
+                self.neighbor_search.record(pass, cache, pipeline);
+            }
+            let mut dispatch = |id, bind_group: &BindGroup| {
+                pass.set_bind_group(0, bind_group, &[]);
+                pass.set_pipeline(cache.get_compute_pipeline(id).expect("ready solver"));
+                pass.dispatch_workgroups(groups, 1, 1);
+            };
+            dispatch(
+                pipeline.collide_particles(),
+                &self.particle_collision_bind_group,
+            );
+            dispatch(pipeline.apply_deltas(), &self.constraint_bind_group);
+            dispatch(pipeline.collide_sdf(), &self.sdf_bind_group);
+            for _ in 0..ITERATIONS {
+                dispatch(pipeline.solve_stretch(), &self.constraint_bind_group);
+                dispatch(pipeline.solve_attachment(), &self.attachment_bind_group);
+                dispatch(pipeline.solve_bending(), &self.bending_bind_group);
+                dispatch(pipeline.apply_deltas(), &self.constraint_bind_group);
+            }
+            dispatch(pipeline.finalize(), &self.particle_bind_group);
+        }
+    }
+}
+
+/// Private live facade: no probes, reference stepping or readback.
+pub(super) struct LiveSolver(SolverBuffers);
+
+impl LiveSolver {
+    pub(super) fn ready(cache: &PipelineCache, pipeline: &SolverPipeline) -> bool {
+        NeighborBuffers::ready(cache, pipeline)
+            && [
+                pipeline.stabilize_sdf(),
+                pipeline.collide_sdf(),
+                pipeline.collide_particles(),
+                pipeline.predict(),
+                pipeline.solve_stretch(),
+                pipeline.solve_attachment(),
+                pipeline.solve_bending(),
+                pipeline.apply_deltas(),
+                pipeline.finalize(),
+            ]
+            .iter()
+            .all(|&id| cache.get_compute_pipeline(id).is_some())
+    }
+
+    pub(super) fn new(
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        cache: &PipelineCache,
+        pipeline: &SolverPipeline,
+        dt: f32,
+    ) -> Self {
+        Self(initialize_buffers(
+            device, queue, cache, pipeline, dt, false,
+        ))
+    }
+
+    pub(super) fn positions(&self) -> &Buffer {
+        &self.0.positions
+    }
+
+    pub(super) fn num_particles(&self) -> u32 {
+        self.0.num_particles
+    }
+
+    /// Submit each requested tick separately: queue writes are applied at the *next* submit.
+    /// Reusing one uniform across multiple unsubmitted ticks would silently use the last dt.
+    pub(super) fn submit_step(
+        &self,
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        cache: &PipelineCache,
+        pipeline: &SolverPipeline,
+        dt: f32,
+    ) {
+        assert!(dt.is_finite() && dt > 0.0);
+        let mut params = self.0.gpu_params;
+        // Preserve the fixture's initialized speed cap when the fixed clock changes.
+        // add_cloth derives that cap from the initial dt/diameter; only integration and
+        // compliance timing change here, not the configured velocity-clamp policy.
+        params.substep_time = dt / SUBSTEPS as f32;
+        queue.write_buffer(&self.0._params, 0, bytemuck::bytes_of(&params));
+        queue.write_buffer(
+            &self.0._sdf_params,
+            0,
+            bytemuck::bytes_of(&SdfParams {
+                num_colliders: self.0.colliders.len() as u32,
+                collision_margin: self.0.collision_margin,
+                friction: self.0.friction,
+                step_time: dt,
+            }),
+        );
+        // The fixture colliders have no motion, so their velocity remains zero at any dt.
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("live cloth fixed tick"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("live cloth fixed tick"),
+                timestamp_writes: None,
+            });
+            self.0.record_step(&mut pass, cache, pipeline);
+        }
+        queue.submit(Some(encoder.finish()));
     }
 }
 
@@ -1619,12 +1989,17 @@ fn attachment_errors(
 mod tests {
     use super::*;
 
-    fn host_hash_neighbors(points: &[Vec3], initial: &[Vec3], config: NeighborParams) -> (Vec<u32>, NeighborStats) {
+    fn host_hash_neighbors(
+        points: &[Vec3],
+        initial: &[Vec3],
+        config: NeighborParams,
+    ) -> (Vec<u32>, NeighborStats) {
         let cell = |point: Vec3| (point / config.spacing).floor().as_ivec3();
         let bucket = |value: glam::IVec3| {
             ((value.x as u32).wrapping_mul(92837111)
                 ^ (value.y as u32).wrapping_mul(689287499)
-                ^ (value.z as u32).wrapping_mul(283923481)) % config.num_buckets
+                ^ (value.z as u32).wrapping_mul(283923481))
+                % config.num_buckets
         };
         let mut buckets = vec![Vec::new(); config.num_buckets as usize];
         for (i, &point) in points.iter().enumerate().rev() {
@@ -1641,13 +2016,19 @@ mod tests {
                     for x in -1..=1 {
                         let query = cell(point) + glam::IVec3::new(x, y, z);
                         for &j in &buckets[bucket(query) as usize] {
-                            if i == j as usize || cell(points[j as usize]) != query { continue; }
-                            if point.distance_squared(points[j as usize]) < config.spacing * config.spacing
-                                && initial[i].distance_squared(initial[j as usize]) > config.diameter_squared
+                            if i == j as usize || cell(points[j as usize]) != query {
+                                continue;
+                            }
+                            if point.distance_squared(points[j as usize])
+                                < config.spacing * config.spacing
+                                && initial[i].distance_squared(initial[j as usize])
+                                    > config.diameter_squared
                             {
                                 required += 1;
                                 // Model the shader's bounded insertion, not sorting an unbounded list.
-                                let index = row.binary_search(&j).expect_err("no duplicate true-cell visit");
+                                let index = row
+                                    .binary_search(&j)
+                                    .expect_err("no duplicate true-cell visit");
                                 if index < config.capacity as usize {
                                     row.insert(index, j);
                                     row.truncate(config.capacity as usize);
@@ -1660,28 +2041,46 @@ mod tests {
             stats.max_required = stats.max_required.max(required);
             stats.overflow_rows += u32::from(required > config.capacity);
             stats.stored_entries += row.len() as u32;
-            for (slot, j) in row.into_iter().enumerate() { table[i + n * slot] = j; }
+            for (slot, j) in row.into_iter().enumerate() {
+                table[i + n * slot] = j;
+            }
         }
         (table, stats)
     }
 
     #[test]
     fn counted_hash_matches_independent_membership_with_collisions_and_overflow() {
-        let points: Vec<Vec3> = (0..24).map(|i| Vec3::new(
-            (i % 8) as f32 * 0.11 - 0.51, (i / 8) as f32 * 0.1 - 0.1, 0.0,
-        )).chain([Vec3::X * 5.0, Vec3::X * 6.0]).collect();
-        let mut initial: Vec<Vec3> = (0..points.len()).map(|i| Vec3::X * i as f32 * 3.0).collect();
+        let points: Vec<Vec3> = (0..24)
+            .map(|i| {
+                Vec3::new(
+                    (i % 8) as f32 * 0.11 - 0.51,
+                    (i / 8) as f32 * 0.1 - 0.1,
+                    0.0,
+                )
+            })
+            .chain([Vec3::X * 5.0, Vec3::X * 6.0])
+            .collect();
+        let mut initial: Vec<Vec3> = (0..points.len())
+            .map(|i| Vec3::X * i as f32 * 3.0)
+            .collect();
         initial[1] = initial[0];
         initial[3] = initial[2] + Vec3::X * 0.25;
         for buckets in [1, 2, 3, 7, 52] {
             for capacity in [0, 1, 3, 25, 26] {
-                let config = NeighborParams { num_particles: points.len() as u32,
-                    num_buckets: buckets, capacity, spacing: 1.0,
-                    diameter_squared: 0.0625, pad: [0; 3] };
+                let config = NeighborParams {
+                    num_particles: points.len() as u32,
+                    num_buckets: buckets,
+                    capacity,
+                    spacing: 1.0,
+                    diameter_squared: 0.0625,
+                    pad: [0; 3],
+                };
                 let expected = reference_neighbors(&points, &initial, config);
                 assert_eq!(host_hash_neighbors(&points, &initial, config), expected);
                 validate_neighbors(points.len(), capacity, &expected.0).unwrap();
-                if capacity < 23 { assert!(expected.1.overflow_rows > 0); }
+                if capacity < 23 {
+                    assert!(expected.1.overflow_rows > 0);
+                }
                 assert_eq!(expected.0.get(24).copied().unwrap_or(EMPTY), EMPTY);
                 assert_eq!(expected.0.get(25).copied().unwrap_or(EMPTY), EMPTY);
             }
@@ -1696,14 +2095,20 @@ mod tests {
             shared[..block.len()].copy_from_slice(block);
             for shift in [1, 2, 4, 8, 16, 32, 64, 128] {
                 let snapshot = shared;
-                for lane in shift..256 { shared[lane] += snapshot[lane - shift]; }
+                for lane in shift..256 {
+                    shared[lane] += snapshot[lane - shift];
+                }
             }
-            for lane in 0..block.len() { output.push(shared[lane] - block[lane]); }
+            for lane in 0..block.len() {
+                output.push(shared[lane] - block[lane]);
+            }
             sums.push(shared[255]);
         }
         if sums.len() > 1 {
             let parent = host_scan(&sums);
-            for (i, value) in output.iter_mut().enumerate() { *value += parent[i / 256]; }
+            for (i, value) in output.iter_mut().enumerate() {
+                *value += parent[i / 256];
+            }
         }
         output
     }
@@ -1714,37 +2119,71 @@ mod tests {
             let input: Vec<u32> = (0..n).map(|i| ((i * 31 + i / 7) % 11) as u32).collect();
             let output = host_scan(&input);
             let mut prefix = 0;
-            for i in 0..n { assert_eq!(output[i], prefix, "n={n}, i={i}"); prefix += input[i]; }
+            for i in 0..n {
+                assert_eq!(output[i], prefix, "n={n}, i={i}");
+                prefix += input[i];
+            }
         }
     }
 
     #[test]
     fn dynamic_reference_rebuild_clears_rows_and_reports_invalid_coordinates() {
         let initial = [Vec3::ZERO, Vec3::X * 3.0];
-        let config = NeighborParams { num_particles: 2, num_buckets: 1, capacity: 1,
-            spacing: 1.0, diameter_squared: 0.0625, pad: [0; 3] };
-        assert_eq!(reference_neighbors(&[Vec3::ZERO, Vec3::X * 0.1], &initial, config).0, [1, 0]);
-        assert_eq!(reference_neighbors(&[Vec3::ZERO, Vec3::X], &initial, config).0, [EMPTY; 2]);
-        for invalid in [Vec3::splat(f32::NAN), Vec3::splat(f32::INFINITY), Vec3::splat(2e9)] {
+        let config = NeighborParams {
+            num_particles: 2,
+            num_buckets: 1,
+            capacity: 1,
+            spacing: 1.0,
+            diameter_squared: 0.0625,
+            pad: [0; 3],
+        };
+        assert_eq!(
+            reference_neighbors(&[Vec3::ZERO, Vec3::X * 0.1], &initial, config).0,
+            [1, 0]
+        );
+        assert_eq!(
+            reference_neighbors(&[Vec3::ZERO, Vec3::X], &initial, config).0,
+            [EMPTY; 2]
+        );
+        for invalid in [
+            Vec3::splat(f32::NAN),
+            Vec3::splat(f32::INFINITY),
+            Vec3::splat(2e9),
+        ] {
             let (table, stats) = reference_neighbors(&[Vec3::ZERO, invalid], &initial, config);
             assert_eq!(table, [EMPTY; 2]);
             assert_eq!(stats.invalid_coordinates, 1);
         }
-        let empty = NeighborParams { num_particles: 0, ..config };
-        assert_eq!(reference_neighbors(&[], &[], empty), (vec![], NeighborStats::default()));
+        let empty = NeighborParams {
+            num_particles: 0,
+            ..config
+        };
+        assert_eq!(
+            reference_neighbors(&[], &[], empty),
+            (vec![], NeighborStats::default())
+        );
     }
 
     #[test]
     fn rebuild_interval_resets_each_full_step() {
         for substeps in [1, 2, 3, 7] {
             for interval in [0, 1, 2, 3, 10] {
-                let params = SimParams { num_substeps: substeps, interleaved_hash: interval, ..default() };
-                let actual = Solver::schedule(&params).iter()
-                    .filter(|phase| **phase == solver::Phase::RebuildHash).count() as u32;
+                let params = SimParams {
+                    num_substeps: substeps,
+                    interleaved_hash: interval,
+                    ..default()
+                };
+                let actual = Solver::schedule(&params)
+                    .iter()
+                    .filter(|phase| **phase == solver::Phase::RebuildHash)
+                    .count() as u32;
                 assert_eq!(actual, substeps.div_ceil(interval.max(1)));
             }
         }
-        assert_eq!(STEPS * SUBSTEPS.div_ceil(SimParams::default().effective_interleaved_hash()), 60);
+        assert_eq!(
+            STEPS * SUBSTEPS.div_ceil(SimParams::default().effective_interleaved_hash()),
+            60
+        );
     }
 
     #[test]
@@ -1755,17 +2194,35 @@ mod tests {
         assert_eq!(cloth.constraints.stretch.indices.len(), 2112);
         assert_eq!(cloth.constraints.attach.particle_ids.len(), 2312);
         let config = neighbor_config(&params);
-        let (table, stats) = reference_neighbors(&cloth.positions, &cloth.initial_positions, config);
+        let (table, stats) =
+            reference_neighbors(&cloth.positions, &cloth.initial_positions, config);
         assert_eq!(stats.overflow_rows, 0);
         assert!(stats.max_required > 0);
         for i in 0..289 {
             assert!((cloth.positions[i + 289].z - cloth.positions[i].z - 0.1).abs() < 1e-6);
-            assert!((cloth.initial_positions[i + 289].z - cloth.initial_positions[i].z - 0.5).abs() < 1e-6);
-            assert!(table.iter().skip(i).step_by(578).any(|&id| id == i as u32 + 289));
+            assert!(
+                (cloth.initial_positions[i + 289].z - cloth.initial_positions[i].z - 0.5).abs()
+                    < 1e-6
+            );
+            assert!(
+                table
+                    .iter()
+                    .skip(i)
+                    .step_by(578)
+                    .any(|&id| id == i as u32 + 289)
+            );
         }
         let colliders = fixture_colliders(1.0 / 64.0);
-        for _ in 0..STEPS { reference_step(&mut cloth, &params, &colliders, 1.0 / 64.0); }
-        assert!(cloth.positions.iter().chain(&cloth.velocities).all(|point| point.is_finite()));
+        for _ in 0..STEPS {
+            reference_step(&mut cloth, &params, &colliders, 1.0 / 64.0);
+        }
+        assert!(
+            cloth
+                .positions
+                .iter()
+                .chain(&cloth.velocities)
+                .all(|point| point.is_finite())
+        );
     }
 
     #[test]
@@ -2796,41 +3253,12 @@ fn run_solver(
     let buffers = buffers
         .get_or_insert_with(|| create_buffers(&device, &queue, &cache, &pipeline, batch_time.0));
 
-    let Some(stabilize_sdf) = cache.get_compute_pipeline(pipeline.stabilize_sdf()) else {
-        return;
-    };
-    let Some(collide_sdf) = cache.get_compute_pipeline(pipeline.collide_sdf()) else {
-        return;
-    };
-    let Some(collide_particles) = cache.get_compute_pipeline(pipeline.collide_particles()) else {
-        return;
-    };
-    let Some(predict) = cache.get_compute_pipeline(pipeline.predict()) else {
-        return;
-    };
-    let Some(solve_stretch) = cache.get_compute_pipeline(pipeline.solve_stretch()) else {
-        return;
-    };
-    let Some(solve_attachment) = cache.get_compute_pipeline(pipeline.solve_attachment()) else {
-        return;
-    };
-    let Some(solve_bending) = cache.get_compute_pipeline(pipeline.solve_bending()) else {
-        return;
-    };
-    let Some(apply_deltas) = cache.get_compute_pipeline(pipeline.apply_deltas()) else {
-        return;
-    };
-    let Some(finalize) = cache.get_compute_pipeline(pipeline.finalize()) else {
-        return;
-    };
-
-    if !NeighborBuffers::ready(&cache, &pipeline) {
+    if !LiveSolver::ready(&cache, &pipeline) {
         return;
     }
     // All pipelines are ready, and the result-slot guard makes this a one-time batch.
     let neighbor_probe = run_neighbor_probe(&device, &queue, &cache, &pipeline);
     let particle_collision_probe = run_particle_probe(&device, &queue, &cache, &pipeline);
-    let groups = buffers.num_particles.div_ceil(WORKGROUP_SIZE);
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
         label: Some("cloth solver"),
     });
@@ -2840,45 +3268,7 @@ fn run_solver(
             timestamp_writes: None,
         });
         for _ in 0..STEPS {
-            pass.set_bind_group(0, &buffers.sdf_bind_group, &[]);
-            pass.set_pipeline(stabilize_sdf);
-            pass.dispatch_workgroups(groups, 1, 1);
-            for substep in 0..SUBSTEPS {
-                pass.set_bind_group(0, &buffers.particle_bind_group, &[]);
-                pass.set_pipeline(predict);
-                pass.dispatch_workgroups(groups, 1, 1);
-                if substep % buffers.hash_interval == 0 {
-                    buffers.neighbor_search.record(&mut pass, &cache, &pipeline);
-                }
-                pass.set_bind_group(0, &buffers.particle_collision_bind_group, &[]);
-                pass.set_pipeline(collide_particles);
-                pass.dispatch_workgroups(groups, 1, 1);
-                pass.set_bind_group(0, &buffers.constraint_bind_group, &[]);
-                pass.set_pipeline(apply_deltas);
-                pass.dispatch_workgroups(groups, 1, 1);
-                pass.set_bind_group(0, &buffers.sdf_bind_group, &[]);
-                pass.set_pipeline(collide_sdf);
-                pass.dispatch_workgroups(groups, 1, 1);
-
-                for _ in 0..ITERATIONS {
-                    pass.set_bind_group(0, &buffers.constraint_bind_group, &[]);
-                    pass.set_pipeline(solve_stretch);
-                    pass.dispatch_workgroups(groups, 1, 1);
-                    pass.set_bind_group(0, &buffers.attachment_bind_group, &[]);
-                    pass.set_pipeline(solve_attachment);
-                    pass.dispatch_workgroups(groups, 1, 1);
-                    pass.set_bind_group(0, &buffers.bending_bind_group, &[]);
-                    pass.set_pipeline(solve_bending);
-                    pass.dispatch_workgroups(groups, 1, 1);
-                    pass.set_bind_group(0, &buffers.constraint_bind_group, &[]);
-                    pass.set_pipeline(apply_deltas);
-                    pass.dispatch_workgroups(groups, 1, 1);
-                }
-
-                pass.set_bind_group(0, &buffers.particle_bind_group, &[]);
-                pass.set_pipeline(finalize);
-                pass.dispatch_workgroups(groups, 1, 1);
-            }
+            buffers.record_step(&mut pass, &cache, &pipeline);
         }
     }
     queue.submit(Some(encoder.finish()));
