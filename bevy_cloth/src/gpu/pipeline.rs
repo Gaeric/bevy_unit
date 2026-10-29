@@ -38,10 +38,34 @@ pub mod binding {
     pub const BEND_CONSTRAINTS: u32 = 15;
     pub const SDF_PARAMS: u32 = 16;
     pub const SDF_COLLIDERS: u32 = 17;
+    pub const PARTICLE_COLLISION_PARAMS: u32 = 18;
+    pub const NEIGHBORS: u32 = 19;
+    pub const NEIGHBOR_PARAMS: u32 = 20;
+    pub const BUCKET_COUNTS: u32 = 21;
+    pub const BUCKET_CURSORS: u32 = 22;
+    pub const BUCKET_OFFSETS: u32 = 23;
+    pub const BUCKET_IDS: u32 = 24;
+    pub const INITIAL_POSITIONS: u32 = 25;
+    pub const NEIGHBOR_OUTPUT: u32 = 26;
+    pub const NEIGHBOR_STATS: u32 = 27;
+    pub const SCAN_PARAMS: u32 = 28;
+    pub const SCAN_INPUT: u32 = 29;
+    pub const SCAN_OUTPUT: u32 = 30;
+    pub const SCAN_SUMS: u32 = 31;
 }
 
 #[derive(Resource)]
 pub struct SolverPipeline {
+    pub hash_layout: BindGroupLayoutDescriptor,
+    pub neighbor_layout: BindGroupLayoutDescriptor,
+    pub scan_layout: BindGroupLayoutDescriptor,
+    pub scan_add_layout: BindGroupLayoutDescriptor,
+    pub clear_hash: CachedComputePipelineId,
+    pub count_hash: CachedComputePipelineId,
+    pub scatter_hash: CachedComputePipelineId,
+    pub cache_neighbors: CachedComputePipelineId,
+    pub scan_blocks: CachedComputePipelineId,
+    pub scan_add: CachedComputePipelineId,
     /// `predict` / `finalize`: params + the three particle arrays.
     pub particle_layout: BindGroupLayoutDescriptor,
     /// `solve_stretch` / `apply_deltas`: params + the arrays the constraint walk reads and writes.
@@ -52,6 +76,9 @@ pub struct SolverPipeline {
     pub bending_layout: BindGroupLayoutDescriptor,
     /// `stabilize_sdf` / `collide_sdf`: two uniforms and three storage buffers.
     pub sdf_layout: BindGroupLayoutDescriptor,
+    /// `collide_particles`: two uniforms and six storage buffers, no neighbor writes.
+    pub particle_collision_layout: BindGroupLayoutDescriptor,
+    collide_particles: CachedComputePipelineId,
     stabilize_sdf: CachedComputePipelineId,
     collide_sdf: CachedComputePipelineId,
     predict: CachedComputePipelineId,
@@ -63,6 +90,10 @@ pub struct SolverPipeline {
 }
 
 impl SolverPipeline {
+    pub fn collide_particles(&self) -> CachedComputePipelineId {
+        self.collide_particles
+    }
+
     pub fn stabilize_sdf(&self) -> CachedComputePipelineId {
         self.stabilize_sdf
     }
@@ -217,6 +248,101 @@ impl FromWorld for SolverPipeline {
             ),
         );
 
+        let particle_collision_layout = BindGroupLayoutDescriptor::new(
+            "cloth solver particle collision layout",
+            &BindGroupLayoutEntries::with_indices(
+                ShaderStages::COMPUTE,
+                (
+                    (binding::PARAMS, uniform_buffer_sized(false, None)),
+                    (
+                        binding::PARTICLE_COLLISION_PARAMS,
+                        uniform_buffer_sized(false, None),
+                    ),
+                    (binding::PREDICTED, storage_buffer_sized(false, None)),
+                    (binding::POSITIONS, storage_buffer_sized(false, None)),
+                    (binding::DELTAS, storage_buffer_sized(false, None)),
+                    (binding::DELTA_COUNTS, storage_buffer_sized(false, None)),
+                    (
+                        binding::INV_MASSES,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                    (
+                        binding::NEIGHBORS,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                ),
+            ),
+        );
+
+        let hash_layout = BindGroupLayoutDescriptor::new(
+            "cloth counting hash layout",
+            &BindGroupLayoutEntries::with_indices(
+                ShaderStages::COMPUTE,
+                (
+                    (binding::NEIGHBOR_PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::PREDICTED, storage_buffer_sized(false, None)),
+                    (binding::BUCKET_COUNTS, storage_buffer_sized(false, None)),
+                    (binding::BUCKET_CURSORS, storage_buffer_sized(false, None)),
+                    (
+                        binding::BUCKET_OFFSETS,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                    (binding::BUCKET_IDS, storage_buffer_sized(false, None)),
+                    (binding::NEIGHBOR_STATS, storage_buffer_sized(false, None)),
+                ),
+            ),
+        );
+        let neighbor_layout = BindGroupLayoutDescriptor::new(
+            "cloth neighbor cache layout",
+            &BindGroupLayoutEntries::with_indices(
+                ShaderStages::COMPUTE,
+                (
+                    (binding::NEIGHBOR_PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::PREDICTED, storage_buffer_sized(false, None)),
+                    (binding::BUCKET_COUNTS, storage_buffer_sized(false, None)),
+                    (
+                        binding::BUCKET_OFFSETS,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                    (binding::BUCKET_IDS, storage_buffer_sized(false, None)),
+                    (
+                        binding::INITIAL_POSITIONS,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                    (binding::NEIGHBOR_OUTPUT, storage_buffer_sized(false, None)),
+                    (binding::NEIGHBOR_STATS, storage_buffer_sized(false, None)),
+                ),
+            ),
+        );
+        let scan_layout = BindGroupLayoutDescriptor::new(
+            "cloth scan blocks layout",
+            &BindGroupLayoutEntries::with_indices(
+                ShaderStages::COMPUTE,
+                (
+                    (binding::SCAN_PARAMS, uniform_buffer_sized(false, None)),
+                    (
+                        binding::SCAN_INPUT,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                    (binding::SCAN_OUTPUT, storage_buffer_sized(false, None)),
+                    (binding::SCAN_SUMS, storage_buffer_sized(false, None)),
+                ),
+            ),
+        );
+        let scan_add_layout = BindGroupLayoutDescriptor::new(
+            "cloth scan add layout",
+            &BindGroupLayoutEntries::with_indices(
+                ShaderStages::COMPUTE,
+                (
+                    (binding::SCAN_PARAMS, uniform_buffer_sized(false, None)),
+                    (
+                        binding::SCAN_INPUT,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                    (binding::SCAN_OUTPUT, storage_buffer_sized(false, None)),
+                ),
+            ),
+        );
         let cache = world.resource::<PipelineCache>();
         let make =
             |entry: &'static str, label: &'static str, layout: &BindGroupLayoutDescriptor| {
@@ -233,6 +359,22 @@ impl FromWorld for SolverPipeline {
             };
 
         Self {
+            clear_hash: make("clear_hash", "cloth clear hash", &hash_layout),
+            count_hash: make("count_hash", "cloth count hash", &hash_layout),
+            scatter_hash: make("scatter_hash", "cloth scatter hash", &hash_layout),
+            cache_neighbors: make("cache_neighbors", "cloth cache neighbors", &neighbor_layout),
+            scan_blocks: make("scan_blocks", "cloth scan blocks", &scan_layout),
+            scan_add: make("scan_add", "cloth scan add", &scan_add_layout),
+            hash_layout,
+            neighbor_layout,
+            scan_layout,
+            scan_add_layout,
+            collide_particles: make(
+                "collide_particles",
+                "cloth solver collide_particles",
+                &particle_collision_layout,
+            ),
+            particle_collision_layout,
             stabilize_sdf: make("stabilize_sdf", "cloth solver stabilize_sdf", &sdf_layout),
             collide_sdf: make("collide_sdf", "cloth solver collide_sdf", &sdf_layout),
             sdf_layout,

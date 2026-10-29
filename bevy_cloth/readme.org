@@ -30,7 +30,7 @@
   |------+------+----------|
   | =src/sim/= | CPU 求解、网格与约束生成、碰撞和空间哈希 | 已有实现与测试，不是独立正确性标准 |
   | =src/demo/= | 场景、面板、相机、抓取和 Mesh 写回 | 交互演示仍调用 CPU 求解器 |
-  | =src/gpu/= | GPU 数据布局、计算管线和 shader | SDF 预稳定/投影/摩擦、预测、三类变形约束 gather、应用修正、更新位置与速度；未接交互渲染 |
+  | =src/gpu/= | GPU 数据布局、计算管线和 shader | SDF、三类变形约束、粒子碰撞 kernel 及专项对照；主布料仍空邻居表，无动态自碰撞/渲染 |
   | =tests/= | CPU 与外围测试 | 测试存在或曾通过，不等于全部物理目标已验收 |
 
   GPU 示例是一次性无窗口对照实验，不是演示程序的 GPU 模式。
@@ -47,8 +47,8 @@
   2026-10-28 用户授权 agent 实现完整 GPU 求解器，包括约束 kernel 和浮点 atomic 的替代。
 
   挂点/LRA 和弯曲批次已有用户主机测试和 UHD 770/Vulkan 数值对照通过的记录。
-  本批加入平面/球/立方体 SDF 投影、摩擦、预稳定和静态接触输入，尚待正式编译和设备验证；CPU 参考不改。
-  当前先推进求解器，不先接可视化；本批不含粒子碰撞或邻居查找。详见 [[file:plan.org][当前计划]]。
+  SDF 用户反馈数据正常，尚未收录完整日志。本批加入粒子碰撞/摩擦 kernel 和固定候选表的 GPU 专项对照，待设备验证。
+  主布料仍自碰撞关闭；动态邻居查找和可视化不在本批。CPU 参考不改，仍沿当前 Jacobi 路径推进，不切换图着色。详见 [[file:plan.org][当前计划]]。
 
 * 运行现有程序
   从 workspace 根目录运行；先阅读根 [[file:../AGENTS.md][AGENTS.md]]。
@@ -57,7 +57,7 @@
 
   #+begin_src bash
     cargo run -j 2 -p bevy_cloth --example velvet-scenes         # CPU 七场景演示与面板
-    cargo run -j 2 -p bevy_cloth --example velvet-gpu            # GPU 变形约束+静态 SDF 接触，一次性对照
+    cargo run -j 2 -p bevy_cloth --example velvet-gpu            # 布料/SDF 对照 + 粒子碰撞专项（固定邻居）
     cargo run -j 2 -p bevy_cloth --example velvet-00-sandbox      # 场景骨架，不是布料模拟验收
     cargo run -j 2 -p bevy_cloth --example velvet-01-collision    # 历史入口，当前实际加载 Attach 场景
   #+end_src
@@ -84,5 +84,7 @@
   - 本次没有运行 Velvet 可执行程序，也没有逐帧黄金数值对照。参考源码与现有 CPU 结果都不能替代独立验证。
   - SDF 保留源的预稳定/子步投影顺序及立方体圆角行为，不保证最终约束后完全不穿透。
     日志 max_sdf_correction 为最终位置的投影修正残差，不是真实穿透深度；运动历史已有主机模型测试，GPU 示例仅静态上传。
-  - 验证记录区分环境和批次：用户主机已通过 attachment、bending 对照及原 16 项测试；新增 SDF 尚待正式测试和设备运行。
+  - 粒子专项独立上传两组固定候选表，读回 apply 前的修正/计数和 apply 后的位置；通过条件为计数一致、delta/位置差 <=1e-5。
+    主布料报告 cloth_self_collision_enabled=false，不表示已有动态自碰撞；专项读回仅用于诊断。
+  - 验证记录区分环境和批次：用户主机已通过 attachment、bending 对照及原 16 项测试；SDF 反馈正常但未附日志，粒子专项待运行。
     agent 容器未暴露 GPU，离线 Cargo 在依赖解析阶段失败。详见 [[file:plan.org::*验证记录与限制][验证记录]]；无性能结论。

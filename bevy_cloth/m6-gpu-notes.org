@@ -14,13 +14,17 @@
   以下源路径以 workspace 根为起点：=../Velvet/Velvet/VtClothSolverGPU.hpp/.cu/.cuh=、
   =SpatialHashGPU.hpp/.cu/.cuh=、=Common.cuh/.hpp=、=VtBuffer.hpp=。本任务不修改该参考仓库。
 
-* 当前 GPU 原型（2026-10-29；变形约束已有设备对照，SDF 待运行）
-  - =src/gpu/solver.wesl= 有八个入口：SDF 预稳定、预测、SDF 碰撞、拉伸 gather、挂点/LRA gather、弯曲 gather、统一应用修正、更新位置与速度。
+* 当前 GPU 原型（2026-10-29；粒子碰撞 kernel 专项待运行，动态邻居未实现）
+  - =src/gpu/solver.wesl= 有九个入口：SDF 预稳定、预测、粒子碰撞、SDF 碰撞、拉伸 gather、挂点/LRA gather、弯曲 gather、统一应用修正、更新位置与速度。
   - =src/gpu/solver_gpu.rs= 建立粒子到拉伸、挂点及弯曲约束的查询表，一次提交固定的 60 步，再读回位置和速度作 CPU 对照。
     它不是逐帧布料后端，未连接交互场景或渲染。
   - “每粒子收集修正”（gather）：一个线程查找该粒子的相关约束，只写自己的修正量。
     查询表采用 CSR，即连续数组加分段索引。求修正和应用修正分两次 dispatch（计算发射）执行。
-  - 弯曲已通过用户主机的 16 项测试和一次设备对照；SDF 投影/摩擦已接入，设备运行待验。
+  - 粒子碰撞 kernel 已实现，固定候选表专项读回 apply 前 delta/count 与 apply 后 predicted；设备对照待验。
+    独立 16 字节参数及六个 storage；邻居布局为 i+n×slot。按粒子收集，独立 apply 后才进 SDF。
+    摩擦用未乘端点权重的 common 和相对位移；保留零质量/重合计数行为，不补造重合分离方向。
+    主 60 步布料仍空邻居表、自碰撞关闭，不以专项成功宣称动态自碰撞完成。
+  - 弯曲已通过用户主机的 16 项测试和一次设备对照；SDF 投影/摩擦已接入，用户反馈正常但未附完整日志。
     SDF 每线程按碰撞器顺序更新自己的粒子，无 atomic 或 delta/count 平均；预稳定每整步一次，子步碰撞在 predict 后。
     collider 224 字节（显式 kind、位置/scale、补齐 mat3、inverse/history mat4），独立 16 字节 uniform；布局共 3 个 storage。
     平面、球、立方体圆角与表面速度沿用 CPU；保留球心/零 dt 等保护，零切向位移显式返回零摩擦。
@@ -37,7 +41,7 @@
     target=rest×stretchiness；dist>target 才追加修正。零 rest 挂点仍被共享计数平均，不改成精确钳制。
   - 主世界 Time<Fixed> timestep 一次传入批次（默认 1/64 秒），uniform 存子步时间；仍为批量提交，不是实时推进。
   - 诊断含 pin drift/LRA violation、弯曲约束数、柔度、初始最大角度误差及数值比较，详见 [[file:plan.org][当前计划]]。
-    用户在 UHD 770/Vulkan 上分别通过 attachment 和 bending 对照；新增 SDF 尚待设备运行。
+    用户在 UHD 770/Vulkan 上分别通过 attachment 和 bending 对照；SDF 反馈正常但未附日志，新粒子专项待运行。
     SDF 日志为 CPU 投影函数评估初态/最终位置的修正量，不是真实穿透深度或 GPU 接触计数。
     agent 容器仍无 GPU，离线 Cargo 被 avian3d 索引阻塞；CPU/GPU 接近不是独立正确性证明。
 
@@ -121,18 +125,19 @@
 
   | 问题 | 当前做法或限制 | 尚需判断 |
   |------+----------------+----------|
-  | 多线程写同一粒子 | 拉伸、挂点、弯曲采用每粒子收集修正，不请求浮点原子扩展 | 碰撞阶段的并行方式必须结合正确性与测量选择 |
+  | 多线程写同一粒子 | 变形约束和粒子碰撞按粒子收集修正；SDF 每粒子独立投影 | 不请求浮点原子扩展，效果和性能分别验证 |
   | 分阶段执行 | 当前用独立 dispatch 分隔求修正与应用修正 | 不可用同一工作组内的屏障代替整个设备的阶段边界 |
   | 数据布局 | 当前将三维向量打包为四分量，统一参数放在 uniform 中 | 新数组与参数的对齐、读写权限和生命周期要独立核对 |
   | 邻居查找 | GPU 路径尚未实现 | 先解释要查哪些邻居及如何验证，再决定是否排序 |
   | 数组清空 | wgpu 的 =clear_buffer= 写零；源的空槽标记为全 1 | 若沿用非零标记，需另行填充；也可以在理解后改变表示 |
-  | 资源绑定 | 粒子/SDF 布局各 3 个 storage；stretch/apply、attachment、bending 各 7 个 | 变形约束已通过一次设备对照；SDF 布局待运行 |
+  | 资源绑定 | 粒子/SDF 各 3 个 storage；粒子碰撞 6 个；stretch/apply、attachment、bending 各 7 个 | 新粒子碰撞布局待设备验证 |
   | 渲染输出 | 当前仅批末位置/速度读回 CPU 作诊断 | 已决定后续 GPU-direct 写 Mesh，参考 Bevy shader_advanced/compute_mesh.rs；不加 CPU Mesh 读回 |
 
   原子操作是保证并发读改写不丢结果的操作。标准 WGSL 的原子类型为整数；
   当前原型不依赖浮点原子扩展。这是现状，不预先替未来所有硬件和算法作决定。
 
 * 6. 当前工作边界
-  用户已授权完整 GPU 求解器实现；本批加入 SDF 碰撞，不同时补齐邻居查找和粒子碰撞。
+  用户已授权完整 GPU 求解器实现；本批加入粒子碰撞 kernel 和固定候选表专项，不同时补齐动态邻居查找。
+  继续现有 Jacobi 路径；graph-colored GS/完整累计乘子 XPBD 的讨论不构成当前切换决定。
   下一步由用户运行本批诊断、双方定位，再决定后续求解器小批。运行方式与预期只在 [[file:plan.org][plan.org]] 维护。
   渲染之后采用 GPU-direct，不以 CPU Mesh 读回作为中间方案；本批数值诊断读回不属于渲染路径。

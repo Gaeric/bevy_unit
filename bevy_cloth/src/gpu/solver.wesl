@@ -72,6 +72,179 @@ struct SdfCollider {
 @group(0) @binding(16) var<uniform> sdf_params: SdfParams;
 @group(0) @binding(17) var<storage, read> sdf_colliders: array<SdfCollider>;
 
+struct ParticleCollisionParams {
+  max_num_neighbors: u32,
+  particle_diameter: f32,
+  friction: f32,
+  pad: u32,
+};
+@group(0) @binding(18) var<uniform> particle_collision_params: ParticleCollisionParams;
+@group(0) @binding(19) var<storage, read> neighbors: array<u32>;
+
+struct NeighborParams {
+  num_particles: u32,
+  num_buckets: u32,
+  capacity: u32,
+  spacing: f32,
+  diameter_squared: f32,
+  pad0: u32,
+  pad1: u32,
+  pad2: u32,
+};
+struct NeighborStats {
+  overflow_rows: atomic<u32>,
+  max_required: atomic<u32>,
+  stored_entries: atomic<u32>,
+  invalid_coordinates: atomic<u32>,
+};
+struct ScanParams {
+  num_elements: u32,
+  pad0: u32,
+  pad1: u32,
+  pad2: u32,
+};
+@group(0) @binding(20) var<uniform> neighbor_params: NeighborParams;
+@group(0) @binding(21) var<storage, read_write> bucket_counts: array<atomic<u32>>;
+@group(0) @binding(22) var<storage, read_write> bucket_cursors: array<atomic<u32>>;
+@group(0) @binding(23) var<storage, read> bucket_offsets: array<u32>;
+@group(0) @binding(24) var<storage, read_write> bucket_ids: array<u32>;
+@group(0) @binding(25) var<storage, read> initial_positions: array<vec4<f32>>;
+// Same buffer as binding 19, but NEVER bound twice in one dispatch.
+@group(0) @binding(26) var<storage, read_write> neighbor_output: array<u32>;
+@group(0) @binding(27) var<storage, read_write> neighbor_stats: NeighborStats;
+@group(0) @binding(28) var<uniform> scan_params: ScanParams;
+@group(0) @binding(29) var<storage, read> scan_input: array<u32>;
+@group(0) @binding(30) var<storage, read_write> scan_output: array<u32>;
+@group(0) @binding(31) var<storage, read_write> scan_sums: array<u32>;
+var<workgroup> scan_shared: array<u32, 256>;
+
+fn valid_cell(point: vec3<f32>) -> bool {
+  // Also rejects NaN/Inf and leaves ample signed headroom for the 27-cell stencil.
+  return all(abs(point / neighbor_params.spacing) <= vec3<f32>(1e9));
+}
+fn cell_of(point: vec3<f32>) -> vec3<i32> {
+  return vec3<i32>(floor(point / neighbor_params.spacing));
+}
+fn cell_bucket(cell: vec3<i32>) -> u32 {
+  // Unsigned arithmetic deliberately wraps, including for negative coordinates.
+  let bits = bitcast<vec3<u32>>(cell);
+  return ((bits.x * 92837111u) ^ (bits.y * 689287499u)
+    ^ (bits.z * 283923481u)) % neighbor_params.num_buckets;
+}
+
+@compute @workgroup_size(256)
+fn clear_hash(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < neighbor_params.num_buckets) {
+    atomicStore(&bucket_counts[gid.x], 0u);
+    atomicStore(&bucket_cursors[gid.x], 0u);
+  }
+}
+@compute @workgroup_size(256)
+fn count_hash(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  if (i >= neighbor_params.num_particles) { return; }
+  if (!valid_cell(predicted[i].xyz)) {
+    atomicAdd(&neighbor_stats.invalid_coordinates, 1u);
+    return;
+  }
+  atomicAdd(&bucket_counts[cell_bucket(cell_of(predicted[i].xyz))], 1u);
+}
+
+// Inclusive workgroup scan followed by exclusive output; padded lanes participate in EVERY
+// barrier. Each level has distinct input/output/sums buffers, including the atomic count input
+// viewed as ordinary u32 only in this later, independent dispatch.
+@compute @workgroup_size(256)
+fn scan_blocks(@builtin(global_invocation_id) gid: vec3<u32>,
+               @builtin(local_invocation_id) lid: vec3<u32>,
+               @builtin(workgroup_id) wid: vec3<u32>) {
+  var value = 0u;
+  if (gid.x < scan_params.num_elements) { value = scan_input[gid.x]; }
+  scan_shared[lid.x] = value;
+  workgroupBarrier();
+  for (var stride = 1u; stride < 256u; stride *= 2u) {
+    var left = 0u;
+    if (lid.x >= stride) { left = scan_shared[lid.x - stride]; }
+    let sum = scan_shared[lid.x] + left;
+    workgroupBarrier();
+    scan_shared[lid.x] = sum;
+    workgroupBarrier();
+  }
+  if (gid.x < scan_params.num_elements) {
+    scan_output[gid.x] = scan_shared[lid.x] - value;
+  }
+  if (lid.x == 255u) { scan_sums[wid.x] = scan_shared[255u]; }
+}
+@compute @workgroup_size(256)
+fn scan_add(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < scan_params.num_elements) {
+    scan_output[gid.x] += scan_input[gid.x / 256u];
+  }
+}
+@compute @workgroup_size(256)
+fn scatter_hash(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  if (i >= neighbor_params.num_particles) { return; }
+  if (!valid_cell(predicted[i].xyz)) { return; }
+  let bucket = cell_bucket(cell_of(predicted[i].xyz));
+  let slot = atomicAdd(&bucket_cursors[bucket], 1u);
+  bucket_ids[bucket_offsets[bucket] + slot] = i;
+}
+@compute @workgroup_size(256)
+fn cache_neighbors(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  let n = neighbor_params.num_particles;
+  let capacity = neighbor_params.capacity;
+  if (i >= n) { return; }
+  for (var slot = 0u; slot < capacity; slot++) {
+    neighbor_output[i + n * slot] = 0xffffffffu;
+  }
+  let point = predicted[i].xyz;
+  if (!valid_cell(point)) { return; }
+  let home = cell_of(point);
+  var required = 0u;
+  var retained = 0u;
+  for (var z = -1; z <= 1; z++) {
+    for (var y = -1; y <= 1; y++) {
+      for (var x = -1; x <= 1; x++) {
+        let cell = home + vec3<i32>(x, y, z);
+        let bucket = cell_bucket(cell);
+        let begin = bucket_offsets[bucket];
+        let end = begin + atomicLoad(&bucket_counts[bucket]);
+        for (var entry = begin; entry < end; entry++) {
+          let j = bucket_ids[entry];
+          // True-cell equality prevents hash collisions from introducing duplicate candidates.
+          if (i == j || any(cell_of(predicted[j].xyz) != cell)) { continue; }
+          let difference = point - predicted[j].xyz;
+          let original = initial_positions[i].xyz - initial_positions[j].xyz;
+          if (!(dot(difference, difference) < neighbor_params.spacing * neighbor_params.spacing
+            && dot(original, original) > neighbor_params.diameter_squared)) { continue; }
+          required++;
+          // Sorted insertion, dropping the maximum when full. Scatter order cannot change the
+          // retained set, collision reduction order, or overflow diagnostic.
+          var insertion = retained;
+          if (retained == capacity) {
+            if (capacity == 0u) { continue; }
+            if (j >= neighbor_output[i + n * (capacity - 1u)]) { continue; }
+            insertion = capacity - 1u;
+          } else {
+            retained++;
+          }
+          while (insertion > 0u) {
+            let previous = neighbor_output[i + n * (insertion - 1u)];
+            if (previous < j) { break; }
+            neighbor_output[i + n * insertion] = previous;
+            insertion--;
+          }
+          neighbor_output[i + n * insertion] = j;
+        }
+      }
+    }
+  }
+  atomicMax(&neighbor_stats.max_required, required);
+  atomicAdd(&neighbor_stats.stored_entries, retained);
+  if (required > capacity) { atomicAdd(&neighbor_stats.overflow_rows, 1u); }
+}
+
 // sign(0) is zero, not +1; preserve even the -0 sign bit for CPU cube-face ties.
 fn copy_sign(magnitude: f32, source: f32) -> f32 {
   return bitcast<f32>((bitcast<u32>(magnitude) & 0x7fffffffu)
@@ -136,15 +309,15 @@ fn sdf_velocity_at(collider: SdfCollider, point: vec3<f32>) -> vec3<f32> {
   return (point - last) / collider.delta_time;
 }
 
-fn sdf_friction(correction: vec3<f32>, displacement: vec3<f32>) -> vec3<f32> {
+fn contact_friction(correction: vec3<f32>, displacement: vec3<f32>, friction: f32) -> vec3<f32> {
   let correction_length = length(correction);
-  if (sdf_params.friction > 0.0 && correction_length > 0.0) {
+  if (friction > 0.0 && correction_length > 0.0) {
     let normal = correction / correction_length;
     let tangent = displacement - normal * dot(displacement, normal);
     let tangent_length = length(tangent);
     // Includes friction=0 / normal-only motion without a speculative zero division.
     if (tangent_length > 0.0) {
-      return -tangent * min(correction_length * sdf_params.friction / tangent_length, 1.0);
+      return -tangent * min(correction_length * friction / tangent_length, 1.0);
     }
   }
   return vec3<f32>(0.0);
@@ -159,7 +332,7 @@ fn project_sdfs(old_position: vec3<f32>, initial: vec3<f32>, h: f32) -> vec3<f32
     pred += correction;
     if (dot(correction, correction) > 0.0) {
       let displacement = pred - old_position - sdf_velocity_at(collider, pred) * h;
-      pred += sdf_friction(correction, displacement);
+      pred += contact_friction(correction, displacement, sdf_params.friction);
     }
   }
   return pred;
@@ -185,6 +358,49 @@ fn collide_sdf(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   predicted[i] = vec4<f32>(
     project_sdfs(positions[i].xyz, predicted[i].xyz, params.substep_time), 0.0);
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE)
+fn collide_particles(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  let n = params.num_particles;
+  if (i >= n) {
+    return;
+  }
+  let pred_i = predicted[i].xyz;
+  let displacement_i = pred_i - positions[i].xyz;
+  let w_i = inv_masses[i];
+  var position_delta = vec3<f32>(0.0);
+  var count = 0i;
+  for (var slot = 0u; slot < particle_collision_params.max_num_neighbors; slot += 1u) {
+    let j = neighbors[i + n * slot];
+    // EMPTY terminates valid rows. >= also guards malformed IDs (CPU/CUDA use >).
+    if (j >= n) {
+      break;
+    }
+    let denominator = w_i + inv_masses[j];
+    if (denominator <= 0.0) {
+      continue;
+    }
+    let pred_j = predicted[j].xyz;
+    let diff = pred_i - pred_j;
+    let distance = length(diff);
+    if (distance >= particle_collision_params.particle_diameter) {
+      continue;
+    }
+    let gradient = diff / (distance + EPSILON);
+    let lambda = (distance - particle_collision_params.particle_diameter) / denominator;
+    let contact_common = lambda * gradient;
+    count += 1i;
+    position_delta -= w_i * contact_common;
+    let relative_displacement = displacement_i - (pred_j - positions[j].xyz);
+    // Friction uses common, NOT the inverse-mass-scaled endpoint correction; no /h.
+    position_delta += w_i * contact_friction(
+      contact_common, relative_displacement, particle_collision_params.friction);
+  }
+  // Snapshot Jacobi: never write predicted or a neighbor's contribution in this dispatch.
+  deltas[i] = vec4<f32>(position_delta, 0.0);
+  delta_counts[i] = count;
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)

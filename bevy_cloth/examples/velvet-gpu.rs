@@ -39,7 +39,9 @@ fn report_and_exit(slot: Res<SolverResultSlot>, mut exit: MessageWriter<AppExit>
     if report.comparison_passed() {
         exit.write(AppExit::Success);
     } else {
-        error!("GPU/CPU comparison exceeded position 1e-3 or velocity 1e-2 tolerance");
+        error!(
+            "Cloth comparison exceeded position 1e-3 / velocity 1e-2, or fixed particle probe failed (raw counts exact; delta/position 1e-5; finite outputs required)"
+        );
         exit.write(AppExit::error());
     }
 }

@@ -69,6 +69,38 @@ pub struct SdfParams {
     pub step_time: f32,
 }
 
+/// Independent 16-byte particle-contact uniform; does not change Params or SdfParams.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct ParticleCollisionParams {
+    pub max_num_neighbors: u32,
+    pub particle_diameter: f32,
+    pub friction: f32,
+    pub pad: u32,
+}
+
+/// Counting-hash configuration. Cell coordinates are guarded before conversion to i32.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct NeighborParams {
+    pub num_particles: u32,
+    pub num_buckets: u32,
+    pub capacity: u32,
+    pub spacing: f32,
+    pub diameter_squared: f32,
+    pub pad: [u32; 3],
+}
+
+/// Cumulative since buffer creation; every rebuild contributes (not just the final cache).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct NeighborStats {
+    pub overflow_rows: u32,
+    pub max_required: u32,
+    pub stored_entries: u32,
+    pub invalid_coordinates: u32,
+}
+
 /// WGSL `SdfCollider`: header 0, position 16, scale 32, mat3 columns 48,
 /// inverse mat4 96, previous mat4 160; 224-byte array stride.
 #[repr(C)]
@@ -151,6 +183,45 @@ impl GpuParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn neighbor_uniform_and_atomic_stats_match_wgsl() {
+        assert_eq!(size_of::<NeighborParams>(), 32);
+        assert_eq!(std::mem::offset_of!(NeighborParams, num_particles), 0);
+        assert_eq!(std::mem::offset_of!(NeighborParams, num_buckets), 4);
+        assert_eq!(std::mem::offset_of!(NeighborParams, capacity), 8);
+        assert_eq!(std::mem::offset_of!(NeighborParams, spacing), 12);
+        assert_eq!(std::mem::offset_of!(NeighborParams, diameter_squared), 16);
+        assert_eq!(std::mem::offset_of!(NeighborParams, pad), 20);
+        assert_eq!(size_of::<NeighborStats>(), 16);
+        assert_eq!(std::mem::offset_of!(NeighborStats, overflow_rows), 0);
+        assert_eq!(std::mem::offset_of!(NeighborStats, max_required), 4);
+        assert_eq!(std::mem::offset_of!(NeighborStats, stored_entries), 8);
+        assert_eq!(std::mem::offset_of!(NeighborStats, invalid_coordinates), 12);
+    }
+
+    #[test]
+    fn particle_collision_params_match_wgsl() {
+        assert_eq!(size_of::<ParticleCollisionParams>(), 16);
+        assert_eq!(
+            std::mem::offset_of!(ParticleCollisionParams, max_num_neighbors),
+            0
+        );
+        assert_eq!(
+            std::mem::offset_of!(ParticleCollisionParams, particle_diameter),
+            4
+        );
+        assert_eq!(std::mem::offset_of!(ParticleCollisionParams, friction), 8);
+        assert_eq!(std::mem::offset_of!(ParticleCollisionParams, pad), 12);
+        let params = ParticleCollisionParams {
+            max_num_neighbors: 2,
+            particle_diameter: 1.0,
+            friction: 0.5,
+            pad: 0,
+        };
+        let words: &[u32] = bytemuck::cast_slice(std::slice::from_ref(&params));
+        assert_eq!(words, [2, 1.0f32.to_bits(), 0.5f32.to_bits(), 0]);
+    }
 
     #[test]
     fn sdf_uniform_and_collider_match_shader_offsets() {

@@ -34,26 +34,29 @@
   | 类别 | 代码现状 | 验收边界 |
   |------+----------+----------|
   | CPU | 已有 demo、求解器及场景代码 | 只作为现有基础，未经运行重新验收 |
-  | GPU | 无窗口：SDF 预稳定；每子步预测 → SDF → 三类变形约束/统一应用 → 更新位置与速度 | attachment、bending 批次设备对照通过；新增 SDF 待设备验证 |
-  | 当前工作 | 求解器优先；本批加入解析 SDF 投影和摩擦 | 不含粒子碰撞、邻居查找或渲染 |
+  | GPU | 无窗口：SDF 预稳定；每子步预测 → 粒子碰撞/apply → SDF → 三类变形约束/apply → finalize | 变形约束有设备对照；SDF 用户反馈正常；粒子碰撞专项待运行 |
+  | 当前工作 | 粒子碰撞 kernel、摩擦与可控邻居表专项 GPU 对照 | 布料自身仍空邻居表；无动态邻居查找或渲染 |
 
-* 当前批次：SDF 碰撞（实现完成，设备运行待验）
-  - [代码事实] 改动 =src/gpu/layout.rs=、=pipeline.rs=、=solver_gpu.rs=、=solver.wesl=；CPU/Velvet 不改。
-    CPU/GPU 均保留 stretch、attach、bend，使用同一碰撞器表；自碰撞关闭。
-  - [布局决定] SDF 独立布局为两个 uniform 和三个 storage（positions、predicted、colliders）。
-    主 uniform 仍 48 字节，SdfParams 为 16 字节（数量、margin、friction、整步 dt）；
-    collider 为 224 字节，显式 kind 编码，mat3 列补齐 16 字节，inverse/history mat4 按列打包。
-    空表上传完整哑元素但 num_colliders=0；positions/predicted 为不同 buffer，不做重复别名绑定。
-  - [算法事实] 每线程拥有一个粒子，按表顺序投影平面、球和旋转/非均匀缩放立方体，再计算摩擦。
-    相对位移 =pred-position-velocity_at(pred)×h=；不按逆质量过滤，挂点也接受碰撞。
-    沿用 CPU 的平面忽略旋转、球半径取 scale.x、立方体圆角和修正衰减，非通用精确 SDF。
-    球心、圆角零长度、碰撞器 dt=0 沿用 CPU 保护；零切向位移显式返回零摩擦，避免除零。
-  - [诊断输入] 保留 Z 鼓包及 bend_compliance=1e-4；增加静态平面 y=-2.15、球 (0,-1,0)/r=.35、
-    旋转立方体中心 (.65,-1,.1)/scale=(.4,.6,.4)。球和立方体初态有接触，平面另有主机专项接触测试。
-    GPU 批次仅验证静态上传；变换历史和运动摩擦有主机测试，未接实时动画/变换同步。
-  - [调度事实] 每整步 stabilize_sdf（整步 dt，仅写 positions）；每子步 predict → collide_sdf（h，仅写 predicted）
-    → [stretch → attachment → bending → apply]×iterations → finalize。预稳定不写速度，predict 刷新 predicted。
-    约束共享计数和挂点残余漂移语义不变；不额外增加末尾碰撞投影来掩盖残差。
+* 当前批次：粒子碰撞 kernel（可控邻居表诊断，设备运行待验）
+  - [代码事实] 改动四个 =src/gpu/= 实现文件及 =examples/velvet-gpu.rs=；CPU/Velvet 不改。
+    本批不切换 graph-colored GS 或累计乘子 XPBD，保留当前 Jacobi 路径。
+  - [布局决定] 独立 16 字节 ParticleCollisionParams（最大槽数、直径、摩擦、pad）；
+    独立绑定组两个 uniform、六个 storage。邻居表 =neighbors[i+n×slot]=，EMPTY 终止，满行无须 sentinel。
+    上传检查长度、索引、sentinel 后无有效条目；不重排/去重。shader 用 j>=n 防越界，
+    与 CPU/CUDA 的 j>n 只在无效输入 j==n 上不同；CPU 不改。
+  - [算法事实] 每粒子读取固定 predicted 快照，按邻居顺序计算质量加权分离和摩擦，覆盖自身 delta/count。
+    摩擦使用未按端点逆质量缩放的 common=lambda×gradient；相对位移不除以 h。
+    零逆质量端点和重合粒子在有效约束下仍计数；重合时方向为零，不额外发明分离方向。
+    独立 apply 后才执行 SDF，不把碰撞计数混进变形约束。
+  - [专项诊断] 两组各 16 粒子、每粒子两槽：friction/relaxation 分别为 0/1、.5/.75。
+    显式对称候选表覆盖等/不等质量、单/双固定点、分离/重合、切向滑动/粘着、满行/空行。
+    GPU 先执行碰撞，再读回原始 delta/count，随后 apply 再读回 predicted；比较独立模型、手算关系和 CPU。
+    这是一次性诊断，不是正常模拟中的 CPU 每帧邻居上传。
+  - [集成边界] 主 60 步布料仍显式空邻居表、自碰撞关闭，报告 cloth_self_collision_enabled=false。
+    本批不宣称动态自碰撞可用；后续 GPU 邻居查找接通后才能找到新接触。
+    原静态 SDF、Z 鼓包、三类变形约束保留。
+  - [调度事实] 每整步 SDF 预稳定；每子步 predict → collide_particles → apply → SDF
+    → [stretch → attachment → bending → apply]×iterations → finalize。
   - [时间决定] 插件 finish 时从主世界 =Time<Fixed>::timestep()= 取一次配置，传给初始化、CPU step
     和 GPU substep uniform；未覆盖 Bevy 默认值时为 1/64 秒。60 步、2 子步、4 轮仍一次批量提交，
     不是 FixedUpdate 实时推进；示例 schedule runner 的 60Hz 仅控制轮询节奏。运行中改 timestep 不会同步。
@@ -63,23 +66,25 @@
      cargo test -j 2 -p bevy_cloth --lib gpu:: -- --nocapture
      cargo run -j 2 -p bevy_cloth --example velvet-gpu
    #+end_src
-   - [预期／待验证] 日志应包含 289 粒子、256 条 bend、3 个碰撞器、60 步、2 子步、4 轮、
-     step_time=.015625、bend_compliance=1e-4、margin=.06、friction=.1、正初始角度误差。
-     初始 SDF 最大修正应为正，initially_affected_particles>0；它们由 CPU 在输入上计算，不是 GPU 接触计数。
-     =max_position_diff<=1e-3=、=max_velocity_diff<=1e-2= 才成功退出；非有限数据或长度不符直接拒绝。
-     保持原容差；接触分支或 acos 导致差异时先定位，不自动放宽。它们不是物理正确性的验收标准。
+   - [预期／待验证] particle_collision_probe：num_cases=2、num_particles=32、active_directed_contacts=28、
+     counts_match=true、pass=true，原始修正和应用后位置的最大差均 <=1e-5 且有限。
+     每例原始 counts 应为 =[1,1,1,1,1,1,0,0,0,0,1,1,2,2,2,0]=，合计 14 个有向接触（不是唯一粒子对数）。
+   - 主布料仍 289 粒子、256 bend、3 个 SDF、60 步/2 子步/4 轮、默认 dt=.015625；
+     cloth_self_collision_enabled=false。原位置差 <=1e-3、速度差 <=1e-2，并且专项对照通过才成功退出。
+     保持容差；失败先定位，不自动放宽，也不把 CPU/GPU 接近当物理正确性证明。
    - 检查 =gpu/cpu_max_pin_drift= 和 =gpu/cpu_max_lra_violation=：前者为零 rest 到槽的距离，
      后者为活动正 rest 约束超 target 的最大值。非零不自动判错，先比较两边与迭代数关系。
    - 检查 =gpu/cpu_max_sdf_correction=：用同一 CPU 投影函数评估两边最终位置的最大修正量，
      不是真实穿透深度（尤其圆角 cube），也不要求为零；后续约束/finalize 可能再次带入碰撞体。
-   - 若两边差异大：查 layout 的 kind、矩阵列和 224 字节 stride（mat3=48、inverse=96、history=160），
-     再查 stabilize_sdf 是否每整步一次、是否取整步 dt；collide_sdf 是否在 predict 后且用 h。
-     接着按单粒子/单碰撞器比较 sdf_correction → 投影后 pred → velocity_at → 切向摩擦，逐层定位。
-     三类变形约束保持原 CSR；若仅残差大而 CPU/GPU 接近，先检查阶段顺序，不硬钳制挂点或加末尾投影。
-     输入已加碰撞器，不要求 pin/LRA 指标等于此前 bending 日志。
+   - 专项 counts 不同：先查 neighbors 的 slot-major 索引及 sentinel，再查质量和距离跳过条件。
+     counts 一致但 delta 不同：查 epsilon、逆质量比例、common 的摩擦幅度和相对位移方向。
+     delta 一致但位置不同：查 apply 的平均/relaxation；等质量 .5 距离对的原始修正幅度应约 .2499995。
+     重合粒子计数但零修正是保留的参考行为，不把零方向当作测试未触发。
+     主布料输入未变，空表调度理论上不应改变此前 SDF 数值；异常再查阶段顺序/缓冲复用。
    - 本批无 Mesh 输出。后续渲染必须 GPU-direct 写 Mesh，参考 Bevy =shader_advanced/compute_mesh.rs=；
      不增加 CPU Mesh 读回路径。现有批末位置/速度读回仅用于数值诊断。
-   - 下一步先收集 SDF 运行日志、共同诊断本批，再决定邻居查找/粒子碰撞小批，不自动扩展。
+   - 本批验证后再推进 GPU 动态邻居查找；它必须输出有效邻居且检测容量溢出。
+     旧哈希重复邻居/桶内预截断的风险不当作正确性标准；具体结构另行确认，不预选排序方案。
 
 * 后续方向（不是并行展开的任务清单）
   - [决定] 先推进完整 GPU 求解器，数值诊断随批次提供；可视化不作为本批前置条件。
@@ -112,6 +117,10 @@
     不含 Bevy 集成或 shader，不能代替正式测试。局部 CPU fixture 实测初始最大修正 .25115085、
     44 个初态受影响粒子，60 步后残余修正 .00940969，仅作主机诊断参考。
     三个改动 Rust 文件的 rustfmt --check 和 git diff --check 通过；未验证 WESL 编译或 GPU 执行。
+  - [用户反馈，SDF] 用户表示数据看起来正常；未提供完整 SolverReport 或测试输出，不补写精确误差或测试通过数。
+  - [粒子碰撞批次] 新增 5 项主机测试，预期共 32 项；局部提取 harness 32 项通过，
+    仍去掉 bytemuck derive 并替换 slice cast，不涵盖 Bevy/WESL/GPU；正式 Cargo 测试和设备对照待执行。
+    agent 私有 target 的离线测试仍被 avian3d 解析阻塞；rustfmt --check、git diff --check 通过。
   - [代码事实／验收缺口] 子步测试只要求差值小于 1，不能据此宣称子步无关性。
     子步是把一次时间推进拆成更小步；其误差标准需随具体问题讨论。
   - 这些限制用于防止误读现有测试。是否在下一批处理，按求解器诊断需要讨论，不默认同时修复所有问题。
