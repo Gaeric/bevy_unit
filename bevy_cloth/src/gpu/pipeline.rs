@@ -33,6 +33,11 @@ pub mod binding {
     pub const ATTACH_INC_OFFSETS: u32 = 10;
     pub const ATTACH_INC_ENTRIES: u32 = 11;
     pub const ATTACH_SLOT_POSITIONS: u32 = 12;
+    pub const BEND_INC_OFFSETS: u32 = 13;
+    pub const BEND_INC_ENTRIES: u32 = 14;
+    pub const BEND_CONSTRAINTS: u32 = 15;
+    pub const SDF_PARAMS: u32 = 16;
+    pub const SDF_COLLIDERS: u32 = 17;
 }
 
 #[derive(Resource)]
@@ -43,14 +48,29 @@ pub struct SolverPipeline {
     pub constraint_layout: BindGroupLayoutDescriptor,
     /// `solve_attachment`: seven storage buffers, independently of the stretch layout.
     pub attachment_layout: BindGroupLayoutDescriptor,
+    /// `solve_bending`: seven storage buffers, independent of the other constraint layouts.
+    pub bending_layout: BindGroupLayoutDescriptor,
+    /// `stabilize_sdf` / `collide_sdf`: two uniforms and three storage buffers.
+    pub sdf_layout: BindGroupLayoutDescriptor,
+    stabilize_sdf: CachedComputePipelineId,
+    collide_sdf: CachedComputePipelineId,
     predict: CachedComputePipelineId,
     solve_stretch: CachedComputePipelineId,
     solve_attachment: CachedComputePipelineId,
+    solve_bending: CachedComputePipelineId,
     apply_deltas: CachedComputePipelineId,
     finalize: CachedComputePipelineId,
 }
 
 impl SolverPipeline {
+    pub fn stabilize_sdf(&self) -> CachedComputePipelineId {
+        self.stabilize_sdf
+    }
+
+    pub fn collide_sdf(&self) -> CachedComputePipelineId {
+        self.collide_sdf
+    }
+
     pub fn predict(&self) -> CachedComputePipelineId {
         self.predict
     }
@@ -61,6 +81,10 @@ impl SolverPipeline {
 
     pub fn solve_attachment(&self) -> CachedComputePipelineId {
         self.solve_attachment
+    }
+
+    pub fn solve_bending(&self) -> CachedComputePipelineId {
+        self.solve_bending
     }
 
     pub fn apply_deltas(&self) -> CachedComputePipelineId {
@@ -147,6 +171,52 @@ impl FromWorld for SolverPipeline {
             ),
         );
 
+        let bending_layout = BindGroupLayoutDescriptor::new(
+            "cloth solver bending layout",
+            &BindGroupLayoutEntries::with_indices(
+                ShaderStages::COMPUTE,
+                (
+                    (binding::PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::PREDICTED, storage_buffer_sized(false, None)),
+                    (binding::DELTAS, storage_buffer_sized(false, None)),
+                    (binding::DELTA_COUNTS, storage_buffer_sized(false, None)),
+                    (
+                        binding::INV_MASSES,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                    (
+                        binding::BEND_INC_OFFSETS,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                    (
+                        binding::BEND_INC_ENTRIES,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                    (
+                        binding::BEND_CONSTRAINTS,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                ),
+            ),
+        );
+
+        let sdf_layout = BindGroupLayoutDescriptor::new(
+            "cloth solver sdf layout",
+            &BindGroupLayoutEntries::with_indices(
+                ShaderStages::COMPUTE,
+                (
+                    (binding::PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::SDF_PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::POSITIONS, storage_buffer_sized(false, None)),
+                    (binding::PREDICTED, storage_buffer_sized(false, None)),
+                    (
+                        binding::SDF_COLLIDERS,
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                ),
+            ),
+        );
+
         let cache = world.resource::<PipelineCache>();
         let make =
             |entry: &'static str, label: &'static str, layout: &BindGroupLayoutDescriptor| {
@@ -163,6 +233,9 @@ impl FromWorld for SolverPipeline {
             };
 
         Self {
+            stabilize_sdf: make("stabilize_sdf", "cloth solver stabilize_sdf", &sdf_layout),
+            collide_sdf: make("collide_sdf", "cloth solver collide_sdf", &sdf_layout),
+            sdf_layout,
             predict: make("predict", "cloth solver predict", &particle_layout),
             solve_stretch: make(
                 "solve_stretch",
@@ -174,6 +247,11 @@ impl FromWorld for SolverPipeline {
                 "cloth solver solve_attachment",
                 &attachment_layout,
             ),
+            solve_bending: make(
+                "solve_bending",
+                "cloth solver solve_bending",
+                &bending_layout,
+            ),
             apply_deltas: make(
                 "apply_deltas",
                 "cloth solver apply_deltas",
@@ -183,6 +261,7 @@ impl FromWorld for SolverPipeline {
             particle_layout,
             constraint_layout,
             attachment_layout,
+            bending_layout,
         }
     }
 }

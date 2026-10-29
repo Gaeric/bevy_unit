@@ -34,21 +34,26 @@
   | 类别 | 代码现状 | 验收边界 |
   |------+----------+----------|
   | CPU | 已有 demo、求解器及场景代码 | 只作为现有基础，未经运行重新验收 |
-  | GPU | 无窗口：预测 → 每轮拉伸 gather → 挂点/LRA gather → 统一应用修正 → 更新位置与速度 | 上传、绑定、kernel、dispatch 已实现；编译/运行未验收 |
-  | 当前工作 | 求解器优先；本批完成 attachment/LRA 实现与诊断 | 不含弯曲、碰撞、自碰撞或渲染 |
+  | GPU | 无窗口：SDF 预稳定；每子步预测 → SDF → 三类变形约束/统一应用 → 更新位置与速度 | attachment、bending 批次设备对照通过；新增 SDF 待设备验证 |
+  | 当前工作 | 求解器优先；本批加入解析 SDF 投影和摩擦 | 不含粒子碰撞、邻居查找或渲染 |
 
-* 当前批次：attachment/LRA（实现完成，运行待验）
-  - [代码事实] 改动 =src/gpu/layout.rs=、=pipeline.rs=、=solver_gpu.rs=、=solver.wesl= 和
-    =examples/velvet-gpu.rs=；CPU 求解器与 Velvet 不改。CPU 对照仅删除 bend，保留 attach；碰撞器为空，自碰撞关闭。
-  - [布局决定] attachment 使用稳定 CSR：=offsets= 为 N+1 个 u32，=entries= 为
-    ={slot:u32, rest:f32}=（8 字节 stride），slot position 为 vec4（16 字节）。
-    每粒子的 entry 保持 CPU 原始表序，支持非均匀、乱序及空表；不假设 slot-major 或每粒子固定条数。
-    attachment 独立 bind group：predicted、deltas、counts、invMass、offsets、entries、slots 共 7 个 storage。
-  - [算法事实] 每粒子一个 invocation，读取本轮不变的 predicted；在 stretch 的 delta/count 上追加。
-    target=rest×long_range_stretchiness；零逆质量且 target>0 跳过；仅 dist>target 才累加
-    =-diff + diff/dist*target= 和 count。条件与 CPU/CUDA 一致，不用浮点 atomic。
-  - [调度事实] 每子步 predict；每轮 stretch → attachment → apply；最后 finalize。
-    独立 dispatch 提供阶段边界。零 rest 挂点通过共享计数修正，不新增硬钳制；残余 pin drift 是保留语义。
+* 当前批次：SDF 碰撞（实现完成，设备运行待验）
+  - [代码事实] 改动 =src/gpu/layout.rs=、=pipeline.rs=、=solver_gpu.rs=、=solver.wesl=；CPU/Velvet 不改。
+    CPU/GPU 均保留 stretch、attach、bend，使用同一碰撞器表；自碰撞关闭。
+  - [布局决定] SDF 独立布局为两个 uniform 和三个 storage（positions、predicted、colliders）。
+    主 uniform 仍 48 字节，SdfParams 为 16 字节（数量、margin、friction、整步 dt）；
+    collider 为 224 字节，显式 kind 编码，mat3 列补齐 16 字节，inverse/history mat4 按列打包。
+    空表上传完整哑元素但 num_colliders=0；positions/predicted 为不同 buffer，不做重复别名绑定。
+  - [算法事实] 每线程拥有一个粒子，按表顺序投影平面、球和旋转/非均匀缩放立方体，再计算摩擦。
+    相对位移 =pred-position-velocity_at(pred)×h=；不按逆质量过滤，挂点也接受碰撞。
+    沿用 CPU 的平面忽略旋转、球半径取 scale.x、立方体圆角和修正衰减，非通用精确 SDF。
+    球心、圆角零长度、碰撞器 dt=0 沿用 CPU 保护；零切向位移显式返回零摩擦，避免除零。
+  - [诊断输入] 保留 Z 鼓包及 bend_compliance=1e-4；增加静态平面 y=-2.15、球 (0,-1,0)/r=.35、
+    旋转立方体中心 (.65,-1,.1)/scale=(.4,.6,.4)。球和立方体初态有接触，平面另有主机专项接触测试。
+    GPU 批次仅验证静态上传；变换历史和运动摩擦有主机测试，未接实时动画/变换同步。
+  - [调度事实] 每整步 stabilize_sdf（整步 dt，仅写 positions）；每子步 predict → collide_sdf（h，仅写 predicted）
+    → [stretch → attachment → bending → apply]×iterations → finalize。预稳定不写速度，predict 刷新 predicted。
+    约束共享计数和挂点残余漂移语义不变；不额外增加末尾碰撞投影来掩盖残差。
   - [时间决定] 插件 finish 时从主世界 =Time<Fixed>::timestep()= 取一次配置，传给初始化、CPU step
     和 GPU substep uniform；未覆盖 Bevy 默认值时为 1/64 秒。60 步、2 子步、4 轮仍一次批量提交，
     不是 FixedUpdate 实时推进；示例 schedule runner 的 60Hz 仅控制轮询节奏。运行中改 timestep 不会同步。
@@ -58,17 +63,23 @@
      cargo test -j 2 -p bevy_cloth --lib gpu:: -- --nocapture
      cargo run -j 2 -p bevy_cloth --example velvet-gpu
    #+end_src
-   - [预期／待验证] 日志 =SolverReport= 应包含 289 粒子、60 步、2 子步、4 轮、step_time=0.015625（默认时）。
+   - [预期／待验证] 日志应包含 289 粒子、256 条 bend、3 个碰撞器、60 步、2 子步、4 轮、
+     step_time=.015625、bend_compliance=1e-4、margin=.06、friction=.1、正初始角度误差。
+     初始 SDF 最大修正应为正，initially_affected_particles>0；它们由 CPU 在输入上计算，不是 GPU 接触计数。
      =max_position_diff<=1e-3=、=max_velocity_diff<=1e-2= 才成功退出；非有限数据或长度不符直接拒绝。
-     这些是诊断容差，不是物理正确性或精确固定的验收标准。
+     保持原容差；接触分支或 acos 导致差异时先定位，不自动放宽。它们不是物理正确性的验收标准。
    - 检查 =gpu/cpu_max_pin_drift= 和 =gpu/cpu_max_lra_violation=：前者为零 rest 到槽的距离，
      后者为活动正 rest 约束超 target 的最大值。非零不自动判错，先比较两边与迭代数关系。
-   - 若两边差异过大：查 =build_attach_csr= 的 offsets/entries、slot positions 与 upload bindings；
-     核对默认网格每粒子 4 条 incidence、总数 1156、末 offset=1156，再查 shader 的 target、skip 与追加 count。
-     若仅 pin drift 较大而两边接近，检查 stretch 的零修正是否仍计数与 apply 的平均，不能直接改成硬钳制。
+   - 检查 =gpu/cpu_max_sdf_correction=：用同一 CPU 投影函数评估两边最终位置的最大修正量，
+     不是真实穿透深度（尤其圆角 cube），也不要求为零；后续约束/finalize 可能再次带入碰撞体。
+   - 若两边差异大：查 layout 的 kind、矩阵列和 224 字节 stride（mat3=48、inverse=96、history=160），
+     再查 stabilize_sdf 是否每整步一次、是否取整步 dt；collide_sdf 是否在 predict 后且用 h。
+     接着按单粒子/单碰撞器比较 sdf_correction → 投影后 pred → velocity_at → 切向摩擦，逐层定位。
+     三类变形约束保持原 CSR；若仅残差大而 CPU/GPU 接近，先检查阶段顺序，不硬钳制挂点或加末尾投影。
+     输入已加碰撞器，不要求 pin/LRA 指标等于此前 bending 日志。
    - 本批无 Mesh 输出。后续渲染必须 GPU-direct 写 Mesh，参考 Bevy =shader_advanced/compute_mesh.rs=；
      不增加 CPU Mesh 读回路径。现有批末位置/速度读回仅用于数值诊断。
-   - 下一步先收集运行日志、共同诊断本批，再决定后续求解器小批；不自动扩展弯曲或碰撞。
+   - 下一步先收集 SDF 运行日志、共同诊断本批，再决定邻居查找/粒子碰撞小批，不自动扩展。
 
 * 后续方向（不是并行展开的任务清单）
   - [决定] 先推进完整 GPU 求解器，数值诊断随批次提供；可视化不作为本批前置条件。
@@ -86,13 +97,21 @@
       cargo test --offline -j 2 -p bevy_cloth --test solver_smoke -- --nocapture
     #+end_src
     源码缓存存在不等于离线依赖解析可行；不能据此声称本次测试通过。
-  - [本批实现，待运行] GPU/CPU 均启用挂点/LRA；保持共享 Jacobi 计数下的残余 pin drift，而非精确钳制。
-    已加长度/非有限值拒绝、比较容差与 pin/LRA 指标；不得据此声称物理或设备运行已通过。
-  - [本批执行] =rustfmt --edition 2024 --check=（四个改动 Rust 文件）与 =git diff --check= 均通过（exit 0）。
-    =cargo check --offline -j 2 -p bevy_cloth --all-targets= 和
-    =cargo test --offline -j 2 -p bevy_cloth --lib gpu:: -- --nocapture= 均在依赖解析阶段失败：
-    =no matching package named avian3d found=，由 workspace 的 =bevy_waltz= 引入；没有编译或执行测试。
-    =/dev/dri= 不存在，未尝试 GPU 运行；Cargo.lock 未改动。
+  - [用户实测，2026-10-28，attachment 批次] 主机端 10 个 gpu:: 单元测试全部通过；
+    shader 的保留字 target 改名 target_dist 后，Intel UHD 770 / Mesa 26.2.5 / Vulkan 对照通过。
+    289 粒子、60 步、2 子步、4 轮、dt=0.015625：位置最大差 4.0233413e-6，速度最大差 6.81061e-5；
+    CPU/GPU 最大 pin drift 均为 0.0002770424，最大 LRA violation 均为 0.008561343。
+    这是一次设备数值对照，不是完整求解器、视觉或性能验收，不覆盖新增 bending。
+  - [用户实测，2026-10-29，bending 批次] 16 个 gpu:: 主机测试全部通过（含三个预期 panic）；
+    UHD 770/Vulkan 的 60 步对照通过。位置最大差 2.1612686e-5，速度最大差 .00014673521；
+    CPU/GPU 最大 pin drift 均 .00041532516、LRA violation 均 .00935483。
+    bend=256、柔度=1e-4、初始角度误差=.1851091 rad；不是 SDF 批次或性能验收。
+  - [SDF 批次，2026-10-29] 新增 11 个测试，连同原测试预期共 27 个；正式 Cargo 测试待用户执行。
+    agent 的私有 target 离线 test/check 仍在 workspace avian3d 索引解析时失败；无 GPU 设备。
+    提取 CPU/打包模型到 /tmp 的局部 harness 27 项通过，但去掉 bytemuck derive、替换 slice cast，
+    不含 Bevy 集成或 shader，不能代替正式测试。局部 CPU fixture 实测初始最大修正 .25115085、
+    44 个初态受影响粒子，60 步后残余修正 .00940969，仅作主机诊断参考。
+    三个改动 Rust 文件的 rustfmt --check 和 git diff --check 通过；未验证 WESL 编译或 GPU 执行。
   - [代码事实／验收缺口] 子步测试只要求差值小于 1，不能据此宣称子步无关性。
     子步是把一次时间推进拆成更小步；其误差标准需随具体问题讨论。
   - 这些限制用于防止误读现有测试。是否在下一批处理，按求解器诊断需要讨论，不默认同时修复所有问题。

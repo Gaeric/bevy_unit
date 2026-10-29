@@ -14,20 +14,32 @@
   以下源路径以 workspace 根为起点：=../Velvet/Velvet/VtClothSolverGPU.hpp/.cu/.cuh=、
   =SpatialHashGPU.hpp/.cu/.cuh=、=Common.cuh/.hpp=、=VtBuffer.hpp=。本任务不修改该参考仓库。
 
-* 当前 GPU 原型（2026-10-28 源码检查，非运行验收）
-  - =src/gpu/solver.wesl= 有五阶段：预测、拉伸 gather、挂点/LRA gather、统一应用修正、更新位置与速度。
-  - =src/gpu/solver_gpu.rs= 建立粒子到拉伸及挂点约束的查询表，一次提交固定的 60 步，再读回位置和速度作 CPU 对照。
+* 当前 GPU 原型（2026-10-29；变形约束已有设备对照，SDF 待运行）
+  - =src/gpu/solver.wesl= 有八个入口：SDF 预稳定、预测、SDF 碰撞、拉伸 gather、挂点/LRA gather、弯曲 gather、统一应用修正、更新位置与速度。
+  - =src/gpu/solver_gpu.rs= 建立粒子到拉伸、挂点及弯曲约束的查询表，一次提交固定的 60 步，再读回位置和速度作 CPU 对照。
     它不是逐帧布料后端，未连接交互场景或渲染。
   - “每粒子收集修正”（gather）：一个线程查找该粒子的相关约束，只写自己的修正量。
     查询表采用 CSR，即连续数组加分段索引。求修正和应用修正分两次 dispatch（计算发射）执行。
-  - 本批挂点/LRA 已实现上传、绑定、kernel 和调度；弯曲、SDF 碰撞、空间哈希、自碰撞和法线仍未接入。
+  - 弯曲已通过用户主机的 16 项测试和一次设备对照；SDF 投影/摩擦已接入，设备运行待验。
+    SDF 每线程按碰撞器顺序更新自己的粒子，无 atomic 或 delta/count 平均；预稳定每整步一次，子步碰撞在 predict 后。
+    collider 224 字节（显式 kind、位置/scale、补齐 mat3、inverse/history mat4），独立 16 字节 uniform；布局共 3 个 storage。
+    平面、球、立方体圆角与表面速度沿用 CPU；保留球心/零 dt 等保护，零切向位移显式返回零摩擦。
+    静态球和旋转非均匀立方体初态有接触；动画上传未实现。空间哈希、自碰撞和法线仍未接入。
+  - bending CSR 每条 entry 编码为 =constraint_id×4+role=，保留每个端点角色（含重复粒子）；
+    约束为 32 字节 ={indices:vec4<u32>, rest_angle:f32, 三个 scalar pad}=。独立布局共 7 个 storage。
+    每粒子重新计算所关联二面角，选择自己的梯度，追加到 attachment 后的 delta/count；再统一 apply。
+    沿用 CPU 的退化三角形、正步长和完整分母有限值保护。CUDA 缺少部分保护，且先检查质量梯度和再加柔度；
+    因此全零逆质量但柔度为正时 CPU/GPU 仍计数，CUDA 跳过。未改 CPU 或参考仓库。
+    柔度使用 =bend_compliance/h²=，不含跨迭代累计 lambda 反馈；不是完整累计乘子形式的标准 XPBD。
   - attachment CSR offsets 为 N+1 个 u32；entry 为 ={slot:u32, rest:f32}=（8 字节），slot position 为 vec4。
     稳定分组保留每粒子的 CPU 表序，空表使用哑元素满足绑定尺寸但不访问；独立 layout 仅 7 个 storage。
   - 挂点在 stretch 后、apply 前追加 deltas/counts，CPU 对照保留 attach。零逆质量且 target>0 跳过，
     target=rest×stretchiness；dist>target 才追加修正。零 rest 挂点仍被共享计数平均，不改成精确钳制。
   - 主世界 Time<Fixed> timestep 一次传入批次（默认 1/64 秒），uniform 存子步时间；仍为批量提交，不是实时推进。
-  - 诊断含 pin drift/LRA violation、有限值/长度检查与比较容差，详见 [[file:plan.org::*当前批次：attachment/LRA（实现完成，运行待验）][当前批次]]。
-    Cargo 被 avian3d 离线索引阻塞，且无 GPU 设备，未运行验收；布局或 CPU/GPU 接近都不是独立正确性证明。
+  - 诊断含 pin drift/LRA violation、弯曲约束数、柔度、初始最大角度误差及数值比较，详见 [[file:plan.org][当前计划]]。
+    用户在 UHD 770/Vulkan 上分别通过 attachment 和 bending 对照；新增 SDF 尚待设备运行。
+    SDF 日志为 CPU 投影函数评估初态/最终位置的修正量，不是真实穿透深度或 GPU 接触计数。
+    agent 容器仍无 GPU，离线 Cargo 被 avian3d 索引阻塞；CPU/GPU 接近不是独立正确性证明。
 
 * 1. Velvet 的执行模型（参考事实）
 
@@ -69,7 +81,7 @@
 
   1. **分散写入与原子累加（scatter / atomic）**：Velvet 让每条约束把修正写入相关粒子；
      多线程可能写同一位置，因此使用浮点 =atomicAdd=，避免累加结果丢失。
-     当前 WGSL 拉伸和挂点/LRA 不用浮点原子，改为每粒子收集自己的修正；其他阶段的实现尚未决定。
+     当前 WGSL 拉伸、挂点/LRA 和弯曲不用浮点原子，改为每粒子收集自己的修正；碰撞阶段另行设计。
   2. =AtomicAdd(deltas, idx, val, reorder)=（.cu:13）轮换 x/y/z 的加法顺序以减少热点串行。
      这是源工程对原子累加的优化，不是当前 gather 路径的必做任务，也不是本项目已测性能结论。
   3. **法线**：源先清零，再按三角形原子累加，最后按顶点归一化。
@@ -109,18 +121,18 @@
 
   | 问题 | 当前做法或限制 | 尚需判断 |
   |------+----------------+----------|
-  | 多线程写同一粒子 | 当前拉伸采用每粒子收集修正，不请求浮点原子扩展 | 其他阶段的并行方式必须结合正确性与测量选择 |
+  | 多线程写同一粒子 | 拉伸、挂点、弯曲采用每粒子收集修正，不请求浮点原子扩展 | 碰撞阶段的并行方式必须结合正确性与测量选择 |
   | 分阶段执行 | 当前用独立 dispatch 分隔求修正与应用修正 | 不可用同一工作组内的屏障代替整个设备的阶段边界 |
   | 数据布局 | 当前将三维向量打包为四分量，统一参数放在 uniform 中 | 新数组与参数的对齐、读写权限和生命周期要独立核对 |
   | 邻居查找 | GPU 路径尚未实现 | 先解释要查哪些邻居及如何验证，再决定是否排序 |
   | 数组清空 | wgpu 的 =clear_buffer= 写零；源的空槽标记为全 1 | 若沿用非零标记，需另行填充；也可以在理解后改变表示 |
-  | 资源绑定 | 粒子布局有 3 个 storage，stretch/apply 布局有 7 个，attachment 独立布局有 7 个 | 扩展时核对实际设备 limits；未运行设备验证 |
+  | 资源绑定 | 粒子/SDF 布局各 3 个 storage；stretch/apply、attachment、bending 各 7 个 | 变形约束已通过一次设备对照；SDF 布局待运行 |
   | 渲染输出 | 当前仅批末位置/速度读回 CPU 作诊断 | 已决定后续 GPU-direct 写 Mesh，参考 Bevy shader_advanced/compute_mesh.rs；不加 CPU Mesh 读回 |
 
   原子操作是保证并发读改写不丢结果的操作。标准 WGSL 的原子类型为整数；
   当前原型不依赖浮点原子扩展。这是现状，不预先替未来所有硬件和算法作决定。
 
 * 6. 当前工作边界
-  用户已授权完整 GPU 求解器实现；本批仅完成 attachment/LRA，不同时补齐弯曲、排序和碰撞。
+  用户已授权完整 GPU 求解器实现；本批加入 SDF 碰撞，不同时补齐邻居查找和粒子碰撞。
   下一步由用户运行本批诊断、双方定位，再决定后续求解器小批。运行方式与预期只在 [[file:plan.org][plan.org]] 维护。
   渲染之后采用 GPU-direct，不以 CPU Mesh 读回作为中间方案；本批数值诊断读回不属于渲染路径。
