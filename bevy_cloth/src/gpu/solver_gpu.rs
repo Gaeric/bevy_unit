@@ -19,6 +19,7 @@ use bevy::{
 use glam::{Mat4, Quat, Vec3};
 
 use crate::{
+    demo::scenes::{SceneId, comparison_scene, scene_params},
     gpu::{
         layout::{
             GpuAttachEntry, GpuBendConstraint, GpuParams, GpuSdfCollider, GpuVec3, NeighborParams,
@@ -1048,6 +1049,51 @@ fn run_neighbor_probe(
     report
 }
 
+/// Workload metadata for the shared Attach/Collision scenes, not the legacy live fixture.
+pub(super) fn scene_live_config(scene: SceneId) -> LiveConfig {
+    let definition = comparison_scene(scene).expect("supported GPU comparison scene");
+    let params = scene_params(scene);
+    let resolution = definition.cloths[0].resolution;
+    assert!(
+        definition
+            .cloths
+            .iter()
+            .all(|cloth| cloth.resolution == resolution)
+    );
+    let config = LiveConfig {
+        resolution,
+        layers: u32::try_from(definition.cloths.len()).expect("scene layer count"),
+        substeps: params.num_substeps,
+        iterations: params.num_iterations,
+        neighbor_capacity: params.max_num_neighbors,
+        hash_interval: params.effective_interleaved_hash(),
+        self_collision: params.enable_self_collision,
+        ..default()
+    };
+    config.validate().expect("valid shared scene configuration");
+    config
+}
+
+/// Exact CPU scene construction: no legacy fixture perturbation or compliance override.
+pub(super) fn scene_fixture(step_time: f32, scene: SceneId) -> (Solver, SimParams) {
+    assert!(step_time.is_finite() && step_time > 0.0);
+    let definition = comparison_scene(scene).expect("supported GPU comparison scene");
+    let mut params = scene_params(scene);
+    let mut solver = Solver::default();
+    for cloth in definition.cloths {
+        solver
+            .add_cloth(
+                &mut params,
+                &generate_cloth_mesh(cloth.resolution),
+                cloth.pose(),
+                &cloth.attached,
+                step_time,
+            )
+            .expect("shared scene meshes are source-layout grids");
+    }
+    (solver, params)
+}
+
 /// Identical layer rest meshes at .5 spacing, translated to .1 live spacing without
 /// modifying original positions or rest constraints. Resolution is a workload control,
 /// not a physically equivalent refinement: add_cloth derives diameter/mass/speed as before.
@@ -1147,9 +1193,62 @@ fn initialize_buffers(
         limits.max_buffer_size,
     );
     let (solver, params) = configured_fixture(step_time, live_config);
+    initialize_solver_buffers(
+        device,
+        queue,
+        cache,
+        pipeline,
+        solver,
+        params,
+        fixture_colliders(step_time),
+        step_time,
+        run_reference,
+    )
+}
+
+/// Shared upload/scheduling path; fixture policy stays in the calling constructor.
+fn initialize_solver_buffers(
+    device: &RenderDevice,
+    queue: &RenderQueue,
+    cache: &PipelineCache,
+    pipeline: &SolverPipeline,
+    solver: Solver,
+    params: SimParams,
+    colliders: Vec<SdfCollider>,
+    step_time: f32,
+    run_reference: bool,
+) -> SolverBuffers {
+    assert!(step_time.is_finite() && step_time > 0.0);
+    let config = neighbor_config(&params);
+    let n = solver.num_particles() as u64;
+    assert_eq!(n, u64::from(params.num_particles));
+    assert!(n > 0);
+    let required = [
+        n * size_of::<GpuVec3>() as u64,
+        (n + 1) * size_of::<u32>() as u64,
+        n * u64::from(config.capacity) * size_of::<u32>() as u64,
+        u64::from(config.num_buckets) * size_of::<u32>() as u64,
+        solver.constraints.stretch.indices.len() as u64 * 2 * size_of::<u32>() as u64,
+        solver.constraints.attach.particle_ids.len() as u64 * size_of::<GpuAttachEntry>() as u64,
+        solver.constraints.attach.slot_positions.len() as u64 * size_of::<GpuVec3>() as u64,
+        solver.constraints.bend.indices.len() as u64 * size_of::<GpuBendConstraint>() as u64,
+        solver.constraints.bend.indices.len() as u64 * 4 * size_of::<u32>() as u64,
+        colliders.len() as u64 * size_of::<GpuSdfCollider>() as u64,
+        size_of::<GpuSdfCollider>() as u64,
+    ]
+    .into_iter()
+    .max()
+    .expect("nonempty binding bounds");
+    let limits = device.limits();
+    assert!(
+        required <= u64::from(limits.max_storage_buffer_binding_size)
+            && required <= limits.max_buffer_size,
+        "cloth storage binding requires up to {required} bytes, device binding limit is {} bytes and buffer limit is {} bytes; reduce scene size/neighbor capacity",
+        limits.max_storage_buffer_binding_size,
+        limits.max_buffer_size,
+    );
     let initial_max_bend_angle_error =
         max_bend_angle_error(&solver.positions, &solver.constraints.bend);
-    let colliders = fixture_colliders(step_time);
     let (initial_max_sdf_correction, initially_affected_particles) =
         sdf_correction_diagnostic(&solver.positions, &colliders, params.collision_margin);
     if run_reference {
@@ -1170,7 +1269,6 @@ fn initialize_buffers(
         hash_interval = params.effective_interleaved_hash(),
         "GPU cloth solver initialized"
     );
-    let config = neighbor_config(&params);
     let initial_directed_contacts = if run_reference {
         let (initial_neighbors, initial_stats) =
             reference_neighbors(&solver.positions, &solver.initial_positions, config);
@@ -1641,6 +1739,50 @@ impl LiveSolver {
         ))
     }
 
+    /// Start a shared CPU/GPU scene without changing the legacy live constructor.
+    pub(super) fn new_scene(
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        cache: &PipelineCache,
+        pipeline: &SolverPipeline,
+        dt: f32,
+        scene: SceneId,
+    ) -> Self {
+        let (solver, params) = scene_fixture(dt, scene);
+        let definition = comparison_scene(scene).expect("supported GPU comparison scene");
+        let colliders = definition
+            .colliders
+            .iter()
+            .map(|collider| {
+                if collider.enabled {
+                    SdfCollider::from_transform(collider.kind, collider.initial_transform(), dt)
+                } else {
+                    SdfCollider::disabled()
+                }
+            })
+            .collect();
+        Self(initialize_solver_buffers(
+            device, queue, cache, pipeline, solver, params, colliders, dt, false,
+        ))
+    }
+
+    /// Upload before the corresponding submit_step; collider topology cannot change in-place.
+    /// Keep caller-supplied history verbatim: CPU ColliderHistory starts translation-only,
+    /// so the first scene tick intentionally does not use the initial scaled sphere model.
+    pub(super) fn update_colliders(&mut self, queue: &RenderQueue, colliders: &[SdfCollider]) {
+        assert_eq!(
+            colliders.len(),
+            self.0.colliders.len(),
+            "fixed collider count"
+        );
+        queue.write_buffer(
+            &self.0._sdf_colliders,
+            0,
+            bytemuck::cast_slice(&pack_colliders(colliders)),
+        );
+        self.0.colliders.copy_from_slice(colliders);
+    }
+
     pub(super) fn positions(&self) -> &Buffer {
         &self.0.positions
     }
@@ -1685,7 +1827,7 @@ impl LiveSolver {
                 step_time: dt,
             }),
         );
-        // The fixture colliders have no motion, so their velocity remains zero at any dt.
+        // Any moving collider models/history must already be uploaded by update_colliders.
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("live cloth fixed tick"),
         });
@@ -2260,7 +2402,7 @@ mod tests {
     #[test]
     fn default_wrapper_matches_legacy_fixture_exactly() {
         let dt = 1.0 / 64.0;
-        let (actual, actual_params) = main_cloth_fixture(dt);
+        let (actual, actual_params) = configured_fixture(dt, &LiveConfig::default());
         let (configured, _) = configured_fixture(dt, &LiveConfig::default());
         assert_eq!(actual.positions, configured.positions);
         // Reconstruct the previous fixed fixture independently of configured_fixture.
@@ -2324,6 +2466,116 @@ mod tests {
         );
         assert_eq!(actual_params.particle_diameter, params.particle_diameter);
         assert_eq!(actual_params.max_speed, params.max_speed);
+    }
+
+    #[test]
+    fn scene_fixture_matches_cpu_initialization_without_legacy_overrides() {
+        let dt = 1.0 / 64.0;
+        for (scene, count, pins) in [
+            (SceneId::Attach, 1681, vec![0, 40, 1680, 1640]),
+            (SceneId::Collision, 289, vec![0, 16]),
+        ] {
+            let (actual, params) = scene_fixture(dt, scene);
+            let definition = comparison_scene(scene).unwrap();
+            let mut expected = Solver::default();
+            let mut expected_params = scene_params(scene);
+            for cloth in &definition.cloths {
+                let mesh = generate_cloth_mesh(cloth.resolution);
+                expected
+                    .add_cloth(
+                        &mut expected_params,
+                        &mesh,
+                        cloth.pose(),
+                        &cloth.attached,
+                        dt,
+                    )
+                    .unwrap();
+                let baked: Vec<_> = mesh
+                    .positions
+                    .iter()
+                    .map(|&position| cloth.pose().transform_point3(position))
+                    .collect();
+                assert_eq!(actual.positions, baked, "no fixture perturbation");
+            }
+            assert_eq!(actual.num_particles(), count);
+            assert_eq!(params, expected_params);
+            assert_eq!(params.bend_compliance, scene_params(scene).bend_compliance);
+            assert_eq!(params.bend_compliance, 0.0);
+            assert_eq!(actual.positions, expected.positions);
+            assert_eq!(actual.predicted, expected.predicted);
+            assert_eq!(actual.predicted, vec![Vec3::ZERO; count]);
+            assert_eq!(actual.initial_positions, expected.initial_positions);
+            assert_eq!(actual.velocities, vec![Vec3::ZERO; count]);
+            assert_eq!(actual.deltas, expected.deltas);
+            assert_eq!(actual.delta_counts, expected.delta_counts);
+            assert_eq!(actual.indices, expected.indices);
+            assert_eq!(
+                actual.constraints.inv_masses,
+                expected.constraints.inv_masses
+            );
+            for (i, &mass) in actual.constraints.inv_masses.iter().enumerate() {
+                assert_eq!(mass, if pins.contains(&(i as u32)) { 0.0 } else { 1.0 });
+            }
+            let attach = &actual.constraints.attach;
+            let cpu_attach = &expected.constraints.attach;
+            assert_eq!(attach.particle_ids, cpu_attach.particle_ids);
+            assert_eq!(attach.slot_ids, cpu_attach.slot_ids);
+            assert_eq!(attach.distances, cpu_attach.distances);
+            assert_eq!(attach.slot_positions, cpu_attach.slot_positions);
+            assert_eq!(attach.particle_ids.len(), count * pins.len());
+            assert_eq!(attach.slot_positions.len(), pins.len());
+            for (slot, &pin) in pins.iter().enumerate() {
+                assert_eq!(attach.slot_positions[slot], actual.positions[pin as usize]);
+                assert!(
+                    attach
+                        .particle_ids
+                        .iter()
+                        .zip(&attach.slot_ids)
+                        .zip(&attach.distances)
+                        .any(|((&particle, &target), &rest)| particle == pin
+                            && target == slot as u32
+                            && rest == 0.0)
+                );
+            }
+            assert_eq!(
+                actual.constraints.stretch.indices,
+                expected.constraints.stretch.indices
+            );
+            assert_eq!(
+                actual.constraints.stretch.lengths,
+                expected.constraints.stretch.lengths
+            );
+            assert_eq!(
+                actual.constraints.bend.indices,
+                expected.constraints.bend.indices
+            );
+            assert_eq!(
+                actual.constraints.bend.angles,
+                expected.constraints.bend.angles
+            );
+        }
+    }
+
+    #[test]
+    fn scene_live_config_tracks_shared_definition_and_keeps_other_defaults() {
+        let defaults = LiveConfig::default();
+        for (scene, resolution, count) in
+            [(SceneId::Attach, 40, 1681), (SceneId::Collision, 16, 289)]
+        {
+            let config = scene_live_config(scene);
+            let params = scene_params(scene);
+            assert!(config.validate().is_ok());
+            assert_eq!(config.resolution, resolution);
+            assert_eq!(config.layers, 1);
+            assert_eq!(config.particle_count(), count);
+            assert_eq!(config.substeps, params.num_substeps);
+            assert_eq!(config.iterations, params.num_iterations);
+            assert_eq!(config.neighbor_capacity, params.max_num_neighbors);
+            assert_eq!(config.hash_interval, params.effective_interleaved_hash());
+            assert_eq!(config.self_collision, params.enable_self_collision);
+            assert_eq!(config.start_paused, defaults.start_paused);
+            assert_eq!(config.gpu_timing, defaults.gpu_timing);
+        }
     }
 
     #[test]
@@ -2546,7 +2798,7 @@ mod tests {
 
     #[test]
     fn main_two_layer_fixture_has_real_eligible_contacts_and_finite_reference() {
-        let (mut cloth, params) = main_cloth_fixture(1.0 / 64.0);
+        let (mut cloth, params) = configured_fixture(1.0 / 64.0, &LiveConfig::default());
         assert_eq!(cloth.num_particles(), 578);
         assert_eq!(cloth.constraints.bend.indices.len(), 512);
         assert_eq!(cloth.constraints.stretch.indices.len(), 2112);

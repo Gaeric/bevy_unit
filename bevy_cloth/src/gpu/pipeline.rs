@@ -683,13 +683,32 @@ impl TimingWindow {
     }
 }
 
+/// HUD state only; values come from completed timestamp samples, never CPU submission time.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub(super) enum GpuTimingStatus {
+    #[default]
+    Off,
+    Unavailable,
+    Sampling,
+}
+
+#[derive(Clone, Default, Debug)]
+pub(super) struct GpuTimingReadout {
+    pub status: GpuTimingStatus,
+    pub completed: u32,
+    pub last_tick_mean_ms: Option<f64>,
+    pub last_tick_skipped: u64,
+}
+
 /// At most three live samples across ticks AND output, including untracked reservations.
 /// Warmup is deliberately external: call begin_tick only after the parent's 64-tick warmup.
 /// A reset never releases resources which may still be mapped or used by a deferred encoder.
 /// Query/readback resources are allocated per sample under this bound, not preallocated;
 /// allocation overhead is not amortized by a preallocated benchmark harness.
 pub(super) struct GpuTimings {
+    requested: bool,
     enabled: bool,
+    last_tick: Option<(f64, u64)>,
     detailed: bool,
     period_ns: f64,
     slots: Arc<AtomicUsize>,
@@ -717,7 +736,9 @@ impl GpuTimings {
             );
         }
         Self {
+            requested: enabled,
             enabled: enabled && supported && valid_period,
+            last_tick: None,
             detailed,
             period_ns,
             slots: Arc::new(AtomicUsize::new(0)),
@@ -725,6 +746,23 @@ impl GpuTimings {
             generation: None,
             windows: default(),
             skipped: [0; 2],
+        }
+    }
+
+    pub(super) fn snapshot(&self) -> GpuTimingReadout {
+        let status = if !self.requested {
+            GpuTimingStatus::Off
+        } else if !self.enabled {
+            GpuTimingStatus::Unavailable
+        } else {
+            GpuTimingStatus::Sampling
+        };
+        let last_tick = self.last_tick.filter(|_| self.enabled);
+        GpuTimingReadout {
+            status,
+            completed: self.windows[TimingKind::Tick.index()].count,
+            last_tick_mean_ms: last_tick.map(|(mean, _)| mean),
+            last_tick_skipped: last_tick.map_or(0, |(_, skipped)| skipped),
         }
     }
 
@@ -917,6 +955,11 @@ impl GpuTimings {
                 "cloth GPU output execution per frame (sum of existing layers; not CPU/queue/transfers/readback)"
             ),
         }
+        if matches!(sample.kind, TimingKind::Tick) {
+            self.last_tick = window.metrics[0]
+                .summary()
+                .map(|summary| (summary[0], self.skipped[index]));
+        }
         *window = default();
         self.skipped[index] = 0;
     }
@@ -926,9 +969,11 @@ impl GpuTimings {
             warn!("cloth GPU timing disabled; solver remains enabled: {reason}");
             self.enabled = false;
         }
+        self.last_tick = None;
     }
 
     pub(super) fn reset(&mut self) {
+        self.last_tick = None;
         self.windows = default();
         self.skipped = [0; 2];
         self.generation = None;
@@ -939,6 +984,40 @@ impl GpuTimings {
 #[cfg(test)]
 mod timing_tests {
     use super::*;
+
+    fn test_timings() -> GpuTimings {
+        GpuTimings {
+            requested: true,
+            enabled: true,
+            last_tick: None,
+            detailed: false,
+            period_ns: 1.0,
+            slots: Arc::new(AtomicUsize::new(0)),
+            pending: Vec::new(),
+            generation: None,
+            windows: default(),
+            skipped: [0; 2],
+        }
+    }
+
+    #[test]
+    fn readout_maps_request_support_and_completed_tick_state() {
+        let mut timings = test_timings();
+        timings.windows[0].add(65, [Some(2.0), None, None, None]);
+        timings.windows[1].add(90, [Some(99.0), None, None, None]);
+        timings.last_tick = Some((1.25, 7));
+        let snapshot = timings.snapshot();
+        assert_eq!(snapshot.status, GpuTimingStatus::Sampling);
+        assert_eq!(snapshot.completed, 1);
+        assert_eq!(snapshot.last_tick_mean_ms, Some(1.25));
+        assert_eq!(snapshot.last_tick_skipped, 7);
+        timings.disable("test mapping failure");
+        assert_eq!(timings.snapshot().status, GpuTimingStatus::Unavailable);
+        assert_eq!(timings.snapshot().last_tick_mean_ms, None);
+        assert_eq!(timings.snapshot().last_tick_skipped, 0);
+        timings.requested = false;
+        assert_eq!(timings.snapshot().status, GpuTimingStatus::Off);
+    }
 
     fn pair(begin: u64, end: u64) -> Vec<u8> {
         [begin.to_ne_bytes(), end.to_ne_bytes()].concat()
@@ -982,18 +1061,15 @@ mod timing_tests {
     #[test]
     fn reset_clears_windows_but_preserves_slot_reservations() {
         let slots = Arc::new(AtomicUsize::new(2));
-        let mut timings = GpuTimings {
-            enabled: true,
-            detailed: false,
-            period_ns: 1.0,
-            slots: Arc::clone(&slots),
-            pending: Vec::new(),
-            generation: Some(4),
-            windows: default(),
-            skipped: [3, 5],
-        };
+        let mut timings = test_timings();
+        timings.slots = Arc::clone(&slots);
+        timings.last_tick = Some((2.5, 3));
+        timings.skipped = [3, 5];
+        timings.generation = Some(4);
         timings.windows[0].add(9, [Some(1.0), None, None, None]);
         timings.reset();
+        assert_eq!(timings.snapshot().last_tick_mean_ms, None);
+        assert_eq!(timings.snapshot().status, GpuTimingStatus::Sampling);
         assert_eq!(timings.windows[0].count, 0);
         assert_eq!(timings.skipped, [0, 0]);
         assert_eq!(timings.generation, None);

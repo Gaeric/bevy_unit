@@ -99,6 +99,116 @@ pub fn scene_params(id: SceneId) -> SimParams {
     params
 }
 
+/// Shared fixtures for the first CPU/GPU comparison batch. Parameters remain in `scene_params`.
+pub struct ComparisonScene {
+    pub cloths: Vec<ClothSpec>,
+    /// Source spawn order: ground first, then sphere.
+    pub colliders: Vec<ColliderSpec>,
+}
+
+/// Analytic collider description; model matrices include the shape's scale exactly once.
+#[derive(Clone)]
+pub struct ColliderSpec {
+    pub kind: ColliderKind,
+    pub radius: f32,
+    pub half_extents: Vec3,
+    pub position: Vec3,
+    pub motion: ColliderMotion,
+    pub enabled: bool,
+}
+
+impl ColliderSpec {
+    /// Initial world model, independent of the animation clock.
+    pub fn initial_transform(&self) -> Mat4 {
+        let scale = match self.kind {
+            ColliderKind::Sphere => Vec3::splat(self.radius),
+            ColliderKind::Cube => self.half_extents * 2.0,
+            ColliderKind::Plane => Vec3::ONE,
+        };
+        Mat4::from_scale_rotation_translation(scale, Quat::IDENTITY, self.position)
+    }
+
+    /// World model at simulation time, including shape scale.
+    ///
+    /// Comparison fixtures use only Static and SweepZ. Other demo-only motions retain their
+    /// initial pose here; their existing CPU animation remains in `animate_colliders`.
+    pub fn transform_at(&self, seconds: f32) -> Mat4 {
+        let mut model = self.initial_transform();
+        if self.motion == ColliderMotion::SweepZ {
+            model.w_axis = sweep_z_position(self.radius, seconds).extend(1.0);
+        }
+        model
+    }
+}
+
+/// `SceneClothCollision` sphere center, shared by CPU animation and comparison fixtures.
+pub fn sweep_z_position(radius: f32, seconds: f32) -> Vec3 {
+    Vec3::new(0.0, radius, -(seconds * 2.0).cos())
+}
+
+/// Only Attach and Collision are supported in this comparison batch.
+pub fn comparison_scene(id: SceneId) -> Option<ComparisonScene> {
+    let (cloth, sphere) = match id {
+        SceneId::Attach => {
+            let resolution = 40;
+            (
+                ClothSpec {
+                    resolution,
+                    texture: 1,
+                    position: Vec3::new(0.0, 1.5, 1.0),
+                    rotation: Vec3::new(90.0, 0.0, 0.0),
+                    attached: vec![
+                        0,
+                        resolution,
+                        (resolution + 1) * (resolution + 1) - 1,
+                        (resolution + 1) * resolution,
+                    ],
+                },
+                ColliderSpec {
+                    kind: ColliderKind::Sphere,
+                    radius: 0.5,
+                    half_extents: Vec3::ONE,
+                    position: Vec3::new(0.0, 0.5, 0.0),
+                    motion: ColliderMotion::Static,
+                    enabled: true,
+                },
+            )
+        }
+        SceneId::Collision => (
+            ClothSpec {
+                resolution: 16,
+                texture: 2,
+                position: Vec3::new(0.0, 2.5, 0.0),
+                rotation: Vec3::ZERO,
+                attached: vec![0, 16],
+            },
+            ColliderSpec {
+                kind: ColliderKind::Sphere,
+                radius: 0.6,
+                half_extents: Vec3::ONE,
+                position: Vec3::new(0.0, 0.6, -1.0),
+                motion: ColliderMotion::SweepZ,
+                enabled: true,
+            },
+        ),
+        _ => return None,
+    };
+    Some(ComparisonScene {
+        cloths: vec![cloth],
+        colliders: vec![
+            ColliderSpec {
+                kind: ColliderKind::Plane,
+                radius: 0.0,
+                half_extents: Vec3::ONE,
+                position: Vec3::ZERO,
+                motion: ColliderMotion::Static,
+                enabled: true,
+            },
+            sphere,
+        ],
+    })
+}
+
 /// the assets and solver state a scene build needs, grouped so the helper signatures stay short.
 #[derive(SystemParam)]
 pub struct SceneContext<'w, 's> {
@@ -167,55 +277,33 @@ fn build_scene(context: &mut SceneContext, id: SceneId) {
 
 /// `SceneClothAttach`: res 40 pinned at all four corners, over a static sphere.
 fn scene_attach(context: &mut SceneContext) {
-    spawn_ground(context);
-
-    let resolution = 40;
-    spawn_sphere(
-        context,
-        0.5,
-        Vec3::new(0.0, 0.5, 0.0),
-        ColliderMotion::Static,
-        true,
-    );
-    spawn_cloth(
-        context,
-        ClothSpec {
-            resolution,
-            texture: 1,
-            position: Vec3::new(0.0, 1.5, 1.0),
-            rotation: Vec3::new(90.0, 0.0, 0.0),
-            // the two ends of the top row plus the two ends of the bottom row
-            attached: vec![
-                0,
-                resolution,
-                (resolution + 1) * (resolution + 1) - 1,
-                (resolution + 1) * resolution,
-            ],
-        },
-    );
+    spawn_comparison_scene(context, SceneId::Attach);
 }
 
 /// `SceneClothCollision`: res 16 hanging from its top edge, a sphere sweeping `z = -cos(2t)`.
 fn scene_collision(context: &mut SceneContext) {
-    spawn_ground(context);
+    spawn_comparison_scene(context, SceneId::Collision);
+}
 
-    spawn_sphere(
-        context,
-        0.6,
-        Vec3::new(0.0, 0.6, -1.0),
-        ColliderMotion::SweepZ,
-        true,
-    );
-    spawn_cloth(
-        context,
-        ClothSpec {
-            resolution: 16,
-            texture: 2,
-            position: Vec3::new(0.0, 2.5, 0.0),
-            rotation: Vec3::ZERO,
-            attached: vec![0, 16],
-        },
-    );
+/// Keep the CPU visuals and history initialization in the existing spawn helpers.
+fn spawn_comparison_scene(context: &mut SceneContext, id: SceneId) {
+    let scene = comparison_scene(id).expect("CPU comparison builders use supported scenes");
+    for collider in scene.colliders {
+        match collider.kind {
+            ColliderKind::Plane => spawn_ground(context),
+            ColliderKind::Sphere => spawn_sphere(
+                context,
+                collider.radius,
+                collider.position,
+                collider.motion,
+                collider.enabled,
+            ),
+            ColliderKind::Cube => unreachable!("comparison batch contains only ground and sphere"),
+        }
+    }
+    for cloth in scene.cloths {
+        spawn_cloth(context, cloth);
+    }
 }
 
 /// `SceneClothSelfCollision`: res 60, no attachment, `substeps 8` / `friction 0.3`.
@@ -325,21 +413,29 @@ fn scene_swirl(context: &mut SceneContext) {
 }
 
 /// one `SpawnCloth` call.
-struct ClothSpec {
-    resolution: u32,
-    texture: u32,
-    position: Vec3,
+#[derive(Clone)]
+pub struct ClothSpec {
+    pub resolution: u32,
+    pub texture: u32,
+    pub position: Vec3,
     /// the source's `Transform::rotation`, in degrees
-    rotation: Vec3,
+    pub rotation: Vec3,
     /// pinned particle ids, in the source's order
-    attached: Vec<u32>,
+    pub attached: Vec<u32>,
+}
+
+impl ClothSpec {
+    /// Pose baked into particle positions by both CPU and GPU scene construction.
+    pub fn pose(&self) -> Mat4 {
+        source_pose(self.position, self.rotation)
+    }
 }
 
 /// `Scene.hpp::SpawnCloth` + `Actor::Initialize`: the pose is baked into the mesh by `add_cloth`,
 /// so the entity itself stays at `Transform::IDENTITY` (plan.org §4-1).
 fn spawn_cloth(context: &mut SceneContext, spec: ClothSpec) {
     let cloth = generate_cloth_mesh(spec.resolution);
-    let pose = source_pose(spec.position, spec.rotation);
+    let pose = spec.pose();
 
     let offset = context
         .solver

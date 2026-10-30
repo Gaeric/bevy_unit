@@ -20,7 +20,10 @@ use bevy::{
 
 use crate::{
     demo::{
-        plugin::{SimClock, SimParamsRes, SimStateRes, SolverRes, StatsRes},
+        plugin::{
+            CpuStepTiming, SimClock, SimParamsRes, SimStateRes, SolverRes, StatsRes,
+            reset_cpu_step_timing,
+        },
         scenes::{self, CurrentScene},
     },
     sim::params::SimParams,
@@ -73,7 +76,7 @@ impl Plugin for ClothUiPlugin {
             .add_systems(
                 Update,
                 (
-                    update_stats_text,
+                    update_stats_text.after(reset_cpu_step_timing),
                     apply_hide_gui,
                     apply_wireframe,
                     draw_particles,
@@ -368,13 +371,18 @@ fn update_stats_text(
     solver: Res<SolverRes>,
     clock: Res<SimClock>,
     stats: Res<StatsRes>,
+    timing: Res<CpuStepTiming>,
     mut text: Single<&mut Text, With<StatsText>>,
 ) {
+    let solve_time = match timing.avg_ms {
+        Some(avg_ms) => format!("CPU solve avg {avg_ms:.2} ms/tick (64 ticks)"),
+        None => format!("CPU solve avg pending ({}/64 ticks)", timing.samples),
+    };
     text.0 = format!(
-        "particles {}\nt {:.2}s   step {:.2}ms\nmax|v| {:.2}   clamp {}\nstretch max {:.2e}\navg {:.2e}   pairs {}",
+        "particles {}\nt {:.2}s\n{}\nmax|v| {:.2}   clamp {}\nstretch max {:.2e}\navg {:.2e}   pairs {}",
         solver.0.num_particles(),
         clock.0.seconds(),
-        stats.0.step_time.as_secs_f64() * 1000.0,
+        solve_time,
         stats.0.max_speed,
         stats.0.clamped,
         stats.0.max_stretch_error,

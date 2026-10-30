@@ -47,6 +47,35 @@ pub struct SimStateRes(pub SimState);
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct StatsRes(pub StepStats);
 
+/// CPU solve time per completed fixed tick, published in non-overlapping 64-tick windows.
+/// Each sample includes all substeps and normals, but excludes diagnostics and mesh writeback.
+#[derive(Resource, Default)]
+pub struct CpuStepTiming {
+    /// Mean milliseconds per tick in the last completed window; absent until 64 ticks finish.
+    pub avg_ms: Option<f64>,
+    /// Completed ticks accumulated toward the next published mean.
+    pub samples: u32,
+    elapsed: std::time::Duration,
+}
+
+impl CpuStepTiming {
+    pub const WINDOW_TICKS: u32 = 64;
+
+    fn record(&mut self, elapsed: std::time::Duration) {
+        self.elapsed += elapsed;
+        self.samples += 1;
+        if self.samples == Self::WINDOW_TICKS {
+            self.avg_ms = Some(self.elapsed.as_secs_f64() * 1000.0 / Self::WINDOW_TICKS as f64);
+            self.samples = 0;
+            self.elapsed = std::time::Duration::ZERO;
+        }
+    }
+
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// `FixedUpdate` order. named so that a later move into another physics crate's schedule is one
 /// `.in_set(...)` (plan.org §8-5).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -129,6 +158,7 @@ impl Plugin for ClothPlugin {
             .init_resource::<SimClock>()
             .init_resource::<Colliders>()
             .init_resource::<StatsRes>()
+            .init_resource::<CpuStepTiming>()
             .init_resource::<scenes::CurrentScene>()
             .init_resource::<scenes::PendingScene>()
             .configure_sets(
@@ -161,7 +191,22 @@ impl Plugin for ClothPlugin {
             )
             // the scene registry owns spawn / switch / reset; `Update` applies pending switches
             .add_systems(Startup, scenes::setup_initial_scene)
+            .add_systems(
+                Update,
+                reset_cpu_step_timing.before(scenes::apply_scene_switch),
+            )
             .add_systems(Update, scenes::apply_scene_switch);
+    }
+}
+
+/// Scene switching replaces the solver, including when reset reloads the same scene.
+/// Check the request before it is consumed, not solver change detection (every tick writes it).
+pub(super) fn reset_cpu_step_timing(
+    pending: Res<scenes::PendingScene>,
+    mut timing: ResMut<CpuStepTiming>,
+) {
+    if pending.0.is_some() {
+        timing.reset();
     }
 }
 
@@ -184,7 +229,7 @@ fn animate_colliders(
         match collider.motion {
             ColliderMotion::Static => {}
             ColliderMotion::SweepZ => {
-                transform.translation = Vec3::new(0.0, collider.radius, -(t * 2.0).cos());
+                transform.translation = scenes::sweep_z_position(collider.radius, t);
             }
             ColliderMotion::FrictionSweep => {
                 // `SceneClothFriction` offsets the clock by half a second
@@ -248,6 +293,7 @@ fn step_solver(
     colliders: Res<Colliders>,
     mut solver: ResMut<SolverRes>,
     mut stats: ResMut<StatsRes>,
+    mut timing: ResMut<CpuStepTiming>,
 ) {
     if solver.0.num_particles() == 0 {
         return;
@@ -255,6 +301,8 @@ fn step_solver(
 
     let started = Instant::now();
     solver.0.step(&params.0, &colliders.0, time.delta_secs());
+    let elapsed = started.elapsed();
+    timing.record(elapsed);
 
     stats.0 = measure(
         &solver.0.positions,
@@ -275,6 +323,63 @@ pub fn simulation_should_run(state: Res<SimStateRes>) -> bool {
 /// consume the one-shot step request so the next fixed tick waits for another key press.
 fn clear_step_request(mut state: ResMut<SimStateRes>) {
     state.0.step = false;
+}
+
+#[cfg(test)]
+mod cpu_step_timing_tests {
+    use super::CpuStepTiming;
+    use std::time::Duration;
+
+    #[test]
+    fn publishes_only_after_64_completed_ticks() {
+        let mut timing = CpuStepTiming::default();
+        for sample in 1..CpuStepTiming::WINDOW_TICKS {
+            timing.record(Duration::from_millis(2));
+            assert_eq!(timing.samples, sample);
+            assert_eq!(timing.avg_ms, None);
+        }
+        timing.record(Duration::from_millis(2));
+        assert_eq!(timing.avg_ms, Some(2.0));
+        assert_eq!(timing.samples, 0);
+    }
+
+    #[test]
+    fn weights_ticks_equally_and_publishes_nonoverlapping_windows() {
+        let mut timing = CpuStepTiming::default();
+        // Different frame groupings do not matter: each completed fixed tick has equal weight.
+        for ticks_in_frame in [1, 3, 20, 40] {
+            for _ in 0..ticks_in_frame {
+                timing.record(Duration::from_millis(ticks_in_frame));
+            }
+        }
+        let expected = (1.0 + 9.0 + 400.0 + 1600.0) / 64.0;
+        assert!((timing.avg_ms.unwrap() - expected).abs() < 1e-10);
+        for _ in 0..63 {
+            timing.record(Duration::from_millis(4));
+            assert!((timing.avg_ms.unwrap() - expected).abs() < 1e-10);
+        }
+        timing.record(Duration::from_millis(4));
+        assert_eq!(timing.avg_ms, Some(4.0));
+        assert_eq!(timing.samples, 0);
+    }
+
+    #[test]
+    fn reset_clears_published_and_partial_windows() {
+        let mut timing = CpuStepTiming::default();
+        for _ in 0..70 {
+            timing.record(Duration::from_millis(9));
+        }
+        assert_eq!(timing.avg_ms, Some(9.0));
+        assert_eq!(timing.samples, 6);
+        timing.reset();
+        assert_eq!(timing.avg_ms, None);
+        assert_eq!(timing.samples, 0);
+        assert_eq!(timing.elapsed, Duration::ZERO);
+        for _ in 0..CpuStepTiming::WINDOW_TICKS {
+            timing.record(Duration::from_millis(1));
+        }
+        assert_eq!(timing.avg_ms, Some(1.0));
+    }
 }
 
 fn writeback_cloth_mesh(

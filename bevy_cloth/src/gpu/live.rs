@@ -4,6 +4,7 @@ use bevy::{
     asset::{AssetPath, RenderAssetUsages, embedded_asset, embedded_path, load_embedded_asset},
     camera::visibility::NoFrustumCulling,
     core_pipeline::schedule::camera_driver,
+    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin},
     material::descriptor::{
         BindGroupLayoutDescriptor, CachedComputePipelineId, ComputePipelineDescriptor,
         RenderPipelineDescriptor,
@@ -39,22 +40,99 @@ use std::{
 
 use super::{
     layout::NeighborStats,
-    pipeline::{GpuTimings, SolverPipeline, WORKGROUP_SIZE},
-    solver_gpu::{LiveConfig, LiveSolver, configured_fixture, fixture_colliders},
+    pipeline::{GpuTimingReadout, GpuTimingStatus, GpuTimings, SolverPipeline, WORKGROUP_SIZE},
+    solver_gpu::{
+        LiveConfig, LiveSolver, configured_fixture, fixture_colliders, scene_fixture,
+        scene_live_config,
+    },
 };
-use crate::sim::{
-    collide::{ColliderKind, SdfCollider},
-    mesh_gen::generate_cloth_mesh,
+use crate::{
+    demo::{
+        OrbitCamera, OrbitCameraPlugin,
+        plugin::FIXED_HZ,
+        scenes::{SceneId, comparison_scene},
+    },
+    sim::{
+        collide::{ColliderKind, SdfCollider},
+        mesh_gen::generate_cloth_mesh,
+    },
 };
+
+/// Startup choice for the shared scene comparison; solver parameters come from the scene.
+#[derive(Resource, Clone, Debug)]
+pub struct GpuSceneConfig {
+    pub scene: SceneId,
+    pub start_paused: bool,
+    pub gpu_timing: bool,
+}
+
+impl Default for GpuSceneConfig {
+    fn default() -> Self {
+        Self {
+            scene: SceneId::Attach,
+            start_paused: false,
+            gpu_timing: false,
+        }
+    }
+}
+
+/// Separate CPU/GPU comparison entry point; first batch supports scenes 1 and 2 only.
+pub struct SolverScenesPlugin;
+
+impl Plugin for SolverScenesPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<GpuSceneConfig>();
+        let config = app.world().resource::<GpuSceneConfig>().clone();
+        assert!(
+            comparison_scene(config.scene).is_some(),
+            "unsupported GPU scene"
+        );
+        let live = LiveConfig {
+            start_paused: config.start_paused,
+            gpu_timing: config.gpu_timing,
+            ..scene_live_config(config.scene)
+        };
+        app.insert_resource(live)
+            .insert_resource(Time::<Fixed>::from_hz(FIXED_HZ))
+            .insert_resource(LiveTicks(Arc::new(Mutex::new(TickQueue {
+                scene: Some(config.scene),
+                ..default()
+            }))))
+            .add_plugins((SolverLivePlugin, OrbitCameraPlugin))
+            .add_systems(PreUpdate, rebuild_scene_visuals.after(controls))
+            .add_systems(
+                PostUpdate,
+                sync_scene_guides
+                    .before(TransformSystems::Propagate)
+                    .before(bevy::asset::AssetEventSystems),
+            );
+    }
+}
 
 #[derive(Default)]
 struct TickQueue {
     ready: bool,
     generation: u64,
     pending: VecDeque<f32>,
+    scene: Option<SceneId>,
+    submitted_ticks: u64,
+    timing: Option<(u64, u64, GpuTimingReadout)>,
 }
 
 impl TickQueue {
+    fn publish_timing(&mut self, generation: u64, total_ticks: u64, timing: GpuTimingReadout) {
+        if self.generation == generation {
+            self.timing = Some((generation, total_ticks, timing));
+        }
+    }
+
+    fn timing_snapshot(&self) -> Option<(u64, GpuTimingReadout)> {
+        self.timing
+            .as_ref()
+            .filter(|(generation, _, _)| *generation == self.generation)
+            .map(|(_, total_ticks, timing)| (*total_ticks, timing.clone()))
+    }
+
     fn push(&mut self, paused: bool, single_steps: &mut u32, dt: f32) {
         if !self.ready || (paused && *single_steps == 0) {
             return;
@@ -70,9 +148,19 @@ impl TickQueue {
         std::mem::take(&mut self.pending)
     }
 
+    fn take_until(&mut self, tick_limit: u64) -> VecDeque<f32> {
+        let count = tick_limit
+            .saturating_sub(self.submitted_ticks)
+            .min(self.pending.len() as u64) as usize;
+        self.submitted_ticks += count as u64;
+        self.pending.drain(..count).collect()
+    }
+
     fn reset(&mut self) {
+        self.timing = None;
         self.pending.clear();
         self.ready = false;
+        self.submitted_ticks = 0;
         self.generation = self
             .generation
             .checked_add(1)
@@ -98,6 +186,24 @@ fn controls(
     ticks: Res<LiveTicks>,
     mut guides: Query<&mut Visibility, With<ColliderGuide>>,
 ) {
+    let next_scene = if keys.just_pressed(KeyCode::Digit1) {
+        Some(SceneId::Attach)
+    } else if keys.just_pressed(KeyCode::Digit2) {
+        Some(SceneId::Collision)
+    } else {
+        None
+    };
+    if let Some(scene) = next_scene {
+        let mut requests = ticks.0.lock().expect("live cloth ticks");
+        if requests.scene.is_some() {
+            requests.scene = Some(scene);
+            requests.reset();
+            controls.paused = true;
+            controls.single_steps = 0;
+            info!(?scene, "GPU scene selected; initial state paused");
+            return;
+        }
+    }
     if keys.just_pressed(KeyCode::KeyR) {
         controls.paused = true;
         controls.single_steps = 0;
@@ -301,6 +407,64 @@ impl LiveStats {
 #[extract_app(RenderApp)]
 struct LiveMeshes {
     layers: Vec<(Handle<Mesh>, u32, u32)>,
+    generation: u64,
+    scene: Option<SceneId>,
+    /// Main-world tick boundary used to draw moving collider guides for this extraction.
+    tick_limit: u64,
+}
+
+#[derive(Component)]
+struct SceneVisual;
+
+#[derive(Component)]
+struct SceneGuide(usize);
+
+#[derive(Default)]
+struct SceneRenderState {
+    motion: Option<SceneMotion>,
+    output_frame: u64,
+}
+
+/// CPU animation uses frame * fixed dt, with translation-only initial collider history.
+struct SceneMotion {
+    scene: SceneId,
+    frame: u64,
+    previous: Vec<Mat4>,
+}
+
+impl SceneMotion {
+    fn new(scene: SceneId) -> Self {
+        let definition = comparison_scene(scene).expect("supported comparison scene");
+        Self {
+            scene,
+            frame: 0,
+            previous: definition
+                .colliders
+                .iter()
+                .map(|collider| Mat4::from_translation(collider.position))
+                .collect(),
+        }
+    }
+
+    fn advance(&mut self, dt: f32) -> Vec<SdfCollider> {
+        self.frame += 1;
+        let seconds = self.frame as f32 * dt;
+        let definition = comparison_scene(self.scene).expect("supported comparison scene");
+        definition
+            .colliders
+            .iter()
+            .zip(&mut self.previous)
+            .map(|(spec, previous)| {
+                if !spec.enabled {
+                    return SdfCollider::disabled();
+                }
+                let model = spec.transform_at(seconds);
+                let collider = SdfCollider::with_history(spec.kind, model, *previous, dt);
+                *previous = model;
+                collider
+            })
+            .collect()
+    }
 }
 
 /// Separate from the headless plugin: never installs its one-shot diagnostic system.
@@ -325,12 +489,21 @@ impl Plugin for SolverLivePlugin {
             paused: start_paused,
             single_steps: 0,
         });
+        if !app.is_plugin_added::<FpsOverlayPlugin>() {
+            app.add_plugins(FpsOverlayPlugin {
+                config: FpsOverlayConfig {
+                    text_config: TextFont::from_font_size(14.0),
+                    ..default()
+                },
+            });
+        }
         app.init_resource::<LiveTicks>()
             .add_plugins((
                 MaterialPlugin::<LiveMaterial>::default(),
                 ExtractResourcePlugin::<LiveMeshes>::default(),
             ))
-            .add_systems(Startup, setup)
+            .add_systems(Startup, (setup, setup_timing_hud))
+            .add_systems(Update, update_timing_hud)
             .add_systems(PreUpdate, controls.after(bevy::input::InputSystems))
             .add_systems(FixedUpdate, request_tick);
         let ticks = app.world().resource::<LiveTicks>().clone();
@@ -366,6 +539,59 @@ impl Plugin for SolverLivePlugin {
             .init_resource::<SolverPipeline>()
             .init_resource::<OutputPipeline>();
     }
+}
+
+#[derive(Component)]
+struct GpuTimingHud;
+
+fn timing_hud_text(requested: bool, snapshot: Option<(u64, GpuTimingReadout)>) -> String {
+    if !requested {
+        return "GPU solve avg: off (use --timing)".into();
+    }
+    let Some((ticks, timing)) = snapshot else {
+        return "GPU solve avg: -- ms/tick (64 samples) | warmup 0/64".into();
+    };
+    match timing.status {
+        GpuTimingStatus::Off => "GPU solve avg: off (use --timing)".into(),
+        GpuTimingStatus::Unavailable => "GPU solve avg: unavailable/error".into(),
+        GpuTimingStatus::Sampling => {
+            let progress = if ticks < TIMING_WARMUP_TICKS {
+                format!("warmup {ticks}/64")
+            } else {
+                format!("sampling {}/64", timing.completed)
+            };
+            let average = timing
+                .last_tick_mean_ms
+                .map_or_else(|| "--".into(), |mean| format!("{mean:.3}"));
+            format!(
+                "GPU solve avg {average} ms/tick (64 samples) | {progress} | skipped {} (last window)",
+                timing.last_tick_skipped
+            )
+        }
+    }
+}
+
+fn setup_timing_hud(mut commands: Commands, config: Res<LiveConfig>) {
+    commands.spawn((
+        GpuTimingHud,
+        Text::new(timing_hud_text(config.gpu_timing, None)),
+        TextFont::from_font_size(14.0),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(35.0),
+            left: px(0.0),
+            ..default()
+        },
+    ));
+}
+
+fn update_timing_hud(
+    ticks: Res<LiveTicks>,
+    config: Res<LiveConfig>,
+    mut text: Single<&mut Text, With<GpuTimingHud>>,
+) {
+    let snapshot = ticks.0.lock().expect("live cloth ticks").timing_snapshot();
+    text.0 = timing_hud_text(config.gpu_timing, snapshot);
 }
 
 #[derive(Resource)]
@@ -466,7 +692,7 @@ fn simulate_and_output(
     mut stats: Local<LiveStats>,
     mut timings: Local<Option<GpuTimings>>,
     mut active_generation: Local<u64>,
-    mut output_frame: Local<u64>,
+    mut scene_state: Local<SceneRenderState>,
 ) {
     let mut requests = ticks.0.lock().expect("live cloth ticks");
     let generation = requests.generation;
@@ -476,7 +702,7 @@ fn simulate_and_output(
         *solver = None;
         stats.reset();
         timings.reset();
-        *output_frame = 0;
+        *scene_state = SceneRenderState::default();
         *active_generation = generation;
         info!(
             generation,
@@ -485,18 +711,25 @@ fn simulate_and_output(
     }
     stats.collect(context.render_device(), generation);
     timings.collect(context.render_device(), generation);
+    requests.publish_timing(generation, stats.clock.total_ticks, timings.snapshot());
     // Startup is gated, but readiness stays latched once active: temporary missing assets
     // must not suppress new fixed ticks or discard requests already queued.
     let Some(meshes) = meshes else {
         return;
     };
+    if meshes.scene != requests.scene || (meshes.scene.is_some() && meshes.generation != generation)
+    {
+        return;
+    }
+    let scene_config = meshes.scene.map(scene_live_config);
+    let workload = scene_config.as_ref().unwrap_or(&config);
     let Some(output_pipeline) = cache.get_compute_pipeline(output.pipeline) else {
         return;
     };
     if !LiveSolver::ready(&cache, &pipeline) {
         return;
     }
-    let n = config.particle_count();
+    let n = workload.particle_count();
     // Re-fetch allocations and layouts: allocator slabs may be replaced/grown between frames.
     let mut targets = Vec::new();
     for (handle, offset, count) in &meshes.layers {
@@ -529,28 +762,49 @@ fn simulate_and_output(
         };
         targets.push((slice, range));
     }
-    if targets.len() != config.layers as usize {
+    if targets.len() != workload.layers as usize {
         return;
     }
     let solver = solver.get_or_insert_with(|| {
-        LiveSolver::new(
-            context.render_device(),
-            &queue,
-            &cache,
-            &pipeline,
-            dt.0,
-            &config,
-        )
+        if let Some(scene) = meshes.scene {
+            scene_state.motion = Some(SceneMotion::new(scene));
+            LiveSolver::new_scene(
+                context.render_device(),
+                &queue,
+                &cache,
+                &pipeline,
+                dt.0,
+                scene,
+            )
+        } else {
+            LiveSolver::new(
+                context.render_device(),
+                &queue,
+                &cache,
+                &pipeline,
+                dt.0,
+                &config,
+            )
+        }
     });
     assert_eq!(solver.num_particles(), n);
     requests.ready = true;
-    let pending = requests.take();
+    let pending = if meshes.scene.is_some() {
+        requests.take_until(meshes.tick_limit)
+    } else {
+        requests.take()
+    };
     drop(requests);
     for step_time in pending {
         let tick = stats.clock.total_ticks + 1;
         let mut sample = (tick > TIMING_WARMUP_TICKS)
-            .then(|| timings.begin_tick(context.render_device(), generation, tick, config.substeps))
+            .then(|| {
+                timings.begin_tick(context.render_device(), generation, tick, workload.substeps)
+            })
             .flatten();
+        if let Some(motion) = &mut scene_state.motion {
+            solver.update_colliders(&queue, &motion.advance(step_time));
+        }
         solver.submit_step(
             context.render_device(),
             &queue,
@@ -569,16 +823,16 @@ fn simulate_and_output(
         &queue,
         solver,
         generation,
-        stats_interval(&config),
+        stats_interval(workload),
     );
-    *output_frame = output_frame.saturating_add(1);
+    scene_state.output_frame = scene_state.output_frame.saturating_add(1);
     let mut output_sample = (stats.clock.total_ticks > TIMING_WARMUP_TICKS)
         .then(|| {
             timings.begin_output(
                 context.render_device(),
                 generation,
-                *output_frame,
-                config.layers,
+                scene_state.output_frame,
+                workload.layers,
             )
         })
         .flatten();
@@ -616,6 +870,11 @@ fn simulate_and_output(
         sample.map_on_submit(context.command_encoder());
         timings.track(sample);
     }
+    ticks.0.lock().expect("live cloth ticks").publish_timing(
+        generation,
+        stats.clock.total_ticks,
+        timings.snapshot(),
+    );
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -701,13 +960,191 @@ fn collider_guide_lines(collider: &SdfCollider) -> Vec<[f32; 3]> {
     vertices
 }
 
+/// Rebuild owned scene assets only; the legacy live fixture has no SceneVisual entities.
+fn rebuild_scene_visuals(
+    mut commands: Commands,
+    ticks: Res<LiveTicks>,
+    current: Option<Res<LiveMeshes>>,
+    time: Res<Time<Fixed>>,
+    visuals: Query<
+        (
+            Entity,
+            Option<&Mesh3d>,
+            Option<&MeshMaterial3d<LiveMaterial>>,
+        ),
+        With<SceneVisual>,
+    >,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<LiveMaterial>>,
+) {
+    let requests = ticks.0.lock().expect("live cloth ticks");
+    let Some(scene) = requests.scene else {
+        return;
+    };
+    if current.as_ref().is_some_and(|current| {
+        current.generation == requests.generation && current.scene == Some(scene)
+    }) {
+        return;
+    }
+    for (entity, mesh, material) in &visuals {
+        if let Some(mesh) = mesh {
+            meshes.remove(&mesh.0);
+        }
+        if let Some(material) = material {
+            materials.remove(&material.0);
+        }
+        commands.entity(entity).despawn();
+    }
+    spawn_scene_visuals(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        scene,
+        requests.generation,
+        time.timestep().as_secs_f32(),
+    );
+}
+
+fn spawn_scene_visuals(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<LiveMaterial>,
+    scene: SceneId,
+    generation: u64,
+    dt: f32,
+) {
+    let definition = comparison_scene(scene).expect("supported GPU comparison scene");
+    let (fixture, _) = scene_fixture(dt, scene);
+    let mut layers = Vec::new();
+    let mut offset = 0u32;
+    for cloth in &definition.cloths {
+        let source = generate_cloth_mesh(cloth.resolution);
+        let count = source.positions.len() as u32;
+        let mut edges = Vec::new();
+        for triangle in source.indices.chunks_exact(3) {
+            edges.extend_from_slice(&[
+                triangle[0],
+                triangle[1],
+                triangle[1],
+                triangle[2],
+                triangle[2],
+                triangle[0],
+            ]);
+        }
+        let initial: Vec<[f32; 3]> = fixture.positions[offset as usize..(offset + count) as usize]
+            .iter()
+            .map(|point| point.to_array())
+            .collect();
+        let mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::RENDER_WORLD)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, initial)
+            .with_inserted_indices(Indices::U32(edges));
+        let handle = meshes.add(mesh);
+        layers.push((handle.clone(), offset, count));
+        commands.spawn((
+            SceneVisual,
+            Mesh3d(handle),
+            NoFrustumCulling,
+            MeshMaterial3d(materials.add(LiveMaterial {
+                color: LinearRgba::new(0.1, 0.7, 1.0, 1.0),
+            })),
+        ));
+        offset += count;
+    }
+    for (index, spec) in definition.colliders.iter().enumerate() {
+        let collider = SdfCollider::from_transform(spec.kind, spec.initial_transform(), dt);
+        let mesh = Mesh::new(
+            PrimitiveTopology::LineList,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, collider_guide_lines(&collider));
+        commands.spawn((
+            SceneVisual,
+            SceneGuide(index),
+            ColliderGuide,
+            Mesh3d(meshes.add(mesh)),
+            NoFrustumCulling,
+            MeshMaterial3d(materials.add(LiveMaterial {
+                color: LinearRgba::new(0.5, 0.6, 0.5, 1.0),
+            })),
+        ));
+    }
+    let orbit = OrbitCamera::source();
+    commands.spawn((SceneVisual, Camera3d::default(), orbit.transform(), orbit));
+    commands.insert_resource(LiveMeshes {
+        layers,
+        generation,
+        scene: Some(scene),
+        tick_limit: 0,
+    });
+    info!(
+        ?scene,
+        generation,
+        particles = fixture.num_particles(),
+        dt,
+        "GPU comparison scene: 1/2 switch paused, Space pause, S tick, R reset paused, C guides; middle drag/wheel camera"
+    );
+}
+
+/// Snapshot the tick frontier before extraction so animated guides match the extracted output.
+fn sync_scene_guides(
+    ticks: Res<LiveTicks>,
+    current: Option<ResMut<LiveMeshes>>,
+    time: Res<Time<Fixed>>,
+    guides: Query<(&SceneGuide, &Mesh3d)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    let requests = ticks.0.lock().expect("live cloth ticks");
+    let Some(mut current) = current else {
+        return;
+    };
+    let Some(scene) = current.scene else {
+        return;
+    };
+    if current.generation != requests.generation || Some(scene) != requests.scene {
+        return;
+    }
+    current.tick_limit = requests.submitted_ticks + requests.pending.len() as u64;
+    let definition = comparison_scene(scene).expect("supported GPU comparison scene");
+    let seconds = current.tick_limit as f32 * time.timestep().as_secs_f32();
+    for (guide, handle) in &guides {
+        let spec = &definition.colliders[guide.0];
+        let model = if current.tick_limit == 0 {
+            spec.initial_transform()
+        } else {
+            spec.transform_at(seconds)
+        };
+        if let Some(mut mesh) = meshes.get_mut(&handle.0) {
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_POSITION,
+                collider_guide_lines(&SdfCollider::from_transform(
+                    spec.kind,
+                    model,
+                    time.timestep().as_secs_f32(),
+                )),
+            );
+        }
+    }
+}
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<LiveMaterial>>,
     time: Res<Time<Fixed>>,
     config: Res<LiveConfig>,
+    scene_config: Option<Res<GpuSceneConfig>>,
 ) {
+    if let Some(scene_config) = scene_config {
+        spawn_scene_visuals(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            scene_config.scene,
+            0,
+            time.timestep().as_secs_f32(),
+        );
+        return;
+    }
     let (fixture, _) = configured_fixture(time.timestep().as_secs_f32(), &config);
     let source = generate_cloth_mesh(config.resolution);
     // Indexed lines keep vertex/particle identity, unlike expanding each line endpoint.
@@ -753,7 +1190,12 @@ fn setup(
             NoFrustumCulling,
         ));
     }
-    commands.insert_resource(LiveMeshes { layers });
+    commands.insert_resource(LiveMeshes {
+        layers,
+        generation: 0,
+        scene: None,
+        tick_limit: 0,
+    });
     let guide_material = materials.add(LiveMaterial {
         color: LinearRgba::new(0.35, 0.45, 0.35, 1.0),
     });
@@ -778,6 +1220,129 @@ fn setup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timing_readout_rejects_old_generations_and_reset_clears_immediately() {
+        let mut queue = TickQueue::default();
+        let timing = GpuTimingReadout {
+            status: GpuTimingStatus::Sampling,
+            completed: 12,
+            last_tick_mean_ms: Some(2.5),
+            last_tick_skipped: 3,
+        };
+        queue.publish_timing(0, 100, timing.clone());
+        let text = timing_hud_text(true, queue.timing_snapshot());
+        assert!(text.contains("2.500 ms/tick (64 samples)"));
+        assert!(text.contains("sampling 12/64"));
+        assert!(text.contains("skipped 3"));
+        queue.reset();
+        assert!(queue.timing_snapshot().is_none());
+        queue.publish_timing(0, 101, timing.clone());
+        assert!(queue.timing_snapshot().is_none());
+        queue.publish_timing(
+            1,
+            7,
+            GpuTimingReadout {
+                last_tick_mean_ms: None,
+                ..timing
+            },
+        );
+        assert!(timing_hud_text(true, queue.timing_snapshot()).contains("warmup 7/64"));
+        assert!(timing_hud_text(false, None).contains("off (use --timing)"));
+        assert!(timing_hud_text(true, None).contains("warmup 0/64"));
+        queue.publish_timing(
+            1,
+            0,
+            GpuTimingReadout {
+                status: GpuTimingStatus::Unavailable,
+                ..default()
+            },
+        );
+        assert!(timing_hud_text(true, queue.timing_snapshot()).contains("unavailable/error"));
+    }
+
+    #[test]
+    fn scene_frontier_leaves_later_ticks_for_the_next_extraction() {
+        let mut queue = TickQueue {
+            ready: true,
+            scene: Some(SceneId::Collision),
+            ..default()
+        };
+        let mut steps = 0;
+        for _ in 0..3 {
+            queue.push(false, &mut steps, 1.0 / 60.0);
+        }
+        // Only the first two requests were represented in this extracted guide mesh.
+        assert_eq!(queue.take_until(2).len(), 2);
+        assert_eq!(queue.submitted_ticks, 2);
+        assert_eq!(queue.pending.len(), 1);
+        assert!(queue.take_until(2).is_empty());
+        assert_eq!(queue.take_until(3).len(), 1);
+        queue.reset();
+        assert_eq!(queue.scene, Some(SceneId::Collision));
+        assert_eq!(queue.submitted_ticks, 0);
+        assert_eq!(queue.generation, 1);
+        assert!(!queue.ready);
+        assert!(queue.pending.is_empty());
+    }
+
+    #[test]
+    fn scene_motion_preserves_cpu_first_history_and_each_previous_tick() {
+        let dt = 1.0 / 60.0;
+        for scene in [SceneId::Attach, SceneId::Collision] {
+            let definition = comparison_scene(scene).unwrap();
+            let mut motion = SceneMotion::new(scene);
+            let first = motion.advance(dt);
+            for (spec, collider) in definition.colliders.iter().zip(&first) {
+                assert_eq!(
+                    collider.last_transform,
+                    Mat4::from_translation(spec.position)
+                );
+                assert_eq!(
+                    *collider,
+                    SdfCollider::with_history(
+                        spec.kind,
+                        spec.transform_at(dt),
+                        Mat4::from_translation(spec.position),
+                        dt
+                    )
+                );
+            }
+            let second = motion.advance(dt);
+            for (spec, collider) in definition.colliders.iter().zip(&second) {
+                assert_eq!(
+                    *collider,
+                    SdfCollider::with_history(
+                        spec.kind,
+                        spec.transform_at(2.0 * dt),
+                        spec.transform_at(dt),
+                        dt
+                    )
+                );
+            }
+            // Recreating the motion state must restore frame zero and first-step history.
+            assert_eq!(SceneMotion::new(scene).advance(dt), first);
+        }
+    }
+
+    #[test]
+    fn scene_motion_uses_simulation_ticks_not_render_frames() {
+        let dt = 1.0 / 60.0;
+        let mut motion = SceneMotion::new(SceneId::Collision);
+        let mut colliders = Vec::new();
+        for _ in 0..60 {
+            colliders = motion.advance(dt);
+        }
+        assert_eq!(motion.frame, 60);
+        assert_eq!(
+            colliders[1].position,
+            crate::demo::scenes::sweep_z_position(0.6, 1.0)
+        );
+        let history = motion.previous.clone();
+        // No advance call while paused: neither frame nor history changes.
+        assert_eq!(motion.previous, history);
+        assert_eq!(motion.frame, 60);
+    }
 
     #[test]
     fn stats_interval_bounds_normal_window_at_largest_workload() {

@@ -25,7 +25,10 @@ pub struct ClothInputPlugin;
 
 impl Plugin for ClothInputPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, keyboard_shortcuts);
+        app.add_systems(
+            Update,
+            keyboard_shortcuts.before(crate::demo::plugin::reset_cpu_step_timing),
+        );
     }
 }
 
