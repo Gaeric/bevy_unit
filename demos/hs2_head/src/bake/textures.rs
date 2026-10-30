@@ -41,6 +41,19 @@ pub enum AddressMode {
     ClampBorder,
 }
 
+/// Image Texture node interpolation, independent of the image's color space.
+///
+/// Cubic is Blender's B-spline filter, evaluated by the recipe shader rather
+/// than by a hardware sampler. Currently only the skin eyebrow path implements
+/// it; do not assign Cubic to other slots without adding shader support.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum TextureInterpolation {
+    Nearest = 0,
+    Linear = 1,
+    Cubic = 2,
+}
+
 /// Stand-in used while a slot has no file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Placeholder {
@@ -62,61 +75,70 @@ pub struct TextureSlot {
     /// Whether the image is decoded from sRGB (Blender `csp=None`).
     pub is_srgb: bool,
     pub address: AddressMode,
+    pub interpolation: TextureInterpolation,
     pub placeholder: Placeholder,
 }
 
 impl TextureSlot {
-    /// sRGB image, tiled - the usual setting for albedo maps.
-    pub const fn srgb(path: &'static str) -> Self {
+    /// sRGB image, tiled; interpolation is specified separately.
+    pub const fn srgb(path: &'static str, interpolation: TextureInterpolation) -> Self {
         Self {
             path: Some(path),
             is_srgb: true,
             address: AddressMode::Repeat,
+            interpolation,
             placeholder: Placeholder::White,
         }
     }
 
-    /// Linear image, tiled - the usual setting for `csp='Non-Color'` maps.
-    pub const fn linear(path: &'static str) -> Self {
+    /// Non-color image, tiled. `linear` refers to color space, not filtering.
+    pub const fn linear(path: &'static str, interpolation: TextureInterpolation) -> Self {
         Self {
             path: Some(path),
             is_srgb: false,
             address: AddressMode::Repeat,
+            interpolation,
             placeholder: Placeholder::White,
         }
     }
 
-    /// Linear image clamped to the edge (Blender `EXTEND`).
-    pub const fn linear_clamped(path: &'static str) -> Self {
+    /// Non-color image clamped to the edge (Blender `EXTEND`).
+    pub const fn linear_clamped(path: &'static str, interpolation: TextureInterpolation) -> Self {
         Self {
             path: Some(path),
             is_srgb: false,
             address: AddressMode::ClampEdge,
+            interpolation,
             placeholder: Placeholder::FlatNormal,
         }
     }
 
-    /// Clamped linear mask whose placeholder is transparent black.
+    /// Non-color, edge-clamped mask with a transparent-black placeholder.
     ///
     /// Masks such as the eyebrow sheet are read through one channel (the skin
     /// shader uses B as the overlay factor), so the normal-map placeholder of
     /// [`Self::linear_clamped`] would paint the whole face with the overlay
     /// color whenever the file is missing.
-    pub const fn linear_clamped_mask(path: &'static str) -> Self {
+    pub const fn linear_clamped_mask(
+        path: &'static str,
+        interpolation: TextureInterpolation,
+    ) -> Self {
         Self {
             path: Some(path),
             is_srgb: false,
             address: AddressMode::ClampEdge,
+            interpolation,
             placeholder: Placeholder::TransparentBlack,
         }
     }
 
-    /// Linear image clamped to a transparent border (Blender `CLIP`).
-    pub const fn linear_clipped(path: &'static str) -> Self {
+    /// Non-color image clamped to a transparent border (Blender `CLIP`).
+    pub const fn linear_clipped(path: &'static str, interpolation: TextureInterpolation) -> Self {
         Self {
             path: Some(path),
             is_srgb: false,
             address: AddressMode::ClampBorder,
+            interpolation,
             placeholder: Placeholder::TransparentBlack,
         }
     }
@@ -127,6 +149,7 @@ impl TextureSlot {
             path: None,
             is_srgb: false,
             address: AddressMode::Repeat,
+            interpolation: TextureInterpolation::Linear,
             placeholder,
         }
     }
@@ -139,32 +162,42 @@ impl TextureSlot {
 
         let is_srgb = self.is_srgb;
         let address = self.address;
+        let interpolation = self.interpolation;
 
         asset_server
             .load_builder()
             .with_settings(move |settings: &mut ImageLoaderSettings| {
                 settings.is_srgb = is_srgb;
-                settings.sampler = ImageSampler::Descriptor(sampler_descriptor(address));
+                settings.sampler =
+                    ImageSampler::Descriptor(sampler_descriptor(address, interpolation));
             })
             .load(path)
     }
 }
 
-fn sampler_descriptor(address: AddressMode) -> ImageSamplerDescriptor {
-    match address {
-        AddressMode::Repeat => ImageSamplerDescriptor::default(),
-        AddressMode::ClampEdge => ImageSamplerDescriptor {
-            address_mode_u: ImageAddressMode::ClampToEdge,
-            address_mode_v: ImageAddressMode::ClampToEdge,
-            ..default()
-        },
-        AddressMode::ClampBorder => ImageSamplerDescriptor {
-            address_mode_u: ImageAddressMode::ClampToBorder,
-            address_mode_v: ImageAddressMode::ClampToBorder,
-            border_color: Some(ImageSamplerBorderColor::TransparentBlack),
-            ..default()
-        },
-    }
+fn sampler_descriptor(
+    address: AddressMode,
+    interpolation: TextureInterpolation,
+) -> ImageSamplerDescriptor {
+    let mut descriptor = match interpolation {
+        TextureInterpolation::Linear => ImageSamplerDescriptor::linear(),
+        // Cubic is NOT implemented by this nearest sampler. The skin eyebrow
+        // shader uses textureLoad and explicitly sums the B-spline footprint.
+        TextureInterpolation::Nearest | TextureInterpolation::Cubic => {
+            ImageSamplerDescriptor::nearest()
+        }
+    };
+    let mode = match address {
+        AddressMode::Repeat => ImageAddressMode::Repeat,
+        AddressMode::ClampEdge => ImageAddressMode::ClampToEdge,
+        AddressMode::ClampBorder => {
+            descriptor.border_color = Some(ImageSamplerBorderColor::TransparentBlack);
+            ImageAddressMode::ClampToBorder
+        }
+    };
+    descriptor.address_mode_u = mode;
+    descriptor.address_mode_v = mode;
+    descriptor
 }
 
 /// Create a 1x1 stand-in image.
@@ -207,24 +240,54 @@ pub struct SkinTextureSet {
 
 /// `Head_`: everything wired in `load_textures()` for `skin_head`.
 pub const HEAD_SKIN: SkinTextureSet = SkinTextureSet {
-    main: TextureSlot::srgb("materials/head/cf_m_skin_head_01_MainTex.png"),
-    detail: TextureSlot::linear("materials/head/cf_m_skin_head_01_DetailMainTex.png"),
-    detail_gloss: TextureSlot::linear("materials/head/cf_m_skin_head_01_DetailGlossMap.png"),
-    eyebrow: TextureSlot::linear_clamped_mask("materials/head/cf_m_skin_head_01_Texture3.png"),
-    bump: TextureSlot::linear_clamped("materials/head/cf_m_skin_head_01_BumpMap_converted.png"),
-    bump2: TextureSlot::linear_clamped("materials/head/cf_m_skin_head_01_BumpMap2_converted.png"),
+    main: TextureSlot::srgb(
+        "materials/head/cf_m_skin_head_01_MainTex.png",
+        TextureInterpolation::Linear,
+    ),
+    detail: TextureSlot::linear(
+        "materials/head/cf_m_skin_head_01_DetailMainTex.png",
+        TextureInterpolation::Linear,
+    ),
+    detail_gloss: TextureSlot::linear(
+        "materials/head/cf_m_skin_head_01_DetailGlossMap.png",
+        TextureInterpolation::Linear,
+    ),
+    eyebrow: TextureSlot::linear_clamped_mask(
+        "materials/head/cf_m_skin_head_01_Texture3.png",
+        TextureInterpolation::Cubic,
+    ),
+    bump: TextureSlot::linear_clamped(
+        "materials/head/cf_m_skin_head_01_BumpMap_converted.png",
+        TextureInterpolation::Linear,
+    ),
+    bump2: TextureSlot::linear_clamped(
+        "materials/head/cf_m_skin_head_01_BumpMap2_converted.png",
+        TextureInterpolation::Linear,
+    ),
     // `SubsurfaceAlbedo` has no local copy; importer.py disconnects the node.
     subsurface: TextureSlot::missing(Placeholder::TransparentBlack),
 };
 
 /// `Torso_`: the same shader with the torso texture set.
 pub const BODY_SKIN: SkinTextureSet = SkinTextureSet {
-    main: TextureSlot::srgb("materials/body/cf_m_skin_body_00_MainTex.png"),
+    main: TextureSlot::srgb(
+        "materials/body/cf_m_skin_body_00_MainTex.png",
+        TextureInterpolation::Linear,
+    ),
     detail: TextureSlot::missing(Placeholder::White),
-    detail_gloss: TextureSlot::linear("materials/body/cf_m_skin_body_00_DetailGlossMap.png"),
+    detail_gloss: TextureSlot::linear(
+        "materials/body/cf_m_skin_body_00_DetailGlossMap.png",
+        TextureInterpolation::Linear,
+    ),
     eyebrow: TextureSlot::missing(Placeholder::TransparentBlack),
-    bump: TextureSlot::linear_clamped("materials/body/cf_m_skin_body_00_BumpMap_converted.png"),
-    bump2: TextureSlot::linear_clamped("materials/body/cf_m_skin_body_00_BumpMap2_converted.png"),
+    bump: TextureSlot::linear_clamped(
+        "materials/body/cf_m_skin_body_00_BumpMap_converted.png",
+        TextureInterpolation::Linear,
+    ),
+    bump2: TextureSlot::linear_clamped(
+        "materials/body/cf_m_skin_body_00_BumpMap2_converted.png",
+        TextureInterpolation::Linear,
+    ),
     subsurface: TextureSlot::missing(Placeholder::TransparentBlack),
 };
 
@@ -248,16 +311,26 @@ pub struct HairTextureSet {
 // `s_04_00` `MainTex` share one MD5, and every `*_BumpMap_converted` except the
 // accessory one is the same file. Only these four slots are ever loaded, so the
 // GPU sees one copy per unique pixel set instead of one per material.
-const HAIR_BACK_MAIN: TextureSlot =
-    TextureSlot::linear("materials/hair/hair_material_b_03_00_MainTex.png");
-const HAIR_BACK_BUMP: TextureSlot =
-    TextureSlot::linear_clamped("materials/hair/hair_material_b_03_00_BumpMap_converted.png");
-const HAIR_FRONT_MAIN: TextureSlot =
-    TextureSlot::linear("materials/hair/hair_material_f_13_00_MainTex.png");
-const HAIR_ACS_MAIN: TextureSlot =
-    TextureSlot::linear("materials/hair/hair_material_b_03_acs_MainTex.png");
-const HAIR_ACS_BUMP: TextureSlot =
-    TextureSlot::linear_clamped("materials/hair/hair_material_b_03_acs_BumpMap_converted.png");
+const HAIR_BACK_MAIN: TextureSlot = TextureSlot::linear(
+    "materials/hair/hair_material_b_03_00_MainTex.png",
+    TextureInterpolation::Linear,
+);
+const HAIR_BACK_BUMP: TextureSlot = TextureSlot::linear_clamped(
+    "materials/hair/hair_material_b_03_00_BumpMap_converted.png",
+    TextureInterpolation::Linear,
+);
+const HAIR_FRONT_MAIN: TextureSlot = TextureSlot::linear(
+    "materials/hair/hair_material_f_13_00_MainTex.png",
+    TextureInterpolation::Linear,
+);
+const HAIR_ACS_MAIN: TextureSlot = TextureSlot::linear(
+    "materials/hair/hair_material_b_03_acs_MainTex.png",
+    TextureInterpolation::Linear,
+);
+const HAIR_ACS_BUMP: TextureSlot = TextureSlot::linear_clamped(
+    "materials/hair/hair_material_b_03_acs_BumpMap_converted.png",
+    TextureInterpolation::Linear,
+);
 
 /// `hair_`: outer back-hair shell around the skull.
 pub const HAIR_00: HairTextureSet = HairTextureSet {
@@ -318,14 +391,78 @@ pub struct EyeTextureSet {
 }
 
 pub const EYES: EyeTextureSet = EyeTextureSet {
-    sclera: TextureSlot::srgb("materials/c_t_eye_white_01-DXT1.dds"),
-    iris: TextureSlot::srgb("materials/c_t_eye_00-DXT1.dds"),
-    pupil: TextureSlot::linear_clipped("materials/c_m_eye_01_Texture3.png"),
-    highlight: TextureSlot::linear("materials/c_m_eye_01_Texture4.png"),
+    sclera: TextureSlot::srgb(
+        "materials/c_t_eye_white_01-DXT1.dds",
+        TextureInterpolation::Linear,
+    ),
+    iris: TextureSlot::srgb(
+        "materials/c_t_eye_00-DXT1.dds",
+        TextureInterpolation::Linear,
+    ),
+    pupil: TextureSlot::linear_clipped(
+        "materials/c_m_eye_01_Texture3.png",
+        TextureInterpolation::Linear,
+    ),
+    highlight: TextureSlot::linear(
+        "materials/c_m_eye_01_Texture4.png",
+        TextureInterpolation::Linear,
+    ),
 };
 
 /// `Eyelashes_`: one texture, alpha in the red channel.
-pub const EYELASH: TextureSlot = TextureSlot::linear("materials/c_t_eyelash_04-DXT1.dds");
+pub const EYELASH: TextureSlot = TextureSlot::linear(
+    "materials/c_t_eyelash_04-DXT1.dds",
+    TextureInterpolation::Linear,
+);
 
 /// `Eyeshadow_`: one texture, alpha blended.
-pub const EYESHADOW: TextureSlot = TextureSlot::srgb("materials/c_t_eyeshadow_02-DXT5.dds");
+pub const EYESHADOW: TextureSlot = TextureSlot::srgb(
+    "materials/c_t_eyeshadow_02-DXT5.dds",
+    TextureInterpolation::Linear,
+);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::image::ImageFilterMode;
+
+    #[test]
+    fn interpolation_does_not_override_addressing() {
+        for (address, expected_address) in [
+            (AddressMode::Repeat, ImageAddressMode::Repeat),
+            (AddressMode::ClampEdge, ImageAddressMode::ClampToEdge),
+            (AddressMode::ClampBorder, ImageAddressMode::ClampToBorder),
+        ] {
+            for (interpolation, expected_filter) in [
+                (TextureInterpolation::Nearest, ImageFilterMode::Nearest),
+                (TextureInterpolation::Linear, ImageFilterMode::Linear),
+                // Cubic bypasses this sampler in the eyebrow shader.
+                (TextureInterpolation::Cubic, ImageFilterMode::Nearest),
+            ] {
+                let sampler = sampler_descriptor(address, interpolation);
+                assert_eq!(sampler.address_mode_u, expected_address);
+                assert_eq!(sampler.address_mode_v, expected_address);
+                assert_eq!(sampler.min_filter, expected_filter);
+                assert_eq!(sampler.mag_filter, expected_filter);
+                assert_eq!(sampler.mipmap_filter, expected_filter);
+                assert_eq!(
+                    sampler.border_color,
+                    (address == AddressMode::ClampBorder)
+                        .then_some(ImageSamplerBorderColor::TransparentBlack),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn head_manifest_preserves_node_interpolation_and_color_space() {
+        let set = HEAD_SKIN;
+        assert!(set.main.is_srgb);
+        assert!(!set.eyebrow.is_srgb);
+        assert_eq!(set.eyebrow.interpolation, TextureInterpolation::Cubic);
+        assert_eq!(set.eyebrow.address, AddressMode::ClampEdge);
+        for slot in [set.main, set.detail, set.detail_gloss, set.bump, set.bump2] {
+            assert_eq!(slot.interpolation, TextureInterpolation::Linear);
+        }
+    }
+}

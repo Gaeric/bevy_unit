@@ -42,7 +42,7 @@ pub struct SkinBakeUniform {
     pub bump_gamma: Vec4,
     /// rgb = subsurface color, a = mix factor.
     pub subsurface: Vec4,
-    /// x = flag bitfield.
+    /// x = flag bitfield, y = eyebrow TextureInterpolation, zw = reserved.
     pub flags: UVec4,
 }
 
@@ -58,10 +58,10 @@ const FLAG_COAT_FROM_DETAIL: u32 = 4;
 /// * textured gloss 1.0, delta 0.75, base gloss 0 (object attribute),
 ///   clear coat 0
 /// * bump gamma: R 1.0 / G 1.592, estimated from the normal map medians
-/// * detail gloss tiling: (24, 12) * 5
+/// * detail gloss tiling: (24, 12)
 pub const HEAD_PARAMS: SkinBakeUniform = SkinBakeUniform {
     uv_transform: Vec4::new(1.0, 1.0, 0.0, 0.0),
-    detail_uv: Vec4::new(120.0, 60.0, 0.0, 0.0),
+    detail_uv: Vec4::new(24.0, 12.0, 0.0, 0.0),
     eyebrow: Vec4::new(9.0, 4.0, 0.0, 2.0),
     eyebrow_offset: Vec4::new(0.0, 0.0, 0.0, 0.0),
     eyebrow_color: Vec4::new(0.8, 0.8, 0.8, 1.0),
@@ -168,6 +168,17 @@ impl BakeRecipe for HeadBake {
             panic!("HeadBake requires 3 outputs");
         };
 
+        let eyebrow_slot = textures::HEAD_SKIN.eyebrow;
+        if eyebrow_slot.interpolation == textures::TextureInterpolation::Cubic {
+            assert_eq!(
+                eyebrow_slot.address,
+                textures::AddressMode::ClampEdge,
+                "skin eyebrow Cubic sampling currently implements EXTEND only",
+            );
+        }
+        let mut params = params.clone();
+        params.flags.y = eyebrow_slot.interpolation as u32;
+
         Self {
             main_texture: main.clone(),
             detail_texture: detail.clone(),
@@ -175,7 +186,7 @@ impl BakeRecipe for HeadBake {
             eyebrow_texture: eyebrow.clone(),
             bump_texture: bump.clone(),
             bump2_texture: bump2.clone(),
-            params: params.clone(),
+            params,
             out_base_color: base_color.clone(),
             out_normal: normal.clone(),
             out_metallic_roughness: metallic_roughness.clone(),

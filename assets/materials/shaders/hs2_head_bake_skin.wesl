@@ -45,7 +45,8 @@ struct SkinBakeParams {
   bump_gamma: vec4<f32>,
   // rgb = subsurface color, a = subsurface/MainTex mix factor.
   subsurface: vec4<f32>,
-  // x = bitfield, yzw reserved.
+  // x = bitfield, y = eyebrow interpolation (Nearest=0, Linear=1, Cubic=2),
+  // zw reserved. Keep the enum values in sync with textures.rs.
   flags: vec4<u32>,
 };
 
@@ -74,6 +75,48 @@ const FLAG_SUBSURFACE: u32 = 8u;
 
 fn sample_level(tex: texture_2d<f32>, smp: sampler, uv: vec2<f32>) -> vec4<f32> {
   return textureSampleLevel(tex, smp, uv, 0.0);
+}
+
+// Blender Cycles Cubic uses a B-spline, not Catmull-Rom.
+// Reference: blender v4.5.0, intern/cycles/kernel/device/cpu/image.h,
+// SET_CUBIC_SPLINE_WEIGHTS and TextureInterpolator::interp_cubic.
+fn cubic_bspline_weights(t: f32) -> vec4<f32> {
+  return vec4<f32>(
+    (((-1.0 / 6.0) * t + 0.5) * t - 0.5) * t + 1.0 / 6.0,
+    ((0.5 * t - 1.0) * t) * t + 2.0 / 3.0,
+    ((-0.5 * t + 0.5) * t + 0.5) * t + 1.0 / 6.0,
+    (1.0 / 6.0) * t * t * t,
+  );
+}
+
+// Explicit 4x4 footprint at mip 0. EXTEND clamps each tap independently;
+// clamping UV before computing the footprint would change edge filtering.
+// This path is for the non-color, edge-clamped eyebrow slot only.
+fn sample_cubic_extend(tex: texture_2d<f32>, uv: vec2<f32>) -> vec4<f32> {
+  let size = vec2<i32>(textureDimensions(tex, 0));
+  let p = uv * vec2<f32>(size) - vec2<f32>(0.5);
+  let base = vec2<i32>(floor(p));
+  let fraction = fract(p);
+  let wx = cubic_bspline_weights(fraction.x);
+  let wy = cubic_bspline_weights(fraction.y);
+  var result = vec4<f32>(0.0);
+  for (var y = 0u; y < 4u; y += 1u) {
+    var row = vec4<f32>(0.0);
+    for (var x = 0u; x < 4u; x += 1u) {
+      let tap = base + vec2<i32>(i32(x) - 1, i32(y) - 1);
+      let pixel = clamp(tap, vec2<i32>(0), size - vec2<i32>(1));
+      row += wx[x] * textureLoad(tex, pixel, 0);
+    }
+    result += wy[y] * row;
+  }
+  return result;
+}
+
+fn sample_eyebrow(uv: vec2<f32>) -> vec4<f32> {
+  if (params.flags.y == 2u) {
+    return sample_cubic_extend(eyebrow_texture, uv);
+  }
+  return sample_level(eyebrow_texture, eyebrow_sampler, uv);
 }
 
 // `Skin effect` -> `Float Curve` ("Brightness correct" = 1): the group converts
@@ -221,7 +264,7 @@ fn bake(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
   if ((params.flags.x & FLAG_EYEBROW) != 0u) {
     // The eyebrow chain reads the mesh UV directly (`Texture Coordinate.UV`),
     // not the material's `uv_transform`.
-    let eyebrow = sample_level(eyebrow_texture, eyebrow_sampler, eyebrow_uv(uv));
+    let eyebrow = sample_eyebrow(eyebrow_uv(uv));
     eyebrow_amount = eyebrow.b;
     // Skin shader: Mix(factor = eyebrow.B, A = skin, B = eyebrow color).
     color = vec4<f32>(mix(color.rgb, params.eyebrow_color.rgb, eyebrow_amount), color.a);
@@ -242,7 +285,7 @@ fn bake(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
   // Gloss group with "alternate skin" disabled:
   //   gloss = base + textured * 2 * (detail_gloss.a - delta)
-  let gloss = params.gloss.z + textured_gloss * 2.0 * (detail_gloss.a - params.gloss.y);
+  let gloss = clamp(params.gloss.z + textured_gloss * 2.0 * (detail_gloss.a - params.gloss.y), 0.0, 1.0);
 
   var clear_coat = params.gloss.w;
   if ((params.flags.x & FLAG_COAT_FROM_DETAIL) != 0u) {

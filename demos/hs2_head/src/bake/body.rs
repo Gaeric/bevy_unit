@@ -25,11 +25,11 @@ const SKIN_BAKE_SHADER_ASSET_PATH: &str = "materials/shaders/hs2_head_bake_skin.
 /// * no eyebrow chain (the torso overlay is the nipple mask, not ported)
 /// * textured gloss 1.0, delta 0.75, base gloss 0, clear coat 0
 /// * bump gamma: R 1.0 / G 1.592, same normal maps as the head
-/// * detail gloss tiling: (24, 12) * 10
+/// * detail gloss tiling: (24, 12)
 /// * subsurface albedo is missing locally, so the mix stays 0.
 pub const TORSO_PARAMS: SkinBakeUniform = SkinBakeUniform {
     uv_transform: Vec4::new(1.0, 1.0, 0.0, 0.0),
-    detail_uv: Vec4::new(240.0, 120.0, 0.0, 0.0),
+    detail_uv: Vec4::new(24.0, 12.0, 0.0, 0.0),
     eyebrow: Vec4::new(0.0, 1.0, 0.0, 0.0),
     eyebrow_offset: Vec4::new(0.0, 0.0, 0.0, 0.0),
     eyebrow_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
