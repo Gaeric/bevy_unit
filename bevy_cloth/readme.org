@@ -38,7 +38,8 @@
 
   =velvet-gpu= 是一次性无窗口对照；=velvet-gpu-live= 保留小型 fixture 实时入口。
   新 =velvet-gpu-scenes= 是共享场景的独立 GPU 入口，首批仅 1/2；CPU =velvet-scenes= 保留七场景。
-  它们不是同一演示的 CPU/GPU 模式开关；当前 GPU 场景仍为线框，不含 CPU 材质、面板或抓取。
+  它们不是同一演示的 CPU/GPU 模式开关；GPU场景1/2已有三角布面、GPU动态法线、共享纹理/光照、阴影及L线框叠加，
+  无CPU面板或抓取。呈现链路已实现，设备视觉待验证；小型 =velvet-gpu-live= 仍为原彩色线框。
   生产求解与动态邻居生成都在 GPU；CPU 独立暴力查找只用于小规模诊断。
   动态邻居采用 counting hash、分层 scan、27 个真实 cell 查询、排序唯一 ID 与溢出统计。
   现有 gather 写法是“每个粒子收集自己的约束修正”，避免多个线程同时写同一粒子；
@@ -83,13 +84,24 @@
   操作与重载仍有已知限制，见下节；不要用入口名称代替检查实际场景。
 
   =velvet-gpu-scenes=：启动参数 =--scene 1|2|attach|collision=、=--paused=、=--timing=。
-  =1/2= 切场景并暂停，=Space= 暂停/继续，暂停时 =S= 推进一 tick，=R= 重置并暂停，=C= 参照显隐；中键环绕、滚轮缩放。
+  =1/2= 切场景并暂停，=Space= 暂停/继续，暂停时 =S= 推进一 tick，=R= 重置并暂停，
+  =C= 地面/实体碰撞器显隐（不改碰撞计算，隐藏也移除其可见遮挡与投影），=L= 布面三角线框叠加开关；中键环绕、滚轮缩放。
   与 CPU 一样使用 60Hz；Attach 为1681粒子/四角挂点，Collision 为289粒子/顶部两角挂点。
   两端共用 =demo/scenes.rs::comparison_scene/scene_params/sweep_z_position=；GPU 不施加旧 fixture 扰动或弯曲柔度覆盖。
   球体按模拟 tick 更新，每 tick 上传当前与上一模型矩阵；首 tick 保留 CPU 初始历史仅平移的行为，不在本批改变语义。
   切换/重置清空待提交 tick、重建场景 Mesh/GPU buffers、复位动画时钟和采样；generation 拒绝旧 Mesh/读回。
-  运动参照采用提取 tick 边界，与该次布料输出同步；仍只画碰撞器本体，不含 margin，不证明无穿透。
+  实体碰撞器采用提取 tick 边界，与该次布料输出同步；只画本体，不含 margin/圆角投影包络，不证明无穿透。
   CPU 既有 R/切换未完全复位状态的限制保留：严格对照初态请分别重启入口，CPU 场景2按2选择，勿以旧R当作已验证重置。
+  场景1/2布面使用源三角索引和UV，分别加载fabric1/fabric2；复用CPU的lit双面材质、环境光200与投影聚光灯，
+  地面50×50、球体等为实体StandardMaterial，可投射/接收阴影；相机/灯光/材料参数与CPU共用构造函数。
+  GPU每顶点收集相邻三角形的面积加权法线后归一化，无atomic；邻接CSR每代只上传一次，动态位置/法线不读回。
+  初态按真实变换后几何在CPU算一次法线，避免compute尚未就绪时先画出零法线；后续动态更新全在GPU。
+  每显示帧在相机和聚光灯阴影pass之前合并写POSITION/NORMAL；UV/索引不变，暂停也输出最终状态。
+  Mesh严格校验Float32x3 POSITION/NORMAL+Float32x2 UV（32字节）；旧live/叠加线为POSITION-only（12字节），拒绝压缩/额外属性。
+  L只切换三角边叠加，不隐藏布面，不改变遮挡或阴影；独立LineList不投影，使用小clip-space偏移降低重叠闪烁，不依赖polygon-line功能。
+  NoFrustumCulling避开动态布料初始AABB的相机/阴影裁剪；当前不启用occlusion culling。
+  退化三角形法线保持零，与CPU语义一致；极端非有限数/溢出不伪装为有效法线。
+  正反面受光、褶皱明暗、投影、L叠加闪烁、暂停/单步及反复R/1/2切换仍待设备验证，不以编译/模型测试代替。
 
   =velvet-gpu-live=：=Space= 暂停/继续，暂停时 =S= 请求一个 fixed tick，=R= 重建同配置初态并暂停，=C= 隐藏/显示碰撞器参照。
   =R= 清空待提交 tick、重建 GPU buffers、复位计数/预热；日志 generation 区分实验，旧在途读回不混入新结果。
@@ -113,11 +125,13 @@
   首窗口未满显示pending；切换/重载清空计时窗口，暂停保留最近均值，不因渲染帧数增加样本。
   GPU左上 =GPU solve avg= 读取异步timestamp的64个完成样本均值，旧窗口均值保留至下一窗口完成；
   显示off（需--timing）、unavailable/error、warmup或sampling进度及最近窗口skipped，重置/切换清空旧均值。
-  CPU包含法线而GPU线框没有法线计算；GPU计时不含Mesh输出，两者不能直接相除作为端到端加速比。
+  CPU每tick包含法线；GPU场景每frame在输出pass计算法线，求解HUD不含该pass，旧live仍无动态法线。
+  GPU输出日志ms/frame含法线+Mesh写入+叠加线写入（隐藏时也保持位置最新），不含材质光栅或阴影pass。
+  不把每frame法线/输出乘进每tick，不直接相除作为端到端加速比。
 
   =--timing= 检查已启用的 TIMESTAMP_QUERY；不支持则只禁用计时，不强制申请功能或阻止求解。
   每代前 64 tick 预热，第65 tick 起采样；有 INSIDE_PASSES 时分邻居重建、粒子碰撞+apply、全部约束轮次，否则仅总耗时。
-  求解日志单位 ms/tick；位置输出另记 ms/frame（所有层 pass 之和，暂停后也输出），不是整帧渲染耗时。
+  求解日志单位 ms/tick；输出另记 ms/frame（表面法线/写回及叠加线pass之和，旧live仅位置；暂停也输出），不是整帧渲染耗时。
   每类满 64 个完成样本报告 avg/min/max、generation 和 skipped；最多三个计时样本在途，忙则跳过，不阻塞。
   每样本分配 query/读回资源，时间戳和采样会扰动工作负载；这不是预分配基准框架，也不测 CPU、排队、上传或读回耗时。
   不足窗口不汇总、无超时监控，计时错误会禁用计时；没有性能实测数据，不能据此宣称更快或达标。

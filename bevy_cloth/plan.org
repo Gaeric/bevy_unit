@@ -45,7 +45,7 @@
   - [用户同意] 求解内核已有实现，下一步用它补齐 GPU 七场景，以观察和对照实际布料行为；
     不以持续完善 XPBD 求解器为主轴，不把既有遥测/计时验收设为场景接入的前置门槛。
   - [决定] CPU/GPU 共享场景定义、区分入口。分批为 1/2 Attach/Collision、3/4/5 自碰撞/摩擦/多布片、6/7 高分辨率/Swirl。
-    本批仅1/2；不做同屏双求解器、常态粒子读回、材质/法线扩展，不改 CPU 算法或 Velvet。
+    首批接入1/2，随后已补齐下节呈现链路；不做同屏双求解器或常态粒子读回，不改 CPU 算法或 Velvet。
   - [代码] =demo/scenes.rs= 提取首批描述与球体运动，CPU 构建读取同一描述；=demo/plugin.rs= SweepZ 调用共享公式。
     =gpu/solver_gpu.rs= 从共享初态上传，保留旧 headless/live fixture；新增实际 buffers 容量检查和逐tick碰撞器上传。
     =gpu/live.rs= 复用线框输出、独立场景插件、60Hz、generation场景重建、逐tick动画/历史与提取边界。
@@ -73,6 +73,31 @@
     cargo run -j 2 -p bevy_cloth --example velvet-gpu-scenes -- --scene 2 --paused --timing
     cargo run -j 2 -p bevy_cloth --example velvet-gpu
   #+end_src
+
+** 呈现收尾：法线、光照、阴影与线框（2026-10-30）
+   - [用户要求] 一并补齐GPU场景1/2呈现，不再将法线/光照/阴影/线框留作零散功能；后五场景/求解算法不改。
+   - [代码] 新 =gpu/normals.rs= 源三角索引→每顶点CSR，成对邻居绕序与三角访问顺序固定；每代上传一次offsets/pairs。
+     =output.wesl= 每顶点gather原始cross后归一化，合并写POSITION/NORMAL，UV静态，无atomic/动态读回。
+     32字节OutputRange含normal_offset_words；u32::MAX令旧live/叠加线跳过法线，5bindings布局/容量均检查。
+   - [代码] =live.rs= surface为32字节POSITION/NORMAL/UV，lit双面材质；初始法线由真实变换后几何一次性CPU计算，
+     避免compute未就绪前零法线被绘制，后续每frame动态法线全在GPU。退化/孤立法线零，与CPU一致，不掩盖非有限数。
+     相机/环境光/聚光灯/地面与球体等实体材质与CPU共用构造函数（scenes.rs/plugin.rs行为不变）。
+     实体变换沿提取tick frontier更新，C隐藏显示（连同其可见遮挡/投影），不改碰撞计算。
+   - [代码] L开关独立索引LineList的三角边叠加，不隐藏lit布面，阴影/遮挡保留；叠加不投影/接影且位置持续GPU更新。
+     不依赖polygon-line功能；live_material.wesl用微小clip-space正Z偏移减轻重叠闪烁，旧live偏移0。
+     不使用wgpu禁止的LineList固定depth bias。重置/切换保留L开关，新旧Mesh/CSR仍按generation隔离。
+   - [调度事实] compute在camera_driver之前；当前引擎点/聚光灯辅助阴影视图由该driver先执行，故也先于阴影。
+     NoFrustumCulling在本地引擎CPU/GPU frustum和shadow筛选均生效；不启用occlusion culling，不增加虚假AABB。
+     GPU求解ms/tick保持不变；输出日志ms/frame含表面法线+位置写回+线框输出（隐藏也写），不含光栅/阴影渲染。
+   - [验证] 正式隔离manifest离线cargo check --all-targets -j2通过；法线CSR/CPU模型11项执行通过，
+     ABI/重叠/边界/UV保护/上传限制5项提取测试通过；实际Bevy mesh/材质/灯光/变换测试编译但未执行。
+     实际output shader Naga30解析/验证，5bindings/32字节/workgroup256检查通过；实际线框材质WESL及本地Bevy imports
+     编译为WGSL并Naga验证（POSITION-only有/无instance-index输出两变体）通过。均无GPU执行/视觉/性能证据。
+   - [设备验收] 场景1/2正反面纹理/受光、折叠法线、地面/球体投影、L开关与遮挡、C显隐；启动/R/1/2反复切换无错误或旧值。
+     CPU/GPU同相机与材质配置不等于视觉已吻合。无灯光先查comparison_spotlight/ambient与实际NORMAL偏移/CSR绑定；
+     投影缺失查light.shadow_maps_enabled、NotShadowCaster误标、camera_driver前输出顺序及光照范围，不用猜偏置修复。
+     错纹理查AssetServer fabric路径/UV；线框闪烁或穿透查clip_bias与深度测试，不能用非法LineList depth bias。
+     冻结/布局拒绝查position_layout和actualallocation；CPU/GPU法线可容许浮点绕序差，不能直接要求逐位一致。
 
 ** 应用 FPS 与模拟 ms/tick 显示（2026-10-30）
    - [用户同意] 两项指标：应用FPS、模拟耗时ms/tick，不新增求解算法或基准框架。

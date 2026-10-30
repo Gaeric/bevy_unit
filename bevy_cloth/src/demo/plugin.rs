@@ -147,11 +147,7 @@ impl Plugin for ClothPlugin {
         app.insert_resource(Time::<Fixed>::from_hz(FIXED_HZ))
             // `AmbientLight` is a *camera* component in 0.20 (`#[require(Camera)]`); the global one
             // is this resource. spawning the component instead would add a spurious camera.
-            .insert_resource(GlobalAmbientLight {
-                color: Color::WHITE,
-                brightness: 200.0,
-                affects_lightmapped_meshes: true,
-            })
+            .insert_resource(scenes::comparison_ambient_light())
             .init_resource::<SolverRes>()
             .init_resource::<SimParamsRes>()
             .init_resource::<SimStateRes>()

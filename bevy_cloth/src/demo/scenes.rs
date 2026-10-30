@@ -468,7 +468,7 @@ fn spawn_cloth(context: &mut SceneContext, spec: ClothSpec) {
 }
 
 /// `Scene.hpp::SpawnCloth`'s material property.
-fn cloth_material(asset_server: &AssetServer, texture: u32) -> StandardMaterial {
+pub(crate) fn cloth_material(asset_server: &AssetServer, texture: u32) -> StandardMaterial {
     StandardMaterial {
         // `material.tint`
         base_color: Color::srgb(0.0, 0.5, 1.0),
@@ -495,8 +495,14 @@ fn spawn_camera_and_light(context: &mut SceneContext) {
 
     // spot light at (2.5, 5, 2.5). the source uses its own euler convention for the direction, so
     // we aim at the cloth instead.
-    context.commands.spawn((
-        SceneEntity,
+    context
+        .commands
+        .spawn((SceneEntity, comparison_spotlight()));
+}
+
+/// Shared CPU/GPU spotlight, including the CPU scene's aim and shadow settings.
+pub(crate) fn comparison_spotlight() -> (SpotLight, Transform) {
+    (
         SpotLight {
             color: Color::WHITE,
             intensity: 3_000_000.0,
@@ -508,7 +514,25 @@ fn spawn_camera_and_light(context: &mut SceneContext) {
             ..default()
         },
         Transform::from_xyz(2.5, 5.0, 2.5).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
-    ));
+    )
+}
+
+/// Shared CPU/GPU ambient environment; this resource does not create a camera.
+pub(crate) fn comparison_ambient_light() -> GlobalAmbientLight {
+    GlobalAmbientLight {
+        color: Color::WHITE,
+        brightness: 200.0,
+        affects_lightmapped_meshes: true,
+    }
+}
+
+/// Shared CPU/GPU ground appearance.
+pub(crate) fn comparison_ground_material() -> StandardMaterial {
+    StandardMaterial {
+        base_color: Color::srgb(0.32, 0.28, 0.24),
+        perceptual_roughness: 1.0,
+        ..default()
+    }
 }
 
 /// `Scene.hpp::SpawnInfinitePlane`: a large quad for display, plus the `Plane` SDF at `y = 0`.
@@ -516,11 +540,7 @@ fn spawn_ground(context: &mut SceneContext) {
     let mesh = context
         .meshes
         .add(Plane3d::default().mesh().size(50.0, 50.0));
-    let material = context.materials.add(StandardMaterial {
-        base_color: Color::srgb(0.32, 0.28, 0.24),
-        perceptual_roughness: 1.0,
-        ..default()
-    });
+    let material = context.materials.add(comparison_ground_material());
 
     context.commands.spawn((
         SceneEntity,
@@ -538,6 +558,15 @@ fn spawn_ground(context: &mut SceneContext) {
     ));
 }
 
+/// Shared CPU/GPU collider appearance, also used by the CPU cube.
+pub(crate) fn comparison_collider_material() -> StandardMaterial {
+    StandardMaterial {
+        base_color: Color::WHITE,
+        perceptual_roughness: 1.0,
+        ..default()
+    }
+}
+
 /// `Scene.hpp::SpawnSphere` with the scene's radius, motion and `Collider::enabled`.
 fn spawn_sphere(
     context: &mut SceneContext,
@@ -547,11 +576,7 @@ fn spawn_sphere(
     enabled: bool,
 ) {
     let mesh = context.meshes.add(Sphere::new(radius));
-    let material = context.materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        perceptual_roughness: 1.0,
-        ..default()
-    });
+    let material = context.materials.add(comparison_collider_material());
 
     context.commands.spawn((
         SceneEntity,
@@ -578,11 +603,7 @@ fn spawn_cube(context: &mut SceneContext, half_extent: f32, position: Vec3) {
         half_extent * 2.0,
         half_extent * 2.0,
     ));
-    let material = context.materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        perceptual_roughness: 1.0,
-        ..default()
-    });
+    let material = context.materials.add(comparison_collider_material());
 
     context.commands.spawn((
         SceneEntity,
@@ -598,6 +619,81 @@ fn spawn_cube(context: &mut SceneContext, half_extent: f32, position: Vec3) {
         },
         ColliderHistory(Mat4::from_translation(position)),
     ));
+}
+
+#[cfg(test)]
+mod comparison_appearance_tests {
+    use super::*;
+
+    #[test]
+    fn spotlight_preserves_cpu_lighting_and_pose() {
+        let (light, transform) = comparison_spotlight();
+        assert_eq!(light.color, Color::WHITE);
+        assert_eq!(light.intensity, 3_000_000.0);
+        assert_eq!(light.range, 50.0);
+        assert_eq!(light.radius, 0.2);
+        assert!(light.shadow_maps_enabled);
+        assert_eq!(light.inner_angle, 40.0_f32.to_radians());
+        assert_eq!(light.outer_angle, 50.0_f32.to_radians());
+        assert_eq!(
+            transform,
+            Transform::from_xyz(2.5, 5.0, 2.5).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y)
+        );
+    }
+
+    #[test]
+    fn ambient_preserves_cpu_environment() {
+        let ambient = comparison_ambient_light();
+        assert_eq!(ambient.color, Color::WHITE);
+        assert_eq!(ambient.brightness, 200.0);
+        assert!(ambient.affects_lightmapped_meshes);
+    }
+
+    #[test]
+    fn ground_and_collider_preserve_cpu_materials() {
+        let ground = comparison_ground_material();
+        let collider = comparison_collider_material();
+        assert_eq!(ground.base_color, Color::srgb(0.32, 0.28, 0.24));
+        assert_eq!(collider.base_color, Color::WHITE);
+        for material in [ground, collider] {
+            assert_eq!(material.perceptual_roughness, 1.0);
+            assert_eq!(
+                material.reflectance,
+                StandardMaterial::default().reflectance
+            );
+            assert!(!material.unlit);
+            assert!(!material.double_sided);
+            assert_eq!(material.cull_mode, StandardMaterial::default().cull_mode);
+            assert!(material.base_color_texture.is_none());
+            assert!(material.emissive_texture.is_none());
+            assert!(material.metallic_roughness_texture.is_none());
+            assert!(material.normal_map_texture.is_none());
+            assert!(material.occlusion_texture.is_none());
+        }
+    }
+
+    #[test]
+    fn cloth_preserves_cpu_lit_textured_double_sided_material() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>();
+        let asset_server = app.world().resource::<AssetServer>();
+        for (requested, expected) in [(0, 1), (1, 1), (2, 2), (3, 3), (4, 3)] {
+            let material = cloth_material(asset_server, requested);
+            assert_eq!(material.base_color, Color::srgb(0.0, 0.5, 1.0));
+            assert_eq!(material.perceptual_roughness, 1.0);
+            assert_eq!(material.reflectance, 0.01);
+            assert!(!material.unlit);
+            assert!(material.double_sided);
+            assert_eq!(material.cull_mode, None);
+            let texture = material.base_color_texture.expect("cloth has a texture");
+            assert_eq!(
+                asset_server.get_path(texture.id()).unwrap().path(),
+                std::path::Path::new(&format!("velvet/fabric{expected}.jpg"))
+            );
+            assert!(material.normal_map_texture.is_none());
+        }
+    }
 }
 
 /// `Transform::matrix`: `translate * Ry * Rz * Rx * scale`, with the source's degree angles.

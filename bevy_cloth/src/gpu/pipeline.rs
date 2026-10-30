@@ -788,12 +788,12 @@ impl GpuTimings {
         device: &RenderDevice,
         generation: u64,
         frame: u64,
-        layers: u32,
+        output_passes: u32,
     ) -> Option<TimingSample> {
-        if !self.enabled || layers == 0 {
+        if !self.enabled || output_passes == 0 {
             return None;
         }
-        let Some(count) = layers.checked_mul(2) else {
+        let Some(count) = output_passes.checked_mul(2) else {
             self.disable("timestamp query count overflow");
             return None;
         };
@@ -952,7 +952,7 @@ impl GpuTimings {
                 first_frame = window.first, last_frame = window.last,
                 completed = window.count, skipped = self.skipped[index],
                 output_layers_ms_avg_min_max = ?window.metrics[0].summary(),
-                "cloth GPU output execution per frame (sum of existing layers; not CPU/queue/transfers/readback)"
+                "cloth GPU output execution per frame (sum of surface normals/output and edge outputs; legacy positions only; not raster/shadow rendering or CPU/queue/transfers/readback)"
             ),
         }
         if matches!(sample.kind, TimingKind::Tick) {

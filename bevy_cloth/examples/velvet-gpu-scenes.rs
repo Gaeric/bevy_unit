@@ -12,7 +12,8 @@ const HELP: &str = "GPU scenes 1/2: --scene 1|2|attach|collision --paused --timi
 Defaults: scene 1 (Attach), running, GPU timing off.
 The first batch supports only scenes 1 and 2; scenes 3..7 are not available.
 Controls: 1/2 switch scene and pause; Space pause/resume; S step while paused;
-R reset and pause; C toggle collider guides; middle drag orbit; mouse wheel zoom.";
+R reset and pause; C toggle solid collider bodies (simulation unchanged);
+L toggle triangle-edge overlay on the lit cloth; middle drag orbit; mouse wheel zoom.";
 
 fn parse_config(args: impl IntoIterator<Item = String>) -> Result<Option<GpuSceneConfig>, String> {
     let mut config = GpuSceneConfig::default();

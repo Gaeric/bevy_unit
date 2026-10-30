@@ -2,6 +2,7 @@
 
 pub mod layout;
 mod live;
+mod normals;
 pub mod pipeline;
 pub mod solver_gpu;
 

@@ -1,10 +1,11 @@
-//! Real-time fixed-tick simulation and GPU-direct POSITION-only mesh output.
+//! Fixed-tick GPU cloth: legacy lines and GPU-normal lit comparison scenes, no particle readback.
 
 use bevy::{
     asset::{AssetPath, RenderAssetUsages, embedded_asset, embedded_path, load_embedded_asset},
     camera::visibility::NoFrustumCulling,
     core_pipeline::schedule::camera_driver,
     dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin},
+    light::{NotShadowCaster, NotShadowReceiver},
     material::descriptor::{
         BindGroupLayoutDescriptor, CachedComputePipelineId, ComputePipelineDescriptor,
         RenderPipelineDescriptor,
@@ -40,6 +41,7 @@ use std::{
 
 use super::{
     layout::NeighborStats,
+    normals::build_normal_csr,
     pipeline::{GpuTimingReadout, GpuTimingStatus, GpuTimings, SolverPipeline, WORKGROUP_SIZE},
     solver_gpu::{
         LiveConfig, LiveSolver, configured_fixture, fixture_colliders, scene_fixture,
@@ -50,7 +52,10 @@ use crate::{
     demo::{
         OrbitCamera, OrbitCameraPlugin,
         plugin::FIXED_HZ,
-        scenes::{SceneId, comparison_scene},
+        scenes::{
+            SceneId, cloth_material, comparison_ambient_light, comparison_collider_material,
+            comparison_ground_material, comparison_scene, comparison_spotlight,
+        },
     },
     sim::{
         collide::{ColliderKind, SdfCollider},
@@ -98,11 +103,12 @@ impl Plugin for SolverScenesPlugin {
                 scene: Some(config.scene),
                 ..default()
             }))))
+            .insert_resource(comparison_ambient_light())
             .add_plugins((SolverLivePlugin, OrbitCameraPlugin))
             .add_systems(PreUpdate, rebuild_scene_visuals.after(controls))
             .add_systems(
                 PostUpdate,
-                sync_scene_guides
+                (sync_scene_guides, apply_overlay_visibility)
                     .before(TransformSystems::Propagate)
                     .before(bevy::asset::AssetEventSystems),
             );
@@ -175,6 +181,23 @@ struct LiveTicks(Arc<Mutex<TickQueue>>);
 struct Controls {
     paused: bool,
     single_steps: u32,
+    wire_overlay: bool,
+}
+
+#[derive(Component)]
+struct ClothWireOverlay;
+
+fn apply_overlay_visibility(
+    controls: Res<Controls>,
+    mut overlays: Query<&mut Visibility, With<ClothWireOverlay>>,
+) {
+    for mut visibility in &mut overlays {
+        *visibility = if controls.wire_overlay {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
 }
 
 #[derive(Component)]
@@ -210,6 +233,10 @@ fn controls(
         ticks.0.lock().expect("live cloth ticks").reset();
         info!("GPU cloth reset requested; experiment restarts paused");
         return;
+    }
+    if keys.just_pressed(KeyCode::KeyL) && ticks.0.lock().expect("live cloth ticks").scene.is_some()
+    {
+        controls.wire_overlay = !controls.wire_overlay;
     }
     if keys.just_pressed(KeyCode::KeyC) {
         for mut visibility in &mut guides {
@@ -407,6 +434,7 @@ impl LiveStats {
 #[extract_app(RenderApp)]
 struct LiveMeshes {
     layers: Vec<(Handle<Mesh>, u32, u32)>,
+    wire_layers: Vec<(Handle<Mesh>, u32, u32)>,
     generation: u64,
     scene: Option<SceneId>,
     /// Main-world tick boundary used to draw moving collider guides for this extraction.
@@ -423,6 +451,60 @@ struct SceneGuide(usize);
 struct SceneRenderState {
     motion: Option<SceneMotion>,
     output_frame: u64,
+    normal_topologies: Vec<NormalBuffers>,
+    dummy_normals: Option<NormalBuffers>,
+}
+
+/// Immutable adjacency, uploaded once per solver generation, never per output frame.
+struct NormalBuffers {
+    offsets: Buffer,
+    pairs: Buffer,
+}
+
+fn normal_buffer_bytes(len: usize, element_bytes: usize, limit: u64) -> Option<u64> {
+    u32::try_from(len).ok()?;
+    let bytes = u64::try_from(len.checked_mul(element_bytes)?).ok()?;
+    (bytes > 0 && bytes <= limit).then_some(bytes)
+}
+
+impl NormalBuffers {
+    fn new(
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        offsets: &[u32],
+        pairs: &[[u32; 2]],
+    ) -> Self {
+        let limits = device.limits();
+        let limit = limits
+            .max_buffer_size
+            .min(u64::from(limits.max_storage_buffer_binding_size));
+        let upload = |label, data: &[u8], len, element_bytes| {
+            let size = normal_buffer_bytes(len, element_bytes, limit)
+                .expect("cloth normal adjacency exceeds device storage/buffer or u32 limits");
+            let buffer = device.create_buffer(&BufferDescriptor {
+                label: Some(label),
+                size,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&buffer, 0, data);
+            buffer
+        };
+        Self {
+            offsets: upload(
+                "cloth normal CSR offsets",
+                bytemuck::cast_slice(offsets),
+                offsets.len(),
+                4,
+            ),
+            pairs: upload(
+                "cloth normal CSR pairs",
+                bytemuck::cast_slice(pairs),
+                pairs.len(),
+                8,
+            ),
+        }
+    }
 }
 
 /// CPU animation uses frame * fixed dt, with translation-only initial collider history.
@@ -487,7 +569,7 @@ impl Plugin for SolverLivePlugin {
         );
         app.insert_resource(Controls {
             paused: start_paused,
-            single_steps: 0,
+            ..default()
         });
         if !app.is_plugin_added::<FpsOverlayPlugin>() {
             app.add_plugins(FpsOverlayPlugin {
@@ -607,13 +689,15 @@ impl FromWorld for OutputPipeline {
     fn from_world(world: &mut World) -> Self {
         let shader = load_embedded_asset!(world, "output.wesl");
         let layout = BindGroupLayoutDescriptor::new(
-            "cloth position-only output",
+            "cloth position output preserving static attributes",
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::COMPUTE,
                 (
                     uniform_buffer_sized(false, None),
                     storage_buffer_read_only_sized(false, None),
                     storage_buffer_sized(false, None),
+                    storage_buffer_read_only_sized(false, None),
+                    storage_buffer_read_only_sized(false, None),
                 ),
             ),
         );
@@ -621,7 +705,7 @@ impl FromWorld for OutputPipeline {
             world
                 .resource::<PipelineCache>()
                 .queue_compute_pipeline(ComputePipelineDescriptor {
-                    label: Some("cloth position-only output".into()),
+                    label: Some("cloth position output preserving static attributes".into()),
                     layout: vec![layout.clone()],
                     shader,
                     entry_point: Some("output_positions".into()),
@@ -631,7 +715,7 @@ impl FromWorld for OutputPipeline {
     }
 }
 
-/// Vertex units, not bytes; output is exactly 3 f32 words per vertex.
+/// Allocation ranges use vertex units; stride/position offset use f32 words, not bytes.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 struct OutputRange {
@@ -639,6 +723,10 @@ struct OutputRange {
     end: u32,
     particle_offset: u32,
     count: u32,
+    stride_words: u32,
+    position_offset_words: u32,
+    normal_offset_words: u32,
+    pad1: u32,
 }
 
 impl OutputRange {
@@ -648,12 +736,21 @@ impl OutputRange {
         count: u32,
         n: u32,
         bytes: u64,
+        layout: PositionLayout,
     ) -> Option<Self> {
-        if range.start > range.end
+        if layout.stride_words < 3
+            || layout.position_offset_words > layout.stride_words - 3
+            || (layout.normal_offset_words != u32::MAX
+                && (layout.normal_offset_words > layout.stride_words - 3
+                    || layout
+                        .position_offset_words
+                        .abs_diff(layout.normal_offset_words)
+                        < 3))
+            || range.start > range.end
             || count == 0
             || count > range.end - range.start
             || offset.checked_add(count)? > n
-            || u64::from(range.end.checked_mul(3)?) * 4 > bytes
+            || u64::from(range.end.checked_mul(layout.stride_words)?) * 4 > bytes
         {
             return None;
         }
@@ -662,18 +759,73 @@ impl OutputRange {
             end: range.end,
             particle_offset: offset,
             count,
+            stride_words: layout.stride_words,
+            position_offset_words: layout.position_offset_words,
+            normal_offset_words: layout.normal_offset_words,
+            pad1: 0,
         })
     }
 }
 
-fn position_only(mesh: &RenderMesh, count: u32) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PositionLayout {
+    stride_words: u32,
+    position_offset_words: u32,
+    normal_offset_words: u32,
+}
+
+/// Whitelist both paths; compressed/extra attributes are not silently overwritten.
+fn position_layout(mesh: &RenderMesh, count: u32, textured: bool) -> Option<PositionLayout> {
     let layout = mesh.layout.0.layout();
-    mesh.vertex_count == count
-        && mesh.layout.0.attribute_ids() == [Mesh::ATTRIBUTE_POSITION.id]
-        && layout.array_stride == 12
-        && layout.attributes.len() == 1
-        && layout.attributes[0].offset == 0
-        && layout.attributes[0].format == VertexFormat::Float32x3
+    let ids = mesh.layout.0.attribute_ids();
+    let expected_ids = if textured {
+        vec![
+            Mesh::ATTRIBUTE_POSITION.id,
+            Mesh::ATTRIBUTE_NORMAL.id,
+            Mesh::ATTRIBUTE_UV_0.id,
+        ]
+    } else {
+        vec![Mesh::ATTRIBUTE_POSITION.id]
+    };
+    let expected_stride = if textured { 32 } else { 12 };
+    if mesh.vertex_count != count
+        || ids != expected_ids
+        || layout.attributes.len() != expected_ids.len()
+        || layout.array_stride != expected_stride
+    {
+        return None;
+    }
+    let position = &layout.attributes[0];
+    if position.format != VertexFormat::Float32x3
+        || position.offset % 4 != 0
+        || position.offset.checked_add(12)? > layout.array_stride
+    {
+        return None;
+    }
+    let normal_offset_words = if textured {
+        let normal = &layout.attributes[1];
+        let uv = &layout.attributes[2];
+        if normal.format != VertexFormat::Float32x3
+            || normal.offset % 4 != 0
+            || normal.offset.checked_add(12)? > layout.array_stride
+            || uv.format != VertexFormat::Float32x2
+            || uv.offset % 4 != 0
+            || uv.offset.checked_add(8)? > layout.array_stride
+            || !(position.offset + 12 <= normal.offset || normal.offset + 12 <= position.offset)
+            || !(position.offset + 12 <= uv.offset || uv.offset + 8 <= position.offset)
+            || !(normal.offset + 12 <= uv.offset || uv.offset + 8 <= normal.offset)
+        {
+            return None;
+        }
+        u32::try_from(normal.offset / 4).ok()?
+    } else {
+        u32::MAX
+    };
+    Some(PositionLayout {
+        stride_words: u32::try_from(layout.array_stride / 4).ok()?,
+        position_offset_words: u32::try_from(position.offset / 4).ok()?,
+        normal_offset_words,
+    })
 }
 
 fn simulate_and_output(
@@ -732,17 +884,22 @@ fn simulate_and_output(
     let n = workload.particle_count();
     // Re-fetch allocations and layouts: allocator slabs may be replaced/grown between frames.
     let mut targets = Vec::new();
-    for (handle, offset, count) in &meshes.layers {
+    for (target_index, (handle, offset, count)) in
+        meshes.layers.iter().chain(&meshes.wire_layers).enumerate()
+    {
+        let surface = meshes.scene.is_some() && target_index < meshes.layers.len();
         let Some(mesh) = render_meshes.get(handle.id()) else {
             return;
         };
         let Some(slice) = allocator.mesh_vertex_slice(&handle.id()) else {
             return;
         };
-        if !position_only(mesh, *count) {
-            error!("GPU cloth output requires an uncompressed POSITION-only Float32x3 mesh");
+        let Some(layout) = position_layout(mesh, *count, surface) else {
+            error!(
+                "GPU cloth output requires Float32x3 POSITION/NORMAL and Float32x2 UV for lit surfaces, or POSITION-only lines; unsupported layout"
+            );
             return;
-        }
+        };
         if slice.buffer.size()
             > u64::from(
                 context
@@ -754,18 +911,39 @@ fn simulate_and_output(
             error!("GPU cloth mesh allocator slab exceeds the device storage binding limit");
             return;
         }
-        let Some(range) =
-            OutputRange::checked(slice.range.clone(), *offset, *count, n, slice.buffer.size())
-        else {
+        let Some(range) = OutputRange::checked(
+            slice.range.clone(),
+            *offset,
+            *count,
+            n,
+            slice.buffer.size(),
+            layout,
+        ) else {
             error!("GPU cloth mesh allocation cannot contain its particle range");
             return;
         };
-        targets.push((slice, range));
+        targets.push((slice, range, surface.then_some(target_index)));
     }
-    if targets.len() != workload.layers as usize {
+    if meshes.layers.len() != workload.layers as usize
+        || (!meshes.wire_layers.is_empty() && meshes.wire_layers.len() != meshes.layers.len())
+    {
         return;
     }
     let solver = solver.get_or_insert_with(|| {
+        let device = context.render_device();
+        scene_state.dummy_normals = Some(NormalBuffers::new(device, &queue, &[0, 0], &[[0, 0]]));
+        scene_state.normal_topologies = meshes.scene.map_or_else(Vec::new, |scene| {
+            comparison_scene(scene)
+                .expect("supported comparison scene")
+                .cloths
+                .iter()
+                .map(|cloth| {
+                    let source = generate_cloth_mesh(cloth.resolution);
+                    let csr = build_normal_csr(source.positions.len(), &source.indices);
+                    NormalBuffers::new(device, &queue, &csr.offsets, &csr.pairs)
+                })
+                .collect()
+        });
         if let Some(scene) = meshes.scene {
             scene_state.motion = Some(SceneMotion::new(scene));
             LiveSolver::new_scene(
@@ -826,19 +1004,29 @@ fn simulate_and_output(
         stats_interval(workload),
     );
     scene_state.output_frame = scene_state.output_frame.saturating_add(1);
+    let output_passes = u32::try_from(targets.len()).expect("cloth output target count");
     let mut output_sample = (stats.clock.total_ticks > TIMING_WARMUP_TICKS)
         .then(|| {
             timings.begin_output(
                 context.render_device(),
                 generation,
                 scene_state.output_frame,
-                workload.layers,
+                output_passes,
             )
         })
         .flatten();
     // No simulation tick is required for output: paused/newly allocated meshes still get copied.
-    for (slice, range) in targets {
+    for (slice, range, topology) in targets {
         let device = context.render_device();
+        let normals = topology.map_or_else(
+            || {
+                scene_state
+                    .dummy_normals
+                    .as_ref()
+                    .expect("legacy normal bindings")
+            },
+            |index| &scene_state.normal_topologies[index],
+        );
         let uniform = device.create_buffer(&BufferDescriptor {
             label: Some("cloth mesh output range"),
             size: size_of::<OutputRange>() as u64,
@@ -853,6 +1041,8 @@ fn simulate_and_output(
                 uniform.as_entire_binding(),
                 solver.positions().as_entire_binding(),
                 slice.buffer.as_entire_binding(),
+                normals.offsets.as_entire_binding(),
+                normals.pairs.as_entire_binding(),
             )),
         );
         let mut pass = context
@@ -881,13 +1071,20 @@ fn simulate_and_output(
 struct LiveMaterial {
     #[uniform(0)]
     color: LinearRgba,
+    /// Clip-space reverse-Z offset, used only for the optional cloth edge overlay.
+    #[uniform(1)]
+    clip_bias: f32,
 }
 
 impl Material for LiveMaterial {
-    fn fragment_shader() -> ShaderRef {
+    fn vertex_shader() -> ShaderRef {
         ShaderRef::Path(
             AssetPath::from_path_buf(embedded_path!("live_material.wesl")).with_source("embedded"),
         )
+    }
+
+    fn fragment_shader() -> ShaderRef {
+        Self::vertex_shader()
     }
 
     fn enable_prepass() -> bool {
@@ -971,11 +1168,14 @@ fn rebuild_scene_visuals(
             Entity,
             Option<&Mesh3d>,
             Option<&MeshMaterial3d<LiveMaterial>>,
+            Option<&MeshMaterial3d<StandardMaterial>>,
         ),
         With<SceneVisual>,
     >,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<LiveMaterial>>,
+    mut cloth_materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     let requests = ticks.0.lock().expect("live cloth ticks");
     let Some(scene) = requests.scene else {
@@ -986,12 +1186,15 @@ fn rebuild_scene_visuals(
     }) {
         return;
     }
-    for (entity, mesh, material) in &visuals {
+    for (entity, mesh, material, cloth_material) in &visuals {
         if let Some(mesh) = mesh {
             meshes.remove(&mesh.0);
         }
         if let Some(material) = material {
             materials.remove(&material.0);
+        }
+        if let Some(material) = cloth_material {
+            cloth_materials.remove(&material.0);
         }
         commands.entity(entity).despawn();
     }
@@ -999,16 +1202,51 @@ fn rebuild_scene_visuals(
         &mut commands,
         &mut meshes,
         &mut materials,
+        &mut cloth_materials,
+        &asset_server,
         scene,
         requests.generation,
         time.timestep().as_secs_f32(),
     );
 }
 
+/// UV/index data stay static; fused GPU output updates POSITION and NORMAL each frame.
+fn textured_cloth_mesh(source: &crate::sim::mesh_gen::ClothMesh, initial: Vec<[f32; 3]>) -> Mesh {
+    assert_eq!(initial.len(), source.positions.len());
+    // A material can become drawable before compute pipelines are ready. Bootstrap from
+    // actual transformed geometry once; all dynamic normal updates remain on the GPU.
+    let positions: Vec<Vec3> = initial.iter().copied().map(Vec3::from_array).collect();
+    let mut normals = vec![Vec3::ZERO; positions.len()];
+    crate::sim::solver::compute_normals(&mut normals, &positions, &source.indices);
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, initial)
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_NORMAL,
+        normals
+            .iter()
+            .map(|normal| normal.to_array())
+            .collect::<Vec<_>>(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_UV_0,
+        source
+            .uvs
+            .iter()
+            .map(|uv| uv.to_array())
+            .collect::<Vec<_>>(),
+    )
+    .with_inserted_indices(Indices::U32(source.indices.clone()))
+}
+
 fn spawn_scene_visuals(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<LiveMaterial>,
+    cloth_materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
     scene: SceneId,
     generation: u64,
     dt: f32,
@@ -1016,62 +1254,74 @@ fn spawn_scene_visuals(
     let definition = comparison_scene(scene).expect("supported GPU comparison scene");
     let (fixture, _) = scene_fixture(dt, scene);
     let mut layers = Vec::new();
+    let mut wire_layers = Vec::new();
     let mut offset = 0u32;
     for cloth in &definition.cloths {
         let source = generate_cloth_mesh(cloth.resolution);
         let count = source.positions.len() as u32;
-        let mut edges = Vec::new();
-        for triangle in source.indices.chunks_exact(3) {
-            edges.extend_from_slice(&[
-                triangle[0],
-                triangle[1],
-                triangle[1],
-                triangle[2],
-                triangle[2],
-                triangle[0],
-            ]);
-        }
         let initial: Vec<[f32; 3]> = fixture.positions[offset as usize..(offset + count) as usize]
             .iter()
             .map(|point| point.to_array())
             .collect();
-        let mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::RENDER_WORLD)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, initial)
-            .with_inserted_indices(Indices::U32(edges));
+        let wire_mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::RENDER_WORLD)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, initial.clone())
+            .with_inserted_indices(Indices::U32(triangle_edges(&source.indices)));
+        let wire_handle = meshes.add(wire_mesh);
+        wire_layers.push((wire_handle.clone(), offset, count));
+        commands.spawn((
+            SceneVisual,
+            ClothWireOverlay,
+            Mesh3d(wire_handle),
+            MeshMaterial3d(materials.add(LiveMaterial {
+                color: LinearRgba::new(0.02, 0.025, 0.03, 1.0),
+                clip_bias: 1e-5,
+            })),
+            Visibility::Hidden,
+            NoFrustumCulling,
+            NotShadowCaster,
+            NotShadowReceiver,
+        ));
+        let mesh = textured_cloth_mesh(&source, initial);
         let handle = meshes.add(mesh);
         layers.push((handle.clone(), offset, count));
         commands.spawn((
             SceneVisual,
             Mesh3d(handle),
             NoFrustumCulling,
-            MeshMaterial3d(materials.add(LiveMaterial {
-                color: LinearRgba::new(0.1, 0.7, 1.0, 1.0),
-            })),
+            MeshMaterial3d(cloth_materials.add(cloth_material(asset_server, cloth.texture))),
         ));
         offset += count;
     }
     for (index, spec) in definition.colliders.iter().enumerate() {
-        let collider = SdfCollider::from_transform(spec.kind, spec.initial_transform(), dt);
-        let mesh = Mesh::new(
-            PrimitiveTopology::LineList,
-            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-        )
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, collider_guide_lines(&collider));
+        if !spec.enabled {
+            continue;
+        }
+        // Unit bodies: the fixture model includes sphere radius / cube extent exactly once.
+        let mesh = match spec.kind {
+            ColliderKind::Plane => Mesh::from(Plane3d::default().mesh().size(50.0, 50.0)),
+            ColliderKind::Sphere => Mesh::from(Sphere::new(1.0)),
+            ColliderKind::Cube => Mesh::from(Cuboid::new(1.0, 1.0, 1.0)),
+        };
+        let material = if spec.kind == ColliderKind::Plane {
+            comparison_ground_material()
+        } else {
+            comparison_collider_material()
+        };
         commands.spawn((
             SceneVisual,
             SceneGuide(index),
             ColliderGuide,
             Mesh3d(meshes.add(mesh)),
-            NoFrustumCulling,
-            MeshMaterial3d(materials.add(LiveMaterial {
-                color: LinearRgba::new(0.5, 0.6, 0.5, 1.0),
-            })),
+            MeshMaterial3d(cloth_materials.add(material)),
+            collider_body_transform(spec.kind, spec.initial_transform()),
         ));
     }
+    commands.spawn((SceneVisual, comparison_spotlight()));
     let orbit = OrbitCamera::source();
     commands.spawn((SceneVisual, Camera3d::default(), orbit.transform(), orbit));
     commands.insert_resource(LiveMeshes {
         layers,
+        wire_layers,
         generation,
         scene: Some(scene),
         tick_limit: 0,
@@ -1081,17 +1331,41 @@ fn spawn_scene_visuals(
         generation,
         particles = fixture.num_particles(),
         dt,
-        "GPU comparison scene: 1/2 switch paused, Space pause, S tick, R reset paused, C guides; middle drag/wheel camera"
+        "GPU comparison scene: 1/2 switch paused, Space pause, S tick, R reset paused, C collider bodies, L triangle-edge overlay; middle drag/wheel camera"
     );
 }
 
-/// Snapshot the tick frontier before extraction so animated guides match the extracted output.
+fn triangle_edges(indices: &[u32]) -> Vec<u32> {
+    indices
+        .chunks_exact(3)
+        .flat_map(|triangle| {
+            [
+                triangle[0],
+                triangle[1],
+                triangle[1],
+                triangle[2],
+                triangle[2],
+                triangle[0],
+            ]
+        })
+        .collect()
+}
+
+fn collider_body_transform(kind: ColliderKind, model: Mat4) -> Transform {
+    if kind == ColliderKind::Plane {
+        // Solver planes are horizontal: ignore model rotation and scale, like the CPU fixture.
+        Transform::from_translation(model.w_axis.truncate())
+    } else {
+        Transform::from_matrix(model)
+    }
+}
+
+/// Snapshot the tick frontier before extraction so animated bodies match the extracted output.
 fn sync_scene_guides(
     ticks: Res<LiveTicks>,
     current: Option<ResMut<LiveMeshes>>,
     time: Res<Time<Fixed>>,
-    guides: Query<(&SceneGuide, &Mesh3d)>,
-    mut meshes: ResMut<Assets<Mesh>>,
+    mut guides: Query<(&SceneGuide, &mut Transform)>,
 ) {
     let requests = ticks.0.lock().expect("live cloth ticks");
     let Some(mut current) = current else {
@@ -1106,23 +1380,14 @@ fn sync_scene_guides(
     current.tick_limit = requests.submitted_ticks + requests.pending.len() as u64;
     let definition = comparison_scene(scene).expect("supported GPU comparison scene");
     let seconds = current.tick_limit as f32 * time.timestep().as_secs_f32();
-    for (guide, handle) in &guides {
+    for (guide, mut transform) in &mut guides {
         let spec = &definition.colliders[guide.0];
         let model = if current.tick_limit == 0 {
             spec.initial_transform()
         } else {
             spec.transform_at(seconds)
         };
-        if let Some(mut mesh) = meshes.get_mut(&handle.0) {
-            mesh.insert_attribute(
-                Mesh::ATTRIBUTE_POSITION,
-                collider_guide_lines(&SdfCollider::from_transform(
-                    spec.kind,
-                    model,
-                    time.timestep().as_secs_f32(),
-                )),
-            );
-        }
+        *transform = collider_body_transform(spec.kind, model);
     }
 }
 
@@ -1133,12 +1398,16 @@ fn setup(
     time: Res<Time<Fixed>>,
     config: Res<LiveConfig>,
     scene_config: Option<Res<GpuSceneConfig>>,
+    mut cloth_materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     if let Some(scene_config) = scene_config {
         spawn_scene_visuals(
             &mut commands,
             &mut meshes,
             &mut materials,
+            &mut cloth_materials,
+            &asset_server,
             scene_config.scene,
             0,
             time.timestep().as_secs_f32(),
@@ -1186,18 +1455,23 @@ fn setup(
         layers.push((handle.clone(), offset, count));
         commands.spawn((
             Mesh3d(handle),
-            MeshMaterial3d(materials.add(LiveMaterial { color })),
+            MeshMaterial3d(materials.add(LiveMaterial {
+                color,
+                clip_bias: 0.0,
+            })),
             NoFrustumCulling,
         ));
     }
     commands.insert_resource(LiveMeshes {
         layers,
+        wire_layers: Vec::new(),
         generation: 0,
         scene: None,
         tick_limit: 0,
     });
     let guide_material = materials.add(LiveMaterial {
         color: LinearRgba::new(0.35, 0.45, 0.35, 1.0),
+        clip_bias: 0.0,
     });
     for collider in fixture_colliders(time.timestep().as_secs_f32()) {
         let mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::RENDER_WORLD)
@@ -1220,6 +1494,48 @@ fn setup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normal_upload_sizes_check_actual_bytes_device_limits_and_shader_indices() {
+        assert_eq!(normal_buffer_bytes(2, 4, 8), Some(8));
+        assert_eq!(normal_buffer_bytes(3, 8, 24), Some(24));
+        assert_eq!(normal_buffer_bytes(3, 8, 23), None);
+        assert_eq!(normal_buffer_bytes(0, 8, 24), None);
+        assert_eq!(normal_buffer_bytes(usize::MAX, 8, u64::MAX), None);
+    }
+
+    #[test]
+    fn overlay_edges_preserve_particle_indices_and_include_triangle_diagonals() {
+        assert_eq!(
+            triangle_edges(&[0, 2, 1, 1, 2, 3]),
+            [0, 2, 2, 1, 1, 0, 1, 2, 2, 3, 3, 1]
+        );
+    }
+
+    #[test]
+    fn collider_bodies_apply_fixture_scale_once_and_planes_only_translate() {
+        for scene in [SceneId::Attach, SceneId::Collision] {
+            for spec in comparison_scene(scene).unwrap().colliders {
+                let model = spec.initial_transform();
+                let body = collider_body_transform(spec.kind, model);
+                assert_eq!(body.translation, spec.position);
+                match spec.kind {
+                    ColliderKind::Sphere => assert_eq!(body.scale, Vec3::splat(spec.radius)),
+                    ColliderKind::Plane => assert_eq!(body.scale, Vec3::ONE),
+                    ColliderKind::Cube => assert_eq!(body.scale, spec.half_extents * 2.0),
+                }
+            }
+        }
+        let model = Mat4::from_scale_rotation_translation(
+            Vec3::splat(2.0),
+            Quat::from_rotation_x(0.7),
+            Vec3::new(1.0, 2.0, 3.0),
+        );
+        assert_eq!(
+            collider_body_transform(ColliderKind::Plane, model),
+            Transform::from_xyz(1.0, 2.0, 3.0)
+        );
+    }
 
     #[test]
     fn timing_readout_rejects_old_generations_and_reset_clears_immediately() {
@@ -1580,62 +1896,334 @@ mod tests {
     }
 
     #[test]
-    fn output_range_uses_vertex_offsets_and_twelve_byte_stride() {
-        let range = OutputRange::checked(7..12, 3, 5, 8, 144).unwrap();
-        assert_eq!(
-            range,
-            OutputRange {
-                start: 7,
-                end: 12,
-                particle_offset: 3,
-                count: 5
-            }
-        );
-        assert_eq!(size_of::<OutputRange>(), 16);
-        assert!(OutputRange::checked(7..12, 3, 5, 8, 143).is_none());
-        assert!(OutputRange::checked(7..12, 3, 6, 9, 144).is_none());
-        assert!(OutputRange::checked(7..12, 4, 5, 8, 144).is_none());
-        assert!(OutputRange::checked(12..7, 0, 1, 8, 144).is_none());
-        assert!(OutputRange::checked(0..0, 0, 0, 8, 144).is_none());
+    fn output_range_uses_vertex_offsets_and_exact_slab_boundary() {
+        for stride_words in [3, 8] {
+            let normal_offset_words = if stride_words == 8 { 3 } else { u32::MAX };
+            let layout = PositionLayout {
+                stride_words,
+                position_offset_words: 0,
+                normal_offset_words,
+            };
+            let bytes = 12 * u64::from(stride_words) * 4;
+            let range = OutputRange::checked(7..12, 3, 5, 8, bytes, layout).unwrap();
+            assert_eq!(
+                range,
+                OutputRange {
+                    start: 7,
+                    end: 12,
+                    particle_offset: 3,
+                    count: 5,
+                    stride_words,
+                    position_offset_words: 0,
+                    normal_offset_words,
+                    pad1: 0,
+                }
+            );
+            assert_eq!(size_of::<OutputRange>(), 32);
+            assert!(OutputRange::checked(7..12, 3, 5, 8, bytes - 1, layout).is_none());
+            assert!(OutputRange::checked(7..12, 3, 6, 9, bytes, layout).is_none());
+            assert!(OutputRange::checked(7..12, 4, 5, 8, bytes, layout).is_none());
+            assert!(OutputRange::checked(12..7, 0, 1, 8, bytes, layout).is_none());
+            assert!(OutputRange::checked(0..0, 0, 0, 8, bytes, layout).is_none());
+        }
+    }
+
+    #[test]
+    fn output_range_checks_position_offset_and_stride() {
+        for (stride_words, position_offset_words, normal_offset_words, valid) in [
+            (0, 0, u32::MAX, false),
+            (2, 0, u32::MAX, false),
+            (3, 1, u32::MAX, false),
+            (5, 3, u32::MAX, false),
+            (5, u32::MAX, u32::MAX, false),
+            (5, 2, u32::MAX, true),
+            (8, 0, 3, true),
+            (8, 3, 0, true),
+            (8, 0, 0, false),
+            (8, 0, 2, false),
+            (8, 3, 1, false),
+            (8, 0, 6, false),
+        ] {
+            let layout = PositionLayout {
+                stride_words,
+                position_offset_words,
+                normal_offset_words,
+            };
+            assert_eq!(
+                OutputRange::checked(7..12, 3, 5, 8, 384, layout).is_some(),
+                valid,
+                "{layout:?}"
+            );
+        }
     }
 
     #[test]
     fn output_range_rejects_u32_overflow() {
-        assert!(OutputRange::checked(0..2, u32::MAX, 2, u32::MAX, u64::MAX).is_none());
-        assert!(OutputRange::checked(0..u32::MAX, 0, 1, 1, u64::MAX).is_none());
-        let last_safe_vertex = u32::MAX / 3;
-        assert!(
-            OutputRange::checked(last_safe_vertex - 1..last_safe_vertex, 0, 1, 1, u64::MAX)
+        for stride_words in [3, 8] {
+            let layout = PositionLayout {
+                stride_words,
+                position_offset_words: 0,
+                normal_offset_words: if stride_words == 8 { 3 } else { u32::MAX },
+            };
+            assert!(OutputRange::checked(0..2, u32::MAX, 2, u32::MAX, u64::MAX, layout).is_none());
+            assert!(OutputRange::checked(0..u32::MAX, 0, 1, 1, u64::MAX, layout).is_none());
+            let last_safe_vertex = u32::MAX / stride_words;
+            assert!(
+                OutputRange::checked(
+                    last_safe_vertex - 1..last_safe_vertex,
+                    0,
+                    1,
+                    1,
+                    u64::MAX,
+                    layout
+                )
                 .is_some()
-        );
+            );
+            assert!(
+                OutputRange::checked(
+                    last_safe_vertex..last_safe_vertex + 1,
+                    0,
+                    1,
+                    1,
+                    u64::MAX,
+                    layout
+                )
+                .is_none()
+            );
+        }
     }
 
+    /// CPU model of the output address formula, not shader/GPU execution.
     #[test]
-    fn output_layout_accepts_only_uncompressed_position() {
+    fn output_cpu_model_preserves_uvs_and_neighboring_slab_words() {
+        for (stride_words, position_offset_words, normal_offset_words) in
+            [(3, 0, u32::MAX), (8, 0, 3), (8, 3, 0)]
+        {
+            let layout = PositionLayout {
+                stride_words,
+                position_offset_words,
+                normal_offset_words,
+            };
+            let stride = stride_words as usize;
+            let mut slab: Vec<u32> = (0..9 * stride)
+                .map(|word| 0x7fc0_0000 + word as u32)
+                .collect();
+            let before = slab.clone();
+            let particles: Vec<[f32; 3]> = (0..5)
+                .map(|i| [i as f32 + 0.25, -(i as f32), i as f32 + 10.0])
+                .collect();
+            // Allocation has a trailing unused vertex; writes must stop at count, not end.
+            let range =
+                OutputRange::checked(2..6, 1, 3, 5, (slab.len() * 4) as u64, layout).unwrap();
+            for i in 0..range.count {
+                let base =
+                    ((range.start + i) * range.stride_words + range.position_offset_words) as usize;
+                for axis in 0..3 {
+                    slab[base + axis] =
+                        particles[(range.particle_offset + i) as usize][axis].to_bits();
+                }
+                if range.normal_offset_words != u32::MAX {
+                    let normal_base = ((range.start + i) * range.stride_words
+                        + range.normal_offset_words) as usize;
+                    for axis in 0..3 {
+                        slab[normal_base + axis] = [0.0_f32, 1.0, 0.0][axis].to_bits();
+                    }
+                }
+            }
+            for word in 0..slab.len() {
+                let vertex = word / stride;
+                let component = word % stride;
+                let position_start = position_offset_words as usize;
+                if (2..5).contains(&vertex)
+                    && (position_start..position_start + 3).contains(&component)
+                {
+                    assert_eq!(
+                        slab[word],
+                        particles[vertex - 1][component - position_start].to_bits()
+                    );
+                } else if normal_offset_words != u32::MAX
+                    && (2..5).contains(&vertex)
+                    && (normal_offset_words as usize..normal_offset_words as usize + 3)
+                        .contains(&component)
+                {
+                    assert_eq!(
+                        slab[word],
+                        [0.0_f32, 1.0, 0.0][component - normal_offset_words as usize].to_bits()
+                    );
+                } else {
+                    // Includes static UV words, allocation padding and both neighboring slabs.
+                    assert_eq!(slab[word], before[word], "stride {stride}, word {word}");
+                }
+            }
+        }
+    }
+
+    fn test_position_layout(mesh: &Mesh, count: u32, textured: bool) -> Option<PositionLayout> {
         use bevy::{
             mesh::{BaseMeshPipelineKey, MeshVertexBufferLayouts},
             render::mesh::RenderMeshBufferInfo,
         };
 
-        let mut layouts = MeshVertexBufferLayouts::default();
-        let mut mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::RENDER_WORLD)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0; 3], [1.0; 3]]);
-        let render_mesh = |mesh: &Mesh, layouts: &mut MeshVertexBufferLayouts| RenderMesh {
+        let render_mesh = RenderMesh {
             vertex_count: mesh.count_vertices() as u32,
             aabb_center: Vec3::ZERO,
             buffer_info: RenderMeshBufferInfo::NonIndexed,
             key_bits: BaseMeshPipelineKey::from_primitive_topology_and_strip_index(
-                PrimitiveTopology::LineList,
+                mesh.primitive_topology(),
                 None,
             ),
-            layout: mesh.get_mesh_vertex_buffer_layout(layouts),
+            layout: mesh.get_mesh_vertex_buffer_layout(&mut MeshVertexBufferLayouts::default()),
         };
-        assert!(position_only(&render_mesh(&mesh, &mut layouts), 2));
-        assert!(!position_only(&render_mesh(&mesh, &mut layouts), 1));
+        position_layout(&render_mesh, count, textured)
+    }
+
+    #[test]
+    fn output_layout_accepts_only_uncompressed_position_or_position_normal_uv() {
+        use bevy::mesh::{MeshVertexAttribute, VertexAttributeValues};
+
+        let legacy = PositionLayout {
+            stride_words: 3,
+            position_offset_words: 0,
+            normal_offset_words: u32::MAX,
+        };
+        let textured = PositionLayout {
+            stride_words: 8,
+            position_offset_words: 0,
+            normal_offset_words: 3,
+        };
+        let mut mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::RENDER_WORLD)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0; 3], [1.0; 3]]);
+        assert_eq!(test_position_layout(&mesh, 2, false), Some(legacy));
+        assert_eq!(test_position_layout(&mesh, 1, false), None);
+        assert_eq!(test_position_layout(&mesh, 2, true), None);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 1.0]; 2]);
+        assert_eq!(test_position_layout(&mesh, 2, true), None);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; 2]);
-        assert!(!position_only(&render_mesh(&mesh, &mut layouts), 2));
-        mesh.remove_attribute(Mesh::ATTRIBUTE_NORMAL);
-        mesh.compress_positions().unwrap();
-        assert!(!position_only(&render_mesh(&mesh, &mut layouts), 2));
+        assert_eq!(test_position_layout(&mesh, 2, true), Some(textured));
+        assert_eq!(test_position_layout(&mesh, 1, true), None);
+        assert_eq!(test_position_layout(&mesh, 2, false), None);
+        for textured in [false, true] {
+            let mut candidate = mesh.clone();
+            if !textured {
+                candidate.remove_attribute(Mesh::ATTRIBUTE_UV_0);
+            } else {
+                candidate.remove_attribute(Mesh::ATTRIBUTE_NORMAL);
+            }
+            assert_eq!(test_position_layout(&candidate, 2, textured), None);
+            if textured {
+                candidate.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; 2]);
+            } else {
+                candidate.remove_attribute(Mesh::ATTRIBUTE_NORMAL);
+            }
+            candidate.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0; 4]; 2]);
+            assert_eq!(test_position_layout(&candidate, 2, textured), None);
+            candidate.remove_attribute(Mesh::ATTRIBUTE_COLOR);
+            candidate.compress_positions().unwrap();
+            assert_eq!(test_position_layout(&candidate, 2, textured), None);
+        }
+        // Same NORMAL id, but malformed width/packing must not pass the whitelist.
+        for (format, values) in [
+            (
+                VertexFormat::Float32x2,
+                VertexAttributeValues::Float32x2(vec![[0.0; 2]; 2]),
+            ),
+            (
+                VertexFormat::Snorm16x4,
+                VertexAttributeValues::Snorm16x4(vec![[0; 4]; 2]),
+            ),
+        ] {
+            let mut candidate = mesh.clone();
+            candidate.insert_attribute(
+                MeshVertexAttribute {
+                    name: "Malformed_Normal",
+                    id: Mesh::ATTRIBUTE_NORMAL.id,
+                    format,
+                },
+                values,
+            );
+            assert_eq!(test_position_layout(&candidate, 2, true), None);
+        }
+        // Same UV id, but malformed width/packing must not pass the whitelist.
+        for (format, values) in [
+            (
+                VertexFormat::Float32x3,
+                VertexAttributeValues::Float32x3(vec![[0.0; 3]; 2]),
+            ),
+            (
+                VertexFormat::Unorm16x2,
+                VertexAttributeValues::Unorm16x2(vec![[0; 2]; 2]),
+            ),
+        ] {
+            mesh.insert_attribute(
+                MeshVertexAttribute {
+                    name: "Malformed_UV",
+                    id: Mesh::ATTRIBUTE_UV_0.id,
+                    format,
+                },
+                values,
+            );
+            assert_eq!(test_position_layout(&mesh, 2, true), None);
+        }
+    }
+
+    #[test]
+    fn textured_mesh_keeps_source_grid_uv_indices_and_initial_world_positions() {
+        use bevy::mesh::VertexAttributeValues;
+
+        let source = generate_cloth_mesh(2);
+        let transform =
+            Mat4::from_rotation_translation(Quat::from_rotation_y(0.7), Vec3::new(3.0, 4.0, 5.0));
+        let initial: Vec<[f32; 3]> = source
+            .positions
+            .iter()
+            .map(|position| transform.transform_point3(*position).to_array())
+            .collect();
+        let mesh = textured_cloth_mesh(&source, initial.clone());
+        assert_eq!(mesh.primitive_topology(), PrimitiveTopology::TriangleList);
+        assert_eq!(mesh.count_vertices(), source.positions.len());
+        assert_eq!(mesh.attributes().count(), 3);
+        let Some(VertexAttributeValues::Float32x3(normals)) =
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        else {
+            panic!("Float32x3 NORMAL required")
+        };
+        let expected_normal = transform.transform_vector3(Vec3::Z).normalize();
+        for normal in normals {
+            assert!((Vec3::from_array(*normal) - expected_normal).length() < 1e-5);
+        }
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("Float32x3 POSITION required")
+        };
+        assert_eq!(positions, &initial);
+        assert_ne!(positions[0], source.positions[0].to_array());
+        let Some(VertexAttributeValues::Float32x2(uvs)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0)
+        else {
+            panic!("Float32x2 UV required")
+        };
+        assert_eq!(
+            uvs,
+            &source
+                .uvs
+                .iter()
+                .map(|uv| uv.to_array())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(uvs[0], [0.0, 0.0]);
+        assert_eq!(uvs[2], [1.0, 0.0]);
+        assert_eq!(uvs[6], [0.0, 1.0]);
+        let Some(Indices::U32(indices)) = mesh.indices() else {
+            panic!("source u32 indices required")
+        };
+        assert_eq!(indices, &source.indices);
+        assert_eq!(
+            test_position_layout(&mesh, initial.len() as u32, true),
+            Some(PositionLayout {
+                stride_words: 8,
+                position_offset_words: 0,
+                normal_offset_words: 3,
+            })
+        );
     }
 }
