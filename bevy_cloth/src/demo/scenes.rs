@@ -99,10 +99,10 @@ pub fn scene_params(id: SceneId) -> SimParams {
     params
 }
 
-/// Shared fixtures for the first CPU/GPU comparison batch. Parameters remain in `scene_params`.
+/// Shared fixtures for all seven CPU/GPU scenes. Parameters remain in `scene_params`.
 pub struct ComparisonScene {
     pub cloths: Vec<ClothSpec>,
-    /// Source spawn order: ground first, then sphere.
+    /// Source spawn order: ground first, then any sphere or cube (including disabled visuals).
     pub colliders: Vec<ColliderSpec>,
 }
 
@@ -128,14 +128,26 @@ impl ColliderSpec {
         Mat4::from_scale_rotation_translation(scale, Quat::IDENTITY, self.position)
     }
 
-    /// World model at simulation time, including shape scale.
-    ///
-    /// Comparison fixtures use only Static and SweepZ. Other demo-only motions retain their
-    /// initial pose here; their existing CPU animation remains in `animate_colliders`.
+    /// World model at simulation time, including shape scale exactly once.
+    /// Disabled colliders still animate visually (notably the Swirl sphere).
     pub fn transform_at(&self, seconds: f32) -> Mat4 {
         let mut model = self.initial_transform();
-        if self.motion == ColliderMotion::SweepZ {
-            model.w_axis = sweep_z_position(self.radius, seconds).extend(1.0);
+        match self.motion {
+            ColliderMotion::Static => {}
+            ColliderMotion::SweepZ => {
+                model.w_axis = sweep_z_position(self.radius, seconds).extend(1.0);
+            }
+            ColliderMotion::FrictionSweep => {
+                let (position, rotation) = friction_sweep_pose(self.radius, seconds);
+                model = Mat4::from_scale_rotation_translation(
+                    Vec3::splat(self.radius),
+                    rotation,
+                    position.unwrap_or(self.position),
+                );
+            }
+            ColliderMotion::SwirlSlot => {
+                model.w_axis = swirl_slot_position(seconds).extend(1.0);
+            }
         }
         model
     }
@@ -146,9 +158,27 @@ pub fn sweep_z_position(radius: f32, seconds: f32) -> Vec3 {
     Vec3::new(0.0, radius, -(seconds * 2.0).cos())
 }
 
-/// Only Attach and Collision are supported in this comparison batch.
+/// `SceneClothFriction`: translation is assigned only after the half-second delay;
+/// spin uses truncation to signed integer and signed remainder, not Euclidean modulo.
+pub fn friction_sweep_pose(radius: f32, seconds: f32) -> (Option<Vec3>, Quat) {
+    let time = seconds - 0.5;
+    let position = (time > 0.0).then(|| Vec3::new(time.sin(), radius, 0.0));
+    let spin = if (time as i32) % 4 > 1 {
+        -time * 180.0
+    } else {
+        time * 180.0
+    };
+    (position, Quat::from_rotation_y(spin.to_radians()))
+}
+
+/// `SceneClothSwirl`: shared attachment slot and disabled decorative sphere center.
+pub fn swirl_slot_position(seconds: f32) -> Vec3 {
+    Vec3::new((seconds * 3.0).sin(), (seconds * 3.0).cos() + 2.0, 0.0)
+}
+
+/// Every `SceneId` has a shared fixture; the `Option` signature is retained for callers.
 pub fn comparison_scene(id: SceneId) -> Option<ComparisonScene> {
-    let (cloth, sphere) = match id {
+    let (cloth, collider) = match id {
         SceneId::Attach => {
             let resolution = 40;
             (
@@ -191,11 +221,15 @@ pub fn comparison_scene(id: SceneId) -> Option<ComparisonScene> {
                 enabled: true,
             },
         ),
-        _ => return None,
-    };
-    Some(ComparisonScene {
-        cloths: vec![cloth],
-        colliders: vec![
+        SceneId::SelfCollision => (
+            ClothSpec {
+                resolution: 60,
+                texture: 1,
+                position: Vec3::new(0.0, 1.5, 1.0),
+                rotation: Vec3::new(-15.0, 10.0, 10.0),
+                attached: Vec::new(),
+            },
+            // No actor collider beyond the ground in this scene.
             ColliderSpec {
                 kind: ColliderKind::Plane,
                 radius: 0.0,
@@ -204,9 +238,103 @@ pub fn comparison_scene(id: SceneId) -> Option<ComparisonScene> {
                 motion: ColliderMotion::Static,
                 enabled: true,
             },
-            sphere,
-        ],
-    })
+        ),
+        SceneId::Friction | SceneId::Multiple | SceneId::HighResolution | SceneId::Swirl => {
+            let (resolution, texture, radius, kind, motion, enabled, attached) = match id {
+                SceneId::Friction => (
+                    64,
+                    2,
+                    0.5,
+                    ColliderKind::Sphere,
+                    ColliderMotion::FrictionSweep,
+                    true,
+                    vec![],
+                ),
+                SceneId::Multiple => (
+                    64,
+                    1,
+                    0.0,
+                    ColliderKind::Cube,
+                    ColliderMotion::Static,
+                    true,
+                    vec![],
+                ),
+                SceneId::HighResolution => (
+                    200,
+                    2,
+                    0.6,
+                    ColliderKind::Sphere,
+                    ColliderMotion::Static,
+                    true,
+                    vec![],
+                ),
+                SceneId::Swirl => (
+                    36,
+                    1,
+                    0.1,
+                    ColliderKind::Sphere,
+                    ColliderMotion::SwirlSlot,
+                    false,
+                    vec![0],
+                ),
+                _ => unreachable!(),
+            };
+            (
+                ClothSpec {
+                    resolution,
+                    texture,
+                    position: Vec3::new(0.0, 1.5, 1.0),
+                    rotation: Vec3::new(90.0, 0.0, 0.0),
+                    attached,
+                },
+                ColliderSpec {
+                    kind,
+                    radius,
+                    half_extents: if kind == ColliderKind::Cube {
+                        Vec3::splat(0.5)
+                    } else {
+                        Vec3::ONE
+                    },
+                    position: Vec3::new(
+                        0.0,
+                        if kind == ColliderKind::Cube {
+                            0.5
+                        } else {
+                            radius
+                        },
+                        0.0,
+                    ),
+                    motion,
+                    enabled,
+                },
+            )
+        }
+    };
+    let mut cloths = vec![cloth];
+    if id == SceneId::Multiple {
+        for (texture, height) in [(2, 1.8), (3, 2.1)] {
+            cloths.push(ClothSpec {
+                texture,
+                position: Vec3::new(0.0, height, 1.0),
+                ..cloths[0].clone()
+            });
+        }
+    }
+    let mut scene = ComparisonScene {
+        cloths,
+        colliders: vec![ColliderSpec {
+            kind: ColliderKind::Plane,
+            radius: 0.0,
+            half_extents: Vec3::ONE,
+            position: Vec3::ZERO,
+            motion: ColliderMotion::Static,
+            enabled: true,
+        }],
+    };
+    if id != SceneId::SelfCollision {
+        scene.colliders.push(collider);
+    }
+    Some(scene)
 }
 
 /// the assets and solver state a scene build needs, grouped so the helper signatures stay short.
@@ -264,30 +392,12 @@ fn build_scene(context: &mut SceneContext, id: SceneId) {
 
     spawn_camera_and_light(context);
 
-    match id {
-        SceneId::Attach => scene_attach(context),
-        SceneId::Collision => scene_collision(context),
-        SceneId::SelfCollision => scene_self_collision(context),
-        SceneId::Friction => scene_friction(context),
-        SceneId::Multiple => scene_multiple(context),
-        SceneId::HighResolution => scene_high_resolution(context),
-        SceneId::Swirl => scene_swirl(context),
-    }
-}
-
-/// `SceneClothAttach`: res 40 pinned at all four corners, over a static sphere.
-fn scene_attach(context: &mut SceneContext) {
-    spawn_comparison_scene(context, SceneId::Attach);
-}
-
-/// `SceneClothCollision`: res 16 hanging from its top edge, a sphere sweeping `z = -cos(2t)`.
-fn scene_collision(context: &mut SceneContext) {
-    spawn_comparison_scene(context, SceneId::Collision);
+    spawn_comparison_scene(context, id);
 }
 
 /// Keep the CPU visuals and history initialization in the existing spawn helpers.
 fn spawn_comparison_scene(context: &mut SceneContext, id: SceneId) {
-    let scene = comparison_scene(id).expect("CPU comparison builders use supported scenes");
+    let scene = comparison_scene(id).expect("all seven scenes have shared descriptors");
     for collider in scene.colliders {
         match collider.kind {
             ColliderKind::Plane => spawn_ground(context),
@@ -298,118 +408,12 @@ fn spawn_comparison_scene(context: &mut SceneContext, id: SceneId) {
                 collider.motion,
                 collider.enabled,
             ),
-            ColliderKind::Cube => unreachable!("comparison batch contains only ground and sphere"),
+            ColliderKind::Cube => spawn_cube(context, collider.half_extents.x, collider.position),
         }
     }
     for cloth in scene.cloths {
         spawn_cloth(context, cloth);
     }
-}
-
-/// `SceneClothSelfCollision`: res 60, no attachment, `substeps 8` / `friction 0.3`.
-fn scene_self_collision(context: &mut SceneContext) {
-    spawn_ground(context);
-
-    spawn_cloth(
-        context,
-        ClothSpec {
-            resolution: 60,
-            texture: 1,
-            position: Vec3::new(0.0, 1.5, 1.0),
-            rotation: Vec3::new(-15.0, 10.0, 10.0),
-            attached: Vec::new(),
-        },
-    );
-}
-
-/// `SceneClothFriction`: res 64, a sphere sliding along `x` with a spin, `friction 0.6`.
-fn scene_friction(context: &mut SceneContext) {
-    spawn_ground(context);
-
-    spawn_sphere(
-        context,
-        0.5,
-        Vec3::new(0.0, 0.5, 0.0),
-        ColliderMotion::FrictionSweep,
-        true,
-    );
-    spawn_cloth(
-        context,
-        ClothSpec {
-            resolution: 64,
-            texture: 2,
-            position: Vec3::new(0.0, 1.5, 1.0),
-            rotation: Vec3::new(90.0, 0.0, 0.0),
-            attached: Vec::new(),
-        },
-    );
-}
-
-/// `SceneClothMultiple`: three res-64 sheets sharing one solver, over a unit cube.
-fn scene_multiple(context: &mut SceneContext) {
-    spawn_ground(context);
-
-    // `SpawnColoredCube` with `scale = 1.0`; the mesh is a unit cube, so the half extent is 0.5
-    spawn_cube(context, 0.5, Vec3::new(0.0, 0.5, 0.0));
-
-    for (texture, height) in [(1, 1.5), (2, 1.8), (3, 2.1)] {
-        spawn_cloth(
-            context,
-            ClothSpec {
-                resolution: 64,
-                texture,
-                position: Vec3::new(0.0, height, 1.0),
-                rotation: Vec3::new(90.0, 0.0, 0.0),
-                attached: Vec::new(),
-            },
-        );
-    }
-}
-
-/// `SceneClothHD`: res 200, `substeps 10` / `iterations 10` (plan.org §1.7 marks this a stress case).
-fn scene_high_resolution(context: &mut SceneContext) {
-    spawn_ground(context);
-
-    spawn_sphere(
-        context,
-        0.6,
-        Vec3::new(0.0, 0.6, 0.0),
-        ColliderMotion::Static,
-        true,
-    );
-    spawn_cloth(
-        context,
-        ClothSpec {
-            resolution: 200,
-            texture: 2,
-            position: Vec3::new(0.0, 1.5, 1.0),
-            rotation: Vec3::new(90.0, 0.0, 0.0),
-            attached: Vec::new(),
-        },
-    );
-}
-
-/// `SceneClothSwirl`: res 36 with a single pinned corner; the sphere rides the slot but is disabled.
-fn scene_swirl(context: &mut SceneContext) {
-    spawn_ground(context);
-
-    spawn_sphere(
-        context,
-        0.1,
-        Vec3::new(0.0, 0.1, 0.0),
-        ColliderMotion::SwirlSlot,
-        false,
-    );
-    spawn_cloth(
-        context,
-        ClothSpec {
-            resolution: 36,
-            texture: 1,
-            position: Vec3::new(0.0, 1.5, 1.0),
-            rotation: Vec3::new(90.0, 0.0, 0.0),
-            attached: vec![0],
-        },
-    );
 }
 
 /// one `SpawnCloth` call.

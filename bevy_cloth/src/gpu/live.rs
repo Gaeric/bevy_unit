@@ -81,7 +81,7 @@ impl Default for GpuSceneConfig {
     }
 }
 
-/// Separate CPU/GPU comparison entry point; first batch supports scenes 1 and 2 only.
+/// Separate CPU/GPU comparison entry point for all seven shared scenes.
 pub struct SolverScenesPlugin;
 
 impl Plugin for SolverScenesPlugin {
@@ -209,13 +209,18 @@ fn controls(
     ticks: Res<LiveTicks>,
     mut guides: Query<&mut Visibility, With<ColliderGuide>>,
 ) {
-    let next_scene = if keys.just_pressed(KeyCode::Digit1) {
-        Some(SceneId::Attach)
-    } else if keys.just_pressed(KeyCode::Digit2) {
-        Some(SceneId::Collision)
-    } else {
-        None
-    };
+    let next_scene = [
+        KeyCode::Digit1,
+        KeyCode::Digit2,
+        KeyCode::Digit3,
+        KeyCode::Digit4,
+        KeyCode::Digit5,
+        KeyCode::Digit6,
+        KeyCode::Digit7,
+    ]
+    .into_iter()
+    .zip(SceneId::ALL)
+    .find_map(|(key, scene)| keys.just_pressed(key).then_some(scene));
     if let Some(scene) = next_scene {
         let mut requests = ticks.0.lock().expect("live cloth ticks");
         if requests.scene.is_some() {
@@ -528,6 +533,14 @@ impl SceneMotion {
         }
     }
 
+    fn moving_attachment_slots(&self, dt: f32) -> Option<[Vec3; 1]> {
+        (self.scene == SceneId::Swirl).then(|| {
+            [crate::demo::scenes::swirl_slot_position(
+                self.frame as f32 * dt,
+            )]
+        })
+    }
+
     fn advance(&mut self, dt: f32) -> Vec<SdfCollider> {
         self.frame += 1;
         let seconds = self.frame as f32 * dt;
@@ -559,9 +572,11 @@ impl Plugin for SolverLivePlugin {
         embedded_asset!(app, "live_material.wesl");
         app.init_resource::<LiveConfig>();
         let config = app.world().resource::<LiveConfig>();
-        config
-            .validate()
-            .expect("valid live cloth startup configuration");
+        let validation = match app.world().get_resource::<GpuSceneConfig>() {
+            Some(scene) => config.validate_scene(scene.scene),
+            None => config.validate(),
+        };
+        validation.expect("valid live cloth startup configuration");
         let start_paused = config.start_paused;
         info!(
             ?config,
@@ -982,6 +997,9 @@ fn simulate_and_output(
             .flatten();
         if let Some(motion) = &mut scene_state.motion {
             solver.update_colliders(&queue, &motion.advance(step_time));
+            if let Some(positions) = motion.moving_attachment_slots(step_time) {
+                solver.update_attachment_slots(&queue, &positions);
+            }
         }
         solver.submit_step(
             context.render_device(),
@@ -1293,9 +1311,7 @@ fn spawn_scene_visuals(
         offset += count;
     }
     for (index, spec) in definition.colliders.iter().enumerate() {
-        if !spec.enabled {
-            continue;
-        }
+        // Collision enablement does not hide the CPU scene's decorative Swirl slot actor.
         // Unit bodies: the fixture model includes sphere radius / cube extent exactly once.
         let mesh = match spec.kind {
             ColliderKind::Plane => Mesh::from(Plane3d::default().mesh().size(50.0, 50.0)),
@@ -1331,7 +1347,7 @@ fn spawn_scene_visuals(
         generation,
         particles = fixture.num_particles(),
         dt,
-        "GPU comparison scene: 1/2 switch paused, Space pause, S tick, R reset paused, C collider bodies, L triangle-edge overlay; middle drag/wheel camera"
+        "GPU comparison scene: 1–7 switch paused, Space pause, S tick, R reset paused, C collider bodies, L triangle-edge overlay; middle drag/wheel camera"
     );
 }
 
@@ -1514,7 +1530,7 @@ mod tests {
 
     #[test]
     fn collider_bodies_apply_fixture_scale_once_and_planes_only_translate() {
-        for scene in [SceneId::Attach, SceneId::Collision] {
+        for scene in SceneId::ALL {
             for spec in comparison_scene(scene).unwrap().colliders {
                 let model = spec.initial_transform();
                 let body = collider_body_transform(spec.kind, model);
@@ -1603,13 +1619,42 @@ mod tests {
     }
 
     #[test]
+    fn swirl_upload_tracks_each_tick_and_reset_without_enabling_collision() {
+        let dt = 1.0 / 60.0;
+        let mut motion = SceneMotion::new(SceneId::Swirl);
+        for frame in 1..=360 {
+            let colliders = motion.advance(dt);
+            let expected = crate::demo::scenes::swirl_slot_position(frame as f32 * dt);
+            assert_eq!(motion.moving_attachment_slots(dt), Some([expected]));
+            assert_eq!(colliders[1], SdfCollider::disabled());
+            assert_eq!(
+                motion.previous[1],
+                Mat4::from_translation(Vec3::new(0.0, 0.1, 0.0))
+            );
+        }
+        let mut reset = SceneMotion::new(SceneId::Swirl);
+        reset.advance(dt);
+        assert_eq!(
+            reset.moving_attachment_slots(dt),
+            Some([crate::demo::scenes::swirl_slot_position(dt)])
+        );
+        for scene in SceneId::ALL.into_iter().filter(|id| *id != SceneId::Swirl) {
+            assert_eq!(SceneMotion::new(scene).moving_attachment_slots(dt), None);
+        }
+    }
+
+    #[test]
     fn scene_motion_preserves_cpu_first_history_and_each_previous_tick() {
         let dt = 1.0 / 60.0;
-        for scene in [SceneId::Attach, SceneId::Collision] {
+        for scene in SceneId::ALL {
             let definition = comparison_scene(scene).unwrap();
             let mut motion = SceneMotion::new(scene);
             let first = motion.advance(dt);
             for (spec, collider) in definition.colliders.iter().zip(&first) {
+                if !spec.enabled {
+                    assert_eq!(*collider, SdfCollider::disabled());
+                    continue;
+                }
                 assert_eq!(
                     collider.last_transform,
                     Mat4::from_translation(spec.position)
@@ -1626,6 +1671,10 @@ mod tests {
             }
             let second = motion.advance(dt);
             for (spec, collider) in definition.colliders.iter().zip(&second) {
+                if !spec.enabled {
+                    assert_eq!(*collider, SdfCollider::disabled());
+                    continue;
+                }
                 assert_eq!(
                     *collider,
                     SdfCollider::with_history(

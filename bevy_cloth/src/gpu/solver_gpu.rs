@@ -82,8 +82,25 @@ impl Default for LiveConfig {
 
 impl LiveConfig {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if !(2..=128).contains(&self.resolution) {
-            return Err("resolution must be in 2..=128");
+        self.validate_resolution_limit(128)
+    }
+
+    /// Only the shared HD scene admits resolution 200; legacy live controls stay capped at 128.
+    pub(super) fn validate_scene(&self, scene: SceneId) -> Result<(), &'static str> {
+        self.validate_resolution_limit(if scene == SceneId::HighResolution {
+            200
+        } else {
+            128
+        })
+    }
+
+    fn validate_resolution_limit(&self, maximum: u32) -> Result<(), &'static str> {
+        if !(2..=maximum).contains(&self.resolution) {
+            return Err(if maximum == 128 {
+                "resolution must be in 2..=128"
+            } else {
+                "HD scene resolution must be in 2..=200"
+            });
         }
         if !(1..=8).contains(&self.layers) {
             return Err("layers must be in 1..=8");
@@ -245,7 +262,7 @@ struct SolverBuffers {
     _stretch_inc_rest: Buffer,
     _attach_inc_offsets: Buffer,
     _attach_inc_entries: Buffer,
-    _attach_slot_positions: Buffer,
+    attach_slot_positions: Buffer,
     _bend_inc_offsets: Buffer,
     _bend_inc_entries: Buffer,
     _bend_constraints: Buffer,
@@ -533,9 +550,22 @@ impl NeighborBuffers {
             .num_particles
             .checked_mul(config.capacity)
             .expect("neighbor table size");
-        // Dispatch sizes and cumulative u32 counters must fit; allocation is checked by wgpu.
-        assert!(config.num_particles.div_ceil(WORKGROUP_SIZE) <= 65535);
-        assert!(config.num_buckets.div_ceil(WORKGROUP_SIZE) <= 65535);
+        // All kernels use 256 lanes; scan_blocks additionally uses 256 shared u32s.
+        // Check the actual device rather than assuming the WebGPU dispatch limit.
+        let limits = device.limits();
+        assert!(WORKGROUP_SIZE <= limits.max_compute_workgroup_size_x);
+        assert!(WORKGROUP_SIZE <= limits.max_compute_invocations_per_workgroup);
+        assert!(
+            WORKGROUP_SIZE * size_of::<u32>() as u32 <= limits.max_compute_workgroup_storage_size
+        );
+        assert!(
+            config.num_particles.div_ceil(WORKGROUP_SIZE)
+                <= limits.max_compute_workgroups_per_dimension
+        );
+        assert!(
+            config.num_buckets.div_ceil(WORKGROUP_SIZE)
+                <= limits.max_compute_workgroups_per_dimension
+        );
         let zeros = vec![0u32; config.num_buckets as usize];
         let counts = storage_buffer(
             device,
@@ -1049,7 +1079,7 @@ fn run_neighbor_probe(
     report
 }
 
-/// Workload metadata for the shared Attach/Collision scenes, not the legacy live fixture.
+/// Workload metadata for the seven shared scenes, not the legacy live fixture.
 pub(super) fn scene_live_config(scene: SceneId) -> LiveConfig {
     let definition = comparison_scene(scene).expect("supported GPU comparison scene");
     let params = scene_params(scene);
@@ -1070,13 +1100,17 @@ pub(super) fn scene_live_config(scene: SceneId) -> LiveConfig {
         self_collision: params.enable_self_collision,
         ..default()
     };
-    config.validate().expect("valid shared scene configuration");
+    config
+        .validate_scene(scene)
+        .expect("valid shared scene configuration");
     config
 }
 
 /// Exact CPU scene construction: no legacy fixture perturbation or compliance override.
 pub(super) fn scene_fixture(step_time: f32, scene: SceneId) -> (Solver, SimParams) {
     assert!(step_time.is_finite() && step_time > 0.0);
+    // Validate shared scene bounds before allocating meshes; this does not relax legacy live.
+    scene_live_config(scene);
     let definition = comparison_scene(scene).expect("supported GPU comparison scene");
     let mut params = scene_params(scene);
     let mut solver = Solver::default();
@@ -1603,7 +1637,7 @@ fn initialize_solver_buffers(
         _stretch_inc_rest: stretch_inc_rest,
         _attach_inc_offsets: attach_inc_offsets,
         _attach_inc_entries: attach_inc_entries,
-        _attach_slot_positions: attach_slot_positions,
+        attach_slot_positions,
         _bend_inc_offsets: bend_inc_offsets,
         _bend_inc_entries: bend_inc_entries,
         _bend_constraints: bend_constraints,
@@ -1781,6 +1815,24 @@ impl LiveSolver {
             bytemuck::cast_slice(&pack_colliders(colliders)),
         );
         self.0.colliders.copy_from_slice(colliders);
+    }
+
+    /// Upload before the corresponding submit_step; attachment topology cannot change in-place.
+    /// CPU diagnostics retain the same targets; GPU slots use the existing padded vec4 layout.
+    pub(super) fn update_attachment_slots(&mut self, queue: &RenderQueue, positions: &[Vec3]) {
+        assert_eq!(
+            positions.len(),
+            self.0.attachment.slot_positions.len(),
+            "fixed attachment slot count"
+        );
+        self.0.attachment.slot_positions.copy_from_slice(positions);
+        if !positions.is_empty() {
+            queue.write_buffer(
+                &self.0.attach_slot_positions,
+                0,
+                bytemuck::cast_slice(&pack_vec3(positions)),
+            );
+        }
     }
 
     pub(super) fn positions(&self) -> &Buffer {
@@ -2346,6 +2398,30 @@ mod tests {
     }
 
     #[test]
+    fn hd_validation_keeps_legacy_and_other_scene_limits() {
+        let mut config = LiveConfig {
+            resolution: 200,
+            ..default()
+        };
+        assert!(config.validate().is_err());
+        for scene in SceneId::ALL {
+            assert_eq!(
+                config.validate_scene(scene).is_ok(),
+                scene == SceneId::HighResolution
+            );
+        }
+        config.resolution = 201;
+        assert!(config.validate_scene(SceneId::HighResolution).is_err());
+        config.resolution = 200;
+        config.neighbor_capacity = 257;
+        assert!(config.validate_scene(SceneId::HighResolution).is_err());
+        // HD dispatches fit the portable 65535-group limit without tiling.
+        let particles = 40401u32;
+        assert_eq!(particles.div_ceil(WORKGROUP_SIZE), 158);
+        assert_eq!((2 * particles).div_ceil(WORKGROUP_SIZE), 316);
+    }
+
+    #[test]
     fn configured_fixture_sizes_layers_and_preserves_rest_spacing() {
         for layers in [1, 3] {
             let config = LiveConfig {
@@ -2474,13 +2550,24 @@ mod tests {
         for (scene, count, pins) in [
             (SceneId::Attach, 1681, vec![0, 40, 1680, 1640]),
             (SceneId::Collision, 289, vec![0, 16]),
+            (SceneId::SelfCollision, 3721, vec![]),
+            (SceneId::Friction, 4225, vec![]),
+            (SceneId::Multiple, 12675, vec![]),
+            (SceneId::HighResolution, 40401, vec![]),
+            (SceneId::Swirl, 1369, vec![0]),
         ] {
             let (actual, params) = scene_fixture(dt, scene);
             let definition = comparison_scene(scene).unwrap();
             let mut expected = Solver::default();
             let mut expected_params = scene_params(scene);
+            let mut offset = 0;
+            let mut stretch_count = 0;
+            let mut bend_count = 0;
             for cloth in &definition.cloths {
                 let mesh = generate_cloth_mesh(cloth.resolution);
+                let resolution = cloth.resolution as usize;
+                stretch_count += 4 * resolution * resolution + 2 * resolution;
+                bend_count += resolution * resolution;
                 expected
                     .add_cloth(
                         &mut expected_params,
@@ -2495,9 +2582,16 @@ mod tests {
                     .iter()
                     .map(|&position| cloth.pose().transform_point3(position))
                     .collect();
-                assert_eq!(actual.positions, baked, "no fixture perturbation");
+                assert_eq!(
+                    actual.positions[offset..offset + baked.len()],
+                    baked,
+                    "no fixture perturbation: {scene:?}"
+                );
+                offset += baked.len();
             }
-            assert_eq!(actual.num_particles(), count);
+            assert_eq!(actual.num_particles(), count, "{scene:?}");
+            assert_eq!(actual.constraints.stretch.indices.len(), stretch_count);
+            assert_eq!(actual.constraints.bend.indices.len(), bend_count);
             assert_eq!(params, expected_params);
             assert_eq!(params.bend_compliance, scene_params(scene).bend_compliance);
             assert_eq!(params.bend_compliance, 0.0);
@@ -2559,14 +2653,21 @@ mod tests {
     #[test]
     fn scene_live_config_tracks_shared_definition_and_keeps_other_defaults() {
         let defaults = LiveConfig::default();
-        for (scene, resolution, count) in
-            [(SceneId::Attach, 40, 1681), (SceneId::Collision, 16, 289)]
-        {
+        for (scene, resolution, layers, count) in [
+            (SceneId::Attach, 40, 1, 1681),
+            (SceneId::Collision, 16, 1, 289),
+            (SceneId::SelfCollision, 60, 1, 3721),
+            (SceneId::Friction, 64, 1, 4225),
+            (SceneId::Multiple, 64, 3, 12675),
+            (SceneId::HighResolution, 200, 1, 40401),
+            (SceneId::Swirl, 36, 1, 1369),
+        ] {
             let config = scene_live_config(scene);
             let params = scene_params(scene);
-            assert!(config.validate().is_ok());
+            assert!(config.validate_scene(scene).is_ok());
+            assert_eq!(config.validate().is_ok(), scene != SceneId::HighResolution);
             assert_eq!(config.resolution, resolution);
-            assert_eq!(config.layers, 1);
+            assert_eq!(config.layers, layers);
             assert_eq!(config.particle_count(), count);
             assert_eq!(config.substeps, params.num_substeps);
             assert_eq!(config.iterations, params.num_iterations);

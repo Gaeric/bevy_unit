@@ -31,51 +31,50 @@
     未运行不记测试通过，未实测不记性能达标；不替用户宣称已经掌握，也不以答题作为验收。
   - 工作流遵守根 [[file:../AGENTS.md][AGENTS.md]]；测试必须带 =-j 2=，避免 Bevy 编译、链接耗尽内存。
 
-* 当前状态（2026-10-29）
+* 当前状态（2026-10-30）
   | 类别 | 代码现状 | 验收边界 |
   |------+----------+----------|
-  | CPU | 现有 demo/参考求解器；独立暴力邻居诊断 | 不参与生产 GPU 邻居生成，不是独立正确性证明 |
-  | GPU headless | 完整求解、动态自碰撞、60 步对照与两类专项 | 用户主机 check/test 无错误，运行报告通过；无性能/物理正确性结论 |
-  | GPU live | 独立 SolverLivePlugin、FixedUpdate、GPU-direct 双色线框 | 用户确认视觉符合预期；不推断交互专项、长期稳定性或性能 |
-  | live 遥测 | 邻居统计的窗口化异步读回 | 用户确认编译无问题；异步映射、窗口数据、异常告警待运行验证 |
-  | 静态碰撞器参照 | 本体线框、C 键显隐 | 3 项几何提取测试通过；集成编译、显示和交互待验证 |
-  | 当前工作 | live 启动配置、暂停重置、GPU 采样计时 | 局部 CPU 测试通过；本批完整编译、设备功能与数值/视觉回归待验证 |
+  | CPU | 既有参考求解器；七场景读取共享描述 | 算法不改；旧重置/抓取缺口保留，不是独立正确性标准 |
+  | GPU headless | 完整求解、动态自碰撞、60步对照与专项 | 2026-10-29用户运行通过；不外推至新七场景 |
+  | GPU live | 旧小型fixture、GPU-direct线框 | 前批视觉确认；遥测/重置/计时设备专项仍待验证 |
+  | GPU scenes | 七场景、三角布面、动态法线、光照/阴影/L叠加 | 全部已实现；当前隔离实际all-targets检查通过，设备验收待运行 |
 
-* 当前主线：GPU 七场景对照（2026-10-30）
-  - [用户同意] 求解内核已有实现，下一步用它补齐 GPU 七场景，以观察和对照实际布料行为；
-    不以持续完善 XPBD 求解器为主轴，不把既有遥测/计时验收设为场景接入的前置门槛。
-  - [决定] CPU/GPU 共享场景定义、区分入口。分批为 1/2 Attach/Collision、3/4/5 自碰撞/摩擦/多布片、6/7 高分辨率/Swirl。
-    首批接入1/2，随后已补齐下节呈现链路；不做同屏双求解器或常态粒子读回，不改 CPU 算法或 Velvet。
-  - [代码] =demo/scenes.rs= 提取首批描述与球体运动，CPU 构建读取同一描述；=demo/plugin.rs= SweepZ 调用共享公式。
-    =gpu/solver_gpu.rs= 从共享初态上传，保留旧 headless/live fixture；新增实际 buffers 容量检查和逐tick碰撞器上传。
-    =gpu/live.rs= 复用线框输出、独立场景插件、60Hz、generation场景重建、逐tick动画/历史与提取边界。
-    =gpu/mod.rs= 导出；新 =examples/velvet-gpu-scenes.rs= 独立CLI，=tests/scenes.rs= 共享定义测试。
-  - [行为] 1/2切换并暂停，R同场景复位并暂停，Space运行/暂停，S单tick，C参照显隐，中键/滚轮相机。
-    Attach1681粒子、Collision289粒子；scene_params保持原值，不用旧fixture的扰动与bend_compliance覆盖。
-    多tick帧逐tick写入碰撞器并独立submit；动画frame×dt，与CPU60Hz一致。首tick历史保留CPU仅平移行为。
-    场景Mesh与solver按generation配对；参照在AssetEventSystems之前更新，tick frontier约束本次提取的求解步数。
-  - [验证] 共享定义局部12项、fixture等局部20项、CLI局部4项分别通过；最终合并提取harness23项通过（有重复覆盖，不相加）。
-    使用实际CPU sim模块及提取的场景/队列/运动代码；不等于Bevy调度或GPU验证。格式与差异检查见本批交付。
-    隔离manifest直接引用当前库和全部9个example，以缓存TUNA源、私有target、临时pkg-config元数据stub执行
-    =cargo check --offline -j 2 --all-targets= 最终通过（库单元测试、全部9个example、8个集成测试目标及CLI测试均编译）。
-    检查同时发现并修复两项旧测试对已不存在main_cloth_fixture的引用，改为现有默认configured_fixture。
-    不是workspace check、链接、正式测试执行或设备验证；临时stub不提供原生库。
-  - [待设备验证] 新入口场景1/2初态、显示、球体运动、暂停单步、反复切换/R（含读回在途）、相机与C键。
-    初态看粒子数/挂点；运动看 =SceneMotion::advance= 的frame与上一模型、sphere.z=-cos(2×frame/60)；
-    暂停不推进动画，单步只推进一tick，R恢复frame0；多tick帧参照/布料应同刻，异常查tick_limit/submitted_ticks/generation。
-    CPU既有重置/切换时钟缺口不在本批修复，严格初态对照重启入口；不宣称轨迹一致、物理正确或性能达标。
+* 当前主线：七场景已实现，转入设备对照与诊断（2026-10-30）
+  - [代码事实] =demo/scenes.rs::comparison_scene/scene_params= 共享全部七场景描述/参数与运动公式；
+    =gpu/solver_gpu.rs::scene_fixture= 上传共享初态，旧headless/live fixture保留。
+    =gpu/live.rs= 独立场景插件以60Hz逐tick动画、上传碰撞器历史、按generation重建与隔离读回；
+    =examples/velvet-gpu-scenes.rs= 支持全部数字/名称。CPU读取共享描述，不改CPU求解算法或Velvet。
+  - [参数] 分辨率/布片数/总粒子/子步/迭代/摩擦完整表及名称见 [[file:readme.org::*运行现有程序][readme运行说明]]。
+    scene1..7粒子数依次1681、289、3721、4225、12675、40401、1369；不施加旧fixture扰动或bend_compliance覆盖。
+    Multiple三片64分辨率布合并为一个求解器，共享邻居表与跨布片自碰撞，不是独立求解。
+    HD200仅场景6放宽，旧live CLI仍限128；所有buffers/bindings与实际Mesh allocation仍检查实际设备边界，不能保证任意设备可运行。
+  - [运动语义] Collision沿共享SweepZ；Friction保留0.5秒平移延迟、signed截断/余数旋转，上传完整旋转/缩放及上一模型。
+    首tick历史仍为CPU初始仅平移模型，随后使用上一tick完整模型；多tick帧逐tick独立submit，不用最后uniform覆盖前步。
+    Swirl每tick更新attachment slot；disabled球体仍可见并随槽运动，求解保留legacy disabled槽语义，非活动球体碰撞。
+  - [操作] =1–7= 切换并暂停，=R= 重置并暂停，=Space= 暂停/继续，暂停时=S=单tick；
+    =C=实体显隐、=L=三角线框叠加，中键环绕/滚轮缩放。切换/R清空队列、动画时钟、采样与旧代Mesh/读回。
+  - [本批证据] 隔离manifest直接引用当前实际库、全部examples和测试目标，私有target、临时原生库pkg-config元数据stub下
+    =cargo check --offline -j 2 --all-targets= 通过。共享场景提取测试14项及旧CPU生成序列对照1项、solver配置提取测试8项、CLI提取测试5项通过。
+    实际SceneMotion源码提取的七场景历史、Swirl槽位/重置测试2项通过，共享场景14项同次重跑通过。
+    不是workspace构建、链接、完整Bevy集成测试执行或设备验证；不宣称设备运行、数值正确或性能达标。
+  - [下一步，待设备验证] 分别启动七场景暂停检查粒子数/挂点/初态，再检查单步、运行、反复1–7/R与在途读回；
+    暂停不推进frame，S只一tick，R回frame0；异常查 =SceneMotion::advance=、tick_limit/submitted_ticks/generation。
+    Friction查当前/上一完整模型与旋转，Swirl查槽位和可见disabled球同步，Multiple查三片输出/跨片邻居，HD查实际allocation与容量拒绝日志。
+    多tick帧布面/实体应同刻；呈现验收看正反面纹理、褶皱法线、投影、C显隐和L深度。失败先保存配置、日志和具体场景再定位。
+    CPU严格初态对照需重启入口，旧R/切换时钟缺口未修复；CPU/GPU一致也不是独立物理正确性证明。无设备运行或性能新证据。
   #+begin_src bash
     cargo check -j 2 -p bevy_cloth --all-targets
     cargo test -j 2 -p bevy_cloth --test scenes
     cargo test -j 2 -p bevy_cloth --lib gpu::
     cargo test -j 2 -p bevy_cloth --example velvet-gpu-scenes
     cargo run -j 2 -p bevy_cloth --example velvet-gpu-scenes -- --scene 1 --paused
-    cargo run -j 2 -p bevy_cloth --example velvet-gpu-scenes -- --scene 2 --paused --timing
+    cargo run -j 2 -p bevy_cloth --example velvet-gpu-scenes -- --scene high-resolution --paused --timing
     cargo run -j 2 -p bevy_cloth --example velvet-gpu
   #+end_src
 
-** 呈现收尾：法线、光照、阴影与线框（2026-10-30）
-   - [用户要求] 一并补齐GPU场景1/2呈现，不再将法线/光照/阴影/线框留作零散功能；后五场景/求解算法不改。
+** 历史批次：呈现收尾（2026-10-30）
+   以下是当时仅1/2接入后的实现与证据，非当前范围限制；当前七场景复用此呈现链路，设备验收仍待运行。
+   - [当时用户要求] 一并补齐GPU场景1/2呈现，不再将法线/光照/阴影/线框留作零散功能；该批不接入后五场景、不改求解算法。
    - [代码] 新 =gpu/normals.rs= 源三角索引→每顶点CSR，成对邻居绕序与三角访问顺序固定；每代上传一次offsets/pairs。
      =output.wesl= 每顶点gather原始cross后归一化，合并写POSITION/NORMAL，UV静态，无atomic/动态读回。
      32字节OutputRange含normal_offset_words；u32::MAX令旧live/叠加线跳过法线，5bindings布局/容量均检查。
@@ -99,7 +98,7 @@
      错纹理查AssetServer fabric路径/UV；线框闪烁或穿透查clip_bias与深度测试，不能用非法LineList depth bias。
      冻结/布局拒绝查position_layout和actualallocation；CPU/GPU法线可容许浮点绕序差，不能直接要求逐位一致。
 
-** 应用 FPS 与模拟 ms/tick 显示（2026-10-30）
+** 已实现批次：应用 FPS 与模拟 ms/tick 显示（2026-10-30）
    - [用户同意] 两项指标：应用FPS、模拟耗时ms/tick，不新增求解算法或基准框架。
    - [代码] =demo/plugin.rs= 在Solver::step返回后立即记录CPU耗时，64完成tick窗口均值；
      =demo/ui.rs= 显示均值/pending替换旧step读数，=demo/input.rs= 明确键盘请求→计时清空→切换顺序。
@@ -113,8 +112,9 @@
      开timing支持时预热→采样→均值，R/切换不得残留旧值，暂停仍收在途结果；检查文字布局与FPS不遮挡。
      CPU含法线、GPU为求解pass且可能跳样，不以二者均值之比宣称端到端加速比；无性能实测结论。
 
-* 保留待验证批次：启动配置 + 可重复初态 + GPU 计时
-  - [用户授权，2026-10-29] 合并推进建议1/2/3；前批遥测/碰撞器参照待验证项继续保留，编译成功不等于运行验收。
+* 已实现、设备待验证批次：启动配置 + 可重复初态 + GPU 计时
+  以下保留旧live批次的实现说明与设备清单；当前隔离all-targets已编译通过，不把早期编译缺口写作当前阻塞。
+  - [历史授权，2026-10-29] 合并推进建议1/2/3；前批遥测/碰撞器参照待验证项继续保留，编译成功不等于运行验收。
   - [改动文件] =Cargo.toml=（wgpu30 query 类型）、=src/gpu/mod.rs=（导出 LiveConfig）、=solver_gpu.rs=（配置/阶段标记）、
     =live.rs=（代号/重置/采样）、=pipeline.rs=（异步计时辅助）、=examples/velvet-gpu-live.rs=（CLI）及 readme/本计划。
     CPU/Velvet 不改，Jacobi 约束计算/碰撞参数不改；headless 使用默认配置并保留原60步对照/专项和容差。
@@ -164,7 +164,7 @@
     live max-speed 仍为初始化上限，碰撞器变换静态；邻居遥测运行尚待验证，未作性能结论。
 
 ** 暂缓验证清单（有条件时运行，不要求当前补跑）
-   - [待验证，本批集成] 编译/测试新增配置、重置和计时；默认headless数值容差/专项不变，不放宽以适应重构。
+   - [待设备验证] 当前隔离all-targets编译已通过，正式测试执行及配置、重置和计时运行仍待验证；默认headless数值容差/专项不变，不放宽以适应重构。
      以 --resolution 8 --layers 1 --paused 和 --resolution 32 --layers 3 --paused 分别检查81/3267粒子及对应输出层数。
      空参数仍为578粒子/两层；自碰撞关只跳过邻居重建与粒子碰撞+apply，不跳过SDF或形变约束。
    - [待验证，重置] 运行后R应回到初态并暂停，S只推进一tick；反复R、启动未就绪时R、读回在途时R均不混旧数据。
@@ -173,7 +173,7 @@
      支持详细阶段时才有阶段值，输出单位ms/frame，求解ms/tick，skipped非零说明采样不完整，不冒充每tick覆盖。
      查 pipeline.rs::TimingSample 的written/query容量、resolve/map顺序、period_ns和u64差；测量值须有限非负，不能由局部测试推定实际耗时。
      暂停后仍收旧采样/输出，R不得混代；多fixed tick帧每tick独立提交uniform、独立采样，不把输出耗时乘进每tick。
-   - [待验证，碰撞器参照] 前批集成编译、显示和 C 键显隐。预期显示中性色地面网格、球体三大圆与旋转盒体；
+   - [待验证，碰撞器参照] 当前隔离编译已通过，显示和 C 键显隐待设备验证。旧live预期显示中性色地面网格、球体三大圆与旋转盒体；
      C 只隐藏/显示参照，不改变彩色布料、暂停状态、tick 或统计。
      若位置/尺寸不符，查 =live.rs::collider_guide_lines= 与 =solver_gpu.rs::fixture_colliders=；
      盒体局部端点应为 ±.5，世界变换使用 cur_transform（已含缩放），不可再乘一次 scale。
@@ -203,8 +203,8 @@
    - 遥测运行、参照集成与本批配置/重置/计时验证暂缓，要求保留；恢复后按实际结果共同定位，不以继续开发抵消验收缺口。
 
 * 后续方向（不是并行展开的任务清单）
-  - [决定，2026-10-30] GPU七场景对照是当前主线，按上节分批推进；下一批为SelfCollision/Friction/Multiple，
-    此后HighResolution/Swirl。具体接入问题围绕场景诊断，不以求解器抽象完善或性能基准取代场景交付。
+  - [决定，2026-10-30] GPU七场景已实现，下一步为上节设备对照与具体问题诊断，不再安排接入场景3–7。
+    先收集实际场景行为与异常，不以求解器抽象完善或性能基准取代场景验收。
     前批遥测/参照/配置/重置/计时的设备验证仍保留，不依赖未验证行为作算法或性能结论。
     不把未来优化提前定为任务，也不设必修理论课程。
   - 每一批的范围和验证标准都先讨论；尚未实现的并行算法与碰撞结构不预先承诺。
@@ -214,6 +214,8 @@
   - 不承诺固定 FPS（每秒显示帧数），不能因为用了 GPU 就宣称更快；先测量，再讨论优化。
 
 * 验证记录与限制
+  - [历史首批场景证据，2026-10-30] 当时仅Attach/Collision接入；共享定义12项、fixture等20项、CLI4项局部测试分别通过，
+    合并提取harness23项通过（重复覆盖，不相加）。当时隔离all-targets检查通过，不是设备运行；现已扩展至七场景，当前证据见下。
   - [历史证据] attachment：10 项主机测试及 UHD 770 / Mesa 26.2.5 / Vulkan 对照通过；
     bending：16 项测试及设备对照通过。旧批次参数/误差见 Git，不混入下面的完整自碰撞批次。
   - [用户实测，2026-10-29，headless 完整批次] 主机 cargo check/test 无错误，60 步运行通过。
@@ -230,15 +232,17 @@
   - [遥测证据] 前批 3 项 StatsClock 提取调度测试通过，用户确认编译无问题；窗口统计、异步映射和异常告警运行仍待验证。
   - [参照局部证据] 使用实际 collider_guide_lines、SdfCollider 定义和3项几何测试的临时rustc harness通过；
     验证平面高度、scale.x球半径、旋转/非均匀缩放盒体十二条唯一边，不调用compute_sdf作几何判据；不替代显示/C键验证。
-  - [本批局部证据] 配置/fixture4项和CLI2项实际源码提取测试通过，另1项临时最小网格SDF容量检查通过；
+  - [历史配置批次局部证据] 配置/fixture4项和CLI2项实际源码提取测试通过，另1项临时最小网格SDF容量检查通过；
     实际CPU sim模块只读导入，默认初态与独立重建旧fixture逐项比较一致。
     tick/统计窗口8项及timestamp解码/汇总3项提取测试通过（合计11），与上述7项合并harness共18项通过。
     另以实际wgpu30类型在/tmp隔离crate编译完整计时辅助及求解pass借用模式，4项CPU测试通过（含部分重复覆盖）；
     RenderDevice/Queue用薄包装、日志为占位，不创建adapter/device，不执行GPU工作，不能代替完整Bevy或异步映射/reset设备验证。
-    rustfmt与git diff --check通过；完整Cargo --offline -j2 --all-targets检查在avian3d解析处阻塞，尚未编译到本批代码；没有性能实测。
-  - [agent 环境] 已检查 /.dockerenv，当前为 Docker、无 GPU；CARGO_TARGET_DIR=/tmp/cargo-target 的离线 Cargo check
-    在 workspace avian3d 依赖解析时阻塞，未编译到本批代码，未执行正式集成验证。
-    源码缓存不等于离线依赖可解析，局部 harness 不替代 Cargo/Bevy/设备运行；没有性能测量。
+    当时rustfmt与git diff --check通过；早期workspace Cargo --offline -j2 --all-targets在avian3d解析处阻塞，未编译到当时改动；没有性能实测。
+  - [当前七场景证据，2026-10-30] 隔离manifest引用实际当前库/examples/测试目标的all-targets cargo check通过；
+    私有target、临时原生库pkg-config元数据stub，仅编译不链接/运行。共享场景提取14项及旧CPU生成序列对照1项、solver配置8项、CLI5项通过。
+    后续SceneMotion测试结果尚未记录；上述证据不证明Bevy调度、设备行为、视觉吻合、长期稳定或性能。
+  - [agent 环境] Docker、无GPU。早期workspace离线依赖阻塞与当前隔离检查通过是不同检查，不互相替代；
+    未执行workspace完整测试、GPU设备运行或性能测量。源码缓存不等于离线依赖可解析，局部harness不替代设备验收。
   - [代码事实／验收缺口] 子步测试只要求差值小于 1，不能据此宣称子步无关性。
     子步是把一次时间推进拆成更小步；其误差标准需随具体问题讨论。
   - 这些限制用于防止误读现有测试。是否在下一批处理，按求解器诊断需要讨论，不默认同时修复所有问题。

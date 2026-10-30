@@ -1,4 +1,4 @@
-//! Independent GPU entry point for the first comparison batch: Attach and Collision.
+//! Independent GPU entry point for all seven comparison scenes.
 //! The CPU `velvet-scenes` example remains separate.
 
 use bevy::prelude::*;
@@ -7,11 +7,13 @@ use bevy_cloth::{
     gpu::{GpuSceneConfig, SolverScenesPlugin},
 };
 
-const FIRST_BATCH: &str = "first batch supports only GPU scenes 1 (attach) and 2 (collision); scenes 3..7 are not available";
-const HELP: &str = "GPU scenes 1/2: --scene 1|2|attach|collision --paused --timing --help
+const SCENE_VALUES: &str =
+    "1..7 or attach|collision|self-collision|friction|multiple|high-resolution|swirl";
+const HELP: &str = "GPU scenes 1..7: --scene <number|name> --paused --timing --help
+Scenes: 1 attach; 2 collision; 3 self-collision; 4 friction;
+        5 multiple; 6 high-resolution; 7 swirl.
 Defaults: scene 1 (Attach), running, GPU timing off.
-The first batch supports only scenes 1 and 2; scenes 3..7 are not available.
-Controls: 1/2 switch scene and pause; Space pause/resume; S step while paused;
+Controls: 1..7 switch scene and pause; Space pause/resume; S step while paused;
 R reset and pause; C toggle solid collider bodies (simulation unchanged);
 L toggle triangle-edge overlay on the lit cloth; middle drag orbit; mouse wheel zoom.";
 
@@ -24,20 +26,25 @@ fn parse_config(args: impl IntoIterator<Item = String>) -> Result<Option<GpuScen
             "--paused" => config.start_paused = true,
             "--timing" => config.gpu_timing = true,
             "--scene" => {
-                let value = args.next().ok_or_else(|| {
-                    format!("--scene requires 1|2|attach|collision; {FIRST_BATCH}")
-                })?;
+                let value = args
+                    .next()
+                    .ok_or_else(|| format!("--scene requires {SCENE_VALUES}"))?;
                 config.scene = match value.as_str() {
                     "1" | "attach" => SceneId::Attach,
                     "2" | "collision" => SceneId::Collision,
-                    _ => return Err(format!("unsupported --scene value: {value}; {FIRST_BATCH}")),
+                    "3" | "self-collision" => SceneId::SelfCollision,
+                    "4" | "friction" => SceneId::Friction,
+                    "5" | "multiple" => SceneId::Multiple,
+                    "6" | "high-resolution" => SceneId::HighResolution,
+                    "7" | "swirl" => SceneId::Swirl,
+                    _ => {
+                        return Err(format!(
+                            "unsupported --scene value: {value}; expected {SCENE_VALUES}"
+                        ));
+                    }
                 };
             }
-            _ => {
-                return Err(format!(
-                    "unknown argument: {flag}; {FIRST_BATCH}; use --help"
-                ));
-            }
+            _ => return Err(format!("unknown argument: {flag}; use --help")),
         }
     }
     Ok(Some(config))
@@ -59,7 +66,7 @@ fn main() -> AppExit {
         .insert_resource(config)
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "GPU scenes 1/2 — Attach / Collision".into(),
+                title: "GPU scenes 1..7 — Attach / Collision / Self Collision / Friction / Multiple / High Resolution / Swirl".into(),
                 ..default()
             }),
             ..default()
@@ -92,6 +99,16 @@ mod tests {
             ("attach", SceneId::Attach),
             ("2", SceneId::Collision),
             ("collision", SceneId::Collision),
+            ("3", SceneId::SelfCollision),
+            ("self-collision", SceneId::SelfCollision),
+            ("4", SceneId::Friction),
+            ("friction", SceneId::Friction),
+            ("5", SceneId::Multiple),
+            ("multiple", SceneId::Multiple),
+            ("6", SceneId::HighResolution),
+            ("high-resolution", SceneId::HighResolution),
+            ("7", SceneId::Swirl),
+            ("swirl", SceneId::Swirl),
         ] {
             let config = parse(&["--timing", "--scene", value, "--paused"])
                 .unwrap()
@@ -107,26 +124,35 @@ mod tests {
     }
 
     #[test]
-    fn cli_rejects_missing_invalid_and_unknown_arguments() {
+    fn cli_rejects_missing_and_invalid_scene_values() {
+        let error = parse(&["--scene"]).unwrap_err();
+        assert_eq!(error, format!("--scene requires {SCENE_VALUES}"));
+        for value in [
+            "0",
+            "8",
+            "bad",
+            "self_collision",
+            "high_resolution",
+            "--paused",
+        ] {
+            let error = parse(&["--scene", value]).unwrap_err();
+            assert_eq!(
+                error,
+                format!("unsupported --scene value: {value}; expected {SCENE_VALUES}")
+            );
+        }
+    }
+
+    #[test]
+    fn cli_rejects_unknown_arguments() {
         for args in [
-            vec!["--scene"],
-            vec!["--scene", "0"],
-            vec!["--scene", "3"],
-            vec!["--scene", "4"],
-            vec!["--scene", "5"],
-            vec!["--scene", "6"],
-            vec!["--scene", "7"],
-            vec!["--scene", "8"],
-            vec!["--scene", "self-collision"],
-            vec!["--scene", "bad"],
-            vec!["--scene", "--paused"],
             vec!["--unknown"],
             vec!["--resolution", "16"],
             vec!["--scene=1"],
             vec!["1"],
         ] {
             let error = parse(&args).unwrap_err();
-            assert!(error.contains(FIRST_BATCH), "{args:?}: {error}");
+            assert_eq!(error, format!("unknown argument: {}; use --help", args[0]));
         }
     }
 
@@ -135,5 +161,17 @@ mod tests {
         for flag in ["--help", "-h"] {
             assert!(parse(&[flag]).unwrap().is_none());
         }
+        for scene in [
+            "1 attach",
+            "2 collision",
+            "3 self-collision",
+            "4 friction",
+            "5 multiple",
+            "6 high-resolution",
+            "7 swirl",
+        ] {
+            assert!(HELP.contains(scene), "help is missing {scene}");
+        }
+        assert!(HELP.contains("Controls: 1..7 switch scene and pause"));
     }
 }

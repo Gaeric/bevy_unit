@@ -228,23 +228,14 @@ fn animate_colliders(
                 transform.translation = scenes::sweep_z_position(collider.radius, t);
             }
             ColliderMotion::FrictionSweep => {
-                // `SceneClothFriction` offsets the clock by half a second
-                let time = t - 0.5;
-                if time > 0.0 {
-                    transform.translation = Vec3::new(time.sin(), collider.radius, 0.0);
+                let (position, rotation) = scenes::friction_sweep_pose(collider.radius, t);
+                if let Some(position) = position {
+                    transform.translation = position;
                 }
-
-                // `(int)time % 4 > 1` flips the spin direction every two seconds
-                let spin = if (time as i32) % 4 > 1 {
-                    -time * 180.0
-                } else {
-                    time * 180.0
-                };
-                transform.rotation = Quat::from_rotation_y(spin.to_radians());
+                transform.rotation = rotation;
             }
             ColliderMotion::SwirlSlot => {
-                // `slot0 = (sin 3t, cos 3t + 2, 0)`
-                let position = Vec3::new((t * 3.0).sin(), (t * 3.0).cos() + 2.0, 0.0);
+                let position = scenes::swirl_slot_position(t);
 
                 if let Some(slot) = solver.0.constraints.attach.slot_positions.first_mut() {
                     *slot = position;
