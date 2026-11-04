@@ -11,6 +11,8 @@ pub use cloth::{
     MeshColliderPreparation, PreparedCloth, PreparedMeshCollider,
 };
 
+pub use gpu::mesh_collision::{MeshQueryHit, MeshQueryProbes, MeshQueryReadout, MeshQueryReadouts};
+
 pub use demo::ClothInputPlugin;
 pub use demo::ClothPlugin;
 pub use demo::ClothUiPlugin;

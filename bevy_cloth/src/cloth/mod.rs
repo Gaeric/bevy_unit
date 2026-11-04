@@ -65,7 +65,10 @@ pub struct GpuClothPlugin;
 
 impl Plugin for GpuClothPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ImportedClothPlugin);
+        app.add_plugins((
+            ImportedClothPlugin,
+            crate::gpu::mesh_collision::MeshCollisionPlugin,
+        ));
         app.add_systems(
             PostUpdate,
             (

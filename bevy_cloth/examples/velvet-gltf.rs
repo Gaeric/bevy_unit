@@ -10,7 +10,8 @@ use bevy::{
 };
 use bevy_cloth::{
     ClothControl, ClothMeshCollider, ClothPreparation, ClothSim, ClothSolverConfig, GpuClothPlugin,
-    OrbitCameraPlugin, demo::OrbitCamera,
+    MeshColliderPreparation, MeshQueryProbes, MeshQueryReadouts, OrbitCameraPlugin,
+    demo::OrbitCamera, gpu::mesh_collision::brute_force_nearest,
 };
 use std::path::Path;
 
@@ -51,7 +52,7 @@ fn main() {
         .add_observer(mark_instance_roles)
         .add_systems(Startup, setup)
         .add_systems(PreUpdate, cloth_controls.after(bevy::input::InputSystems))
-        .add_systems(Update, draw_preparation)
+        .add_systems(Update, (draw_preparation, query_diagnostics))
         .add_systems(
             PostUpdate,
             log_instance_roles.after(TransformSystems::Propagate),
@@ -190,6 +191,25 @@ fn log_instance_roles(
             global_transform = ?transform,
             "GLB role selected"
         );
+        if matches!(selection.role, AssetRole::Sphere) {
+            // Face-center, edge-midpoint, vertex and center probes, from this instance's geometry.
+            let positions = mesh
+                .attribute(Mesh::ATTRIBUTE_POSITION)
+                .and_then(|p| p.as_float3());
+            if let (Some(positions), Some(indices)) = (positions, mesh.indices()) {
+                let ids: Vec<_> = indices.iter().take(3).collect();
+                if ids.len() == 3 {
+                    let [a, b, c] = [ids[0], ids[1], ids[2]].map(|i| Vec3::from(positions[i]));
+                    let points = [(a + b + c) / 3.0 * 1.1, (a + b) * 0.55, a * 1.1, Vec3::ZERO];
+                    commands.entity(entity).insert(MeshQueryProbes {
+                        positions: points
+                            .into_iter()
+                            .map(|p| transform.transform_point(p))
+                            .collect(),
+                    });
+                }
+            }
+        }
         commands.entity(entity).remove::<PendingRoleLog>();
     }
 }
@@ -272,6 +292,59 @@ mod tests {
             instance_meshes(root_b, &children, &meshes),
             vec![primitive_b]
         );
+    }
+}
+
+fn query_diagnostics(
+    readouts: Res<MeshQueryReadouts>,
+    colliders: Query<&MeshColliderPreparation>,
+    mut seen: Local<std::collections::HashMap<Entity, u64>>,
+    mut gizmos: Gizmos,
+) {
+    seen.retain(|entity, _| readouts.0.contains_key(entity));
+    for (&entity, result) in &readouts.0 {
+        let fresh = seen.get(&entity) != Some(&result.revision);
+        if fresh {
+            seen.insert(entity, result.revision);
+            if let Some(error) = &result.error {
+                warn!(?entity, %error, "mesh query diagnostic failed");
+            }
+        }
+        let Ok(MeshColliderPreparation::Ready(geometry)) = colliders.get(entity) else {
+            continue;
+        };
+        for (probe, hit) in result.probes.iter().zip(&result.hits) {
+            if hit.status != 0 {
+                if fresh {
+                    warn!(
+                        ?entity,
+                        status = hit.status,
+                        "mesh query shader rejected probe"
+                    );
+                }
+                continue;
+            }
+            let point = Vec3::new(hit.point[0], hit.point[1], hit.point[2]);
+            gizmos.sphere(*probe, 0.018, Color::srgb(1.0, 0.8, 0.1));
+            gizmos.line(*probe, point, Color::srgb(0.1, 1.0, 0.4));
+            gizmos.sphere(point, 0.012, Color::srgb(0.1, 1.0, 0.4));
+            if fresh {
+                if let Some(reference) =
+                    brute_force_nearest(&geometry.positions, &geometry.indices, *probe)
+                {
+                    let expected =
+                        Vec3::new(reference.point[0], reference.point[1], reference.point[2]);
+                    info!(
+                        ?entity,
+                        triangle = hit.triangle_id,
+                        visited = hit.visited_nodes,
+                        point_error = point.distance(expected),
+                        squared_distance_error = (hit.point[3] - reference.point[3]).abs(),
+                        "GPU BVH vs independent brute-force probe (ties may choose different IDs)"
+                    );
+                }
+            }
+        }
     }
 }
 
