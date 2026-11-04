@@ -13,7 +13,7 @@ pub use cloth::{
 
 pub use gpu::geometry::ColliderMotion;
 pub use gpu::mesh_collision::{MeshQueryHit, MeshQueryProbes, MeshQueryReadout, MeshQueryReadouts};
-pub use gpu::mesh_contact::{CollisionGroup, MeshContactSurface};
+pub use gpu::mesh_contact::{CollisionGroup, MeshContactSurface, MeshRebuildRequests};
 
 pub use demo::ClothInputPlugin;
 pub use demo::ClothPlugin;

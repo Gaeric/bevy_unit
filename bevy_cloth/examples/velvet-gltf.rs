@@ -11,7 +11,8 @@ use bevy::{
 use bevy_cloth::{
     ClothControl, ClothMeshCollider, ClothPreparation, ClothSim, ClothSolverConfig, ColliderMotion,
     CollisionGroup, GpuClothPlugin, MeshColliderPreparation, MeshQueryProbes, MeshQueryReadouts,
-    OrbitCameraPlugin, demo::OrbitCamera, gpu::mesh_collision::brute_force_nearest,
+    MeshRebuildRequests, OrbitCameraPlugin, demo::OrbitCamera,
+    gpu::mesh_collision::brute_force_nearest,
 };
 use std::path::Path;
 
@@ -59,7 +60,14 @@ fn main() {
         .run();
 }
 
-fn cloth_controls(keys: Res<ButtonInput<KeyCode>>, mut control: ResMut<ClothControl>) {
+fn cloth_controls(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut control: ResMut<ClothControl>,
+    mut rebuild: ResMut<MeshRebuildRequests>,
+) {
+    if keys.just_pressed(KeyCode::KeyB) {
+        rebuild.request_all();
+    }
     if keys.just_pressed(KeyCode::KeyR) {
         control.paused = true;
         control.reset();

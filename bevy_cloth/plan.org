@@ -118,6 +118,10 @@
    - 验证：逐层 AABB 与独立几何计算比较；运动和弯折场景中最近点及布料接触随动，记录 refit 和遍历成本。
 
 ** TODO 08 手动 rebuild 与运行中树切换
+   实现：MeshRebuildRequests.request_all（示例B）→异步current顶点快照→后台obvhs→新节点/refit表上传→最新顶点refit→PrepareResources边界切换。
+   旧树在等待时继续工作；新旧树共享同一current/previous/indices缓冲，不重置布料。snapshot/epoch/几何身份拒绝过期结果。
+   同时最多一个映射/建树/候选，忙时不重复排队；记录快照等待、CPU建树、上传/切换墙钟，不冒充GPU耗时。
+   Agent：all-targets check、148项lib测试通过（重建新增3项）；设备异步映射/不中断运行/访问量与耗时对比仍待运行。
    - 实现：增加手动重建入口。按请求取得当前几何快照；GPU 变形通过异步读回快照交给 CPU obvhs，而非每帧读取。
      构建新树和分层表、上传新资源；核对拓扑版本，在模拟边界用最新顶点 refit 后切换，保持布料状态。
    - 提交产物：可分别手动选择 refit 或 rebuild 的同一场景，记录快照、建树、上传与切换成本。

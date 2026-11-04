@@ -15,8 +15,9 @@ use bevy::{
         mesh::{RenderMesh, allocator::MeshAllocator},
         render_asset::RenderAssets,
         render_resource::{
-            BindGroup, BindGroupEntries, BindGroupLayoutEntries, Buffer, BufferInitDescriptor,
-            BufferUsages, ComputePass, ComputePassDescriptor, PipelineCache, ShaderStages,
+            BindGroup, BindGroupEntries, BindGroupLayoutEntries, Buffer, BufferDescriptor,
+            BufferInitDescriptor, BufferUsages, CommandEncoderDescriptor, ComputePass,
+            ComputePassDescriptor, MapMode, PipelineCache, PollType, ShaderStages,
             binding_types::{
                 storage_buffer_read_only_sized, storage_buffer_sized, uniform_buffer_sized,
             },
@@ -25,9 +26,30 @@ use bevy::{
     },
 };
 use bytemuck::{Pod, Zeroable};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::{Arc, Mutex, mpsc},
+    time::{Duration, Instant},
+};
 
-use crate::cloth::{ClothMeshCollider, MeshColliderPreparation, bvh::BvhNode};
+use crate::cloth::{
+    ClothMeshCollider, MeshColliderPreparation,
+    bvh::{BvhNode, TriangleBvh, build_triangle_bvh},
+};
+
+/// Explicit global rebuild requests; repeated requests while busy are coalesced.
+/// This requests a CPU rebuild from a GPU snapshot, not an automatic quality policy.
+#[derive(Resource, Clone, Default, ExtractResource)]
+#[extract_app(RenderApp)]
+pub struct MeshRebuildRequests {
+    sequence: u64,
+}
+
+impl MeshRebuildRequests {
+    pub fn request_all(&mut self) {
+        self.sequence = self.sequence.wrapping_add(1);
+    }
+}
 
 use super::{
     geometry::{ColliderMotion, GeometryTick, GpuPositions, PositionPipeline},
@@ -353,7 +375,7 @@ impl FromWorld for ContactPipeline {
 struct GpuGeometry {
     _uniform: Buffer,
     _nodes: Buffer,
-    positions: GpuPositions,
+    positions: Arc<GpuPositions>,
     _indices: Buffer,
     _refs: Buffer,
     refit: GpuRefit,
@@ -477,7 +499,7 @@ fn prepare_contacts(
                 } else {
                     (|| -> Result<Arc<GpuGeometry>, String> {
                         let refit = GpuRefit::new(&device, &g.refit_tree)?;
-                        let positions = GpuPositions::new(&device, &g.positions)?;
+                        let positions = Arc::new(GpuPositions::new(&device, &g.positions)?);
                         let csr = build_normal_csr(g.positions.len(), &g.indices);
                         let normal_offsets = upload(&device, &csr.offsets, BufferUsages::STORAGE);
                         let normal_pairs = upload(&device, &csr.pairs, BufferUsages::STORAGE);
@@ -556,6 +578,432 @@ fn prepare_contacts(
     let mut order: Vec<_> = contacts.entries.keys().copied().collect();
     order.sort_unstable_by_key(|entity| entity.to_bits());
     contacts.order = order;
+}
+
+// Rebuild work is globally single-flight, including the worker and ready candidate.
+// Tickets own the exact immutable input and GPU buffers until completion is consumed.
+struct RebuildTicket {
+    entity: Entity,
+    snapshot: Arc<Snapshot>,
+    geometry: Arc<GpuGeometry>,
+    epoch: Option<u64>,
+}
+
+fn same_rebuild_version(
+    requested: &Arc<Snapshot>,
+    current: &Arc<Snapshot>,
+    epoch: Option<u64>,
+    current_epoch: Option<u64>,
+) -> bool {
+    Arc::ptr_eq(requested, current) && epoch == current_epoch
+}
+
+impl RebuildTicket {
+    fn current(&self, contacts: &StaticMeshContacts) -> bool {
+        contacts.entries.get(&self.entity).is_some_and(|entry| {
+            same_rebuild_version(
+                &self.snapshot,
+                &entry.snapshot,
+                self.epoch,
+                entry.reset_epoch,
+            ) && entry
+                .geometry
+                .as_ref()
+                .is_some_and(|g| Arc::ptr_eq(g, &self.geometry))
+        })
+    }
+}
+
+#[derive(Default)]
+struct RebuildTimes {
+    snapshot_cpu: Duration,
+    map_wait: Duration,
+    build_wall: Duration,
+    build_cpu: Duration,
+    upload_cpu: Duration,
+}
+
+type MapCompletion = Arc<Mutex<Option<Result<(), String>>>>;
+type BuiltTree = Result<(TriangleBvh, Duration), String>;
+
+enum RebuildStage {
+    Mapping {
+        ticket: RebuildTicket,
+        staging: Buffer,
+        completion: MapCompletion,
+        submitted: Instant,
+        times: RebuildTimes,
+    },
+    Building {
+        ticket: RebuildTicket,
+        receiver: Mutex<mpsc::Receiver<BuiltTree>>,
+        started: Instant,
+        times: RebuildTimes,
+    },
+    Candidate {
+        ticket: RebuildTicket,
+        geometry: Arc<GpuGeometry>,
+        times: RebuildTimes,
+    },
+}
+
+#[derive(Resource, Default)]
+struct PendingRebuild {
+    requested_sequence: u64,
+    queue: VecDeque<(Entity, Arc<Snapshot>)>,
+    stage: Option<RebuildStage>,
+    poll_failed: bool,
+}
+
+impl PendingRebuild {
+    // Consume requests even while busy: holding/pressing the key cannot enqueue
+    // duplicate rebuilds behind the current all-collider batch.
+    fn accept_request(&mut self, sequence: u64) -> bool {
+        if self.requested_sequence == sequence {
+            return false;
+        }
+        self.requested_sequence = sequence;
+        self.stage.is_none() && self.queue.is_empty() && !self.poll_failed
+    }
+}
+
+fn upload_rebuilt_geometry(
+    device: &RenderDevice,
+    cache: &PipelineCache,
+    pipeline: &ContactPipeline,
+    old: &GpuGeometry,
+    tree: &TriangleBvh,
+) -> Result<Arc<GpuGeometry>, String> {
+    if tree.max_depth >= 127 {
+        return Err("rebuilt BVH exceeds contact traversal depth".into());
+    }
+    validate_array(tree.nodes.len(), 32, &device.limits())?;
+    validate_array(tree.triangle_refs.len(), 4, &device.limits())?;
+    let refit = GpuRefit::new(device, tree)?;
+    let uniform = upload(
+        device,
+        &[QueryParams {
+            query_count: 0,
+            node_count: tree.nodes.len() as u32,
+            triangle_count: tree.triangle_refs.len() as u32,
+            pad: 0,
+        }],
+        BufferUsages::UNIFORM,
+    );
+    let nodes = upload(device, &tree.nodes, BufferUsages::STORAGE);
+    let refs = upload(device, &tree.triangle_refs, BufferUsages::STORAGE);
+    // Preserve the actual buffers: no rest upload, history reset or normal CSR rebuild.
+    let positions = old.positions.clone();
+    let indices = old._indices.clone();
+    let group = device.create_bind_group(
+        "rebuilt mesh contact geometry",
+        &cache.get_bind_group_layout(&pipeline.geometry_layout),
+        &BindGroupEntries::sequential((
+            uniform.as_entire_binding(),
+            nodes.as_entire_binding(),
+            positions.current().as_entire_binding(),
+            indices.as_entire_binding(),
+            refs.as_entire_binding(),
+            positions.previous().as_entire_binding(),
+        )),
+    );
+    Ok(Arc::new(GpuGeometry {
+        _uniform: uniform,
+        _nodes: nodes,
+        positions,
+        _indices: indices,
+        _refs: refs,
+        refit,
+        normal_offsets: old.normal_offsets.clone(),
+        normal_pairs: old.normal_pairs.clone(),
+        group,
+    }))
+}
+
+/// PrepareResources precedes render-graph tick batches. The active tree remains
+/// untouched until latest-current refit has been submitted on their shared queue.
+#[allow(clippy::too_many_arguments)]
+fn maintain_rebuilds(
+    requests: Res<MeshRebuildRequests>,
+    device: Res<RenderDevice>,
+    queue: Res<RenderQueue>,
+    cache: Res<PipelineCache>,
+    pipeline: Res<ContactPipeline>,
+    refit: Res<RefitPipeline>,
+    mut contacts: ResMut<StaticMeshContacts>,
+    mut pending: ResMut<PendingRebuild>,
+) {
+    if pending.accept_request(requests.sequence) {
+        pending.queue = contacts
+            .order
+            .iter()
+            .filter_map(|entity| {
+                let entry = contacts.entries.get(entity)?;
+                entry.geometry.as_ref()?;
+                Some((*entity, entry.snapshot.clone()))
+            })
+            .collect();
+        info!(
+            colliders = pending.queue.len(),
+            "mesh BVH manual rebuild requested"
+        );
+    }
+    // A failed poll must not drop/recycle an in-flight staging allocation.
+    if pending.poll_failed {
+        return;
+    }
+    if matches!(pending.stage, Some(RebuildStage::Mapping { .. })) {
+        if let Err(error) = device.poll(PollType::Poll) {
+            pending.poll_failed = true;
+            warn!(%error, "mesh BVH rebuild disabled: nonblocking device poll failed");
+            return;
+        }
+    }
+    if let Some(stage) = pending.stage.take() {
+        match stage {
+            RebuildStage::Mapping {
+                ticket,
+                staging,
+                completion,
+                submitted,
+                mut times,
+            } => {
+                let completed = completion
+                    .lock()
+                    .expect("mesh rebuild map completion")
+                    .take();
+                let Some(completed) = completed else {
+                    pending.stage = Some(RebuildStage::Mapping {
+                        ticket,
+                        staging,
+                        completion,
+                        submitted,
+                        times,
+                    });
+                    return;
+                };
+                times.map_wait = submitted.elapsed();
+                let decode_start = Instant::now();
+                let decoded = completed.and_then(|()| {
+                    if !ticket.current(&contacts) {
+                        return Err("snapshot or reset epoch changed during mapping".into());
+                    }
+                    let data = staging
+                        .slice(..)
+                        .get_mapped_range()
+                        .map_err(|e| e.to_string())?;
+                    if data.len() != ticket.geometry.positions.count() as usize * 16 {
+                        return Err("mesh rebuild position snapshot length mismatch".into());
+                    }
+                    Ok(data
+                        .chunks_exact(16)
+                        .map(|p| {
+                            let p = bytemuck::pod_read_unaligned::<[f32; 4]>(p);
+                            Vec3::new(p[0], p[1], p[2])
+                        })
+                        .collect::<Vec<_>>())
+                });
+                staging.unmap();
+                times.snapshot_cpu += decode_start.elapsed();
+                match decoded {
+                    Ok(positions) => {
+                        let SourceState::Ready(source) = &ticket.snapshot.state else {
+                            unreachable!()
+                        };
+                        let source = source.clone();
+                        let (sender, receiver) = mpsc::channel();
+                        let started = Instant::now();
+                        // No join or blocking receive on the render thread. The Arc
+                        // retains immutable triangle indices, not live scene data.
+                        match std::thread::Builder::new()
+                            .name("cloth-bvh-rebuild".into())
+                            .spawn(move || {
+                                let start = Instant::now();
+                                let result = build_triangle_bvh(&positions, &source.indices)
+                                    .map(|tree| (tree, start.elapsed()))
+                                    .map_err(|error| error.to_string());
+                                let _ = sender.send(result);
+                            }) {
+                            Ok(_worker) => {
+                                pending.stage = Some(RebuildStage::Building {
+                                    ticket,
+                                    receiver: Mutex::new(receiver),
+                                    started,
+                                    times,
+                                })
+                            }
+                            Err(error) => {
+                                warn!(%error, "mesh BVH rebuild worker spawn failed; old tree retained")
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        warn!(entity = ?ticket.entity, %error, "mesh BVH rebuild snapshot discarded; old tree retained")
+                    }
+                }
+            }
+            RebuildStage::Building {
+                ticket,
+                receiver,
+                started,
+                mut times,
+            } => {
+                let result = receiver.lock().expect("mesh rebuild receiver").try_recv();
+                match result {
+                    Err(mpsc::TryRecvError::Empty) => {
+                        pending.stage = Some(RebuildStage::Building {
+                            ticket,
+                            receiver,
+                            started,
+                            times,
+                        });
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        warn!(entity = ?ticket.entity, "mesh BVH rebuild worker disconnected; old tree retained");
+                    }
+                    Ok(result) => {
+                        times.build_wall = started.elapsed();
+                        if !ticket.current(&contacts) {
+                            info!(entity = ?ticket.entity, "mesh BVH rebuild discarded: snapshot or reset epoch changed");
+                        } else {
+                            match result.and_then(|(tree, elapsed)| {
+                                times.build_cpu = elapsed;
+                                let start = Instant::now();
+                                let geometry = upload_rebuilt_geometry(
+                                    &device,
+                                    &cache,
+                                    &pipeline,
+                                    &ticket.geometry,
+                                    &tree,
+                                )?;
+                                times.upload_cpu = start.elapsed();
+                                Ok(geometry)
+                            }) {
+                                Ok(geometry) => {
+                                    pending.stage = Some(RebuildStage::Candidate {
+                                        ticket,
+                                        geometry,
+                                        times,
+                                    })
+                                }
+                                Err(error) => {
+                                    warn!(entity = ?ticket.entity, %error, "mesh BVH rebuild failed; old tree retained")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            RebuildStage::Candidate {
+                ticket,
+                geometry,
+                times,
+            } => {
+                if !ticket.current(&contacts) {
+                    info!(entity = ?ticket.entity, "mesh BVH rebuild candidate discarded: snapshot or reset epoch changed");
+                } else if !refit.ready(&cache) {
+                    pending.stage = Some(RebuildStage::Candidate {
+                        ticket,
+                        geometry,
+                        times,
+                    });
+                } else {
+                    let start = Instant::now();
+                    if geometry.refit.record_or_submit(
+                        &device,
+                        &queue,
+                        &cache,
+                        &refit,
+                        &geometry._nodes,
+                        geometry.positions.current(),
+                        &geometry._indices,
+                        &geometry._refs,
+                    ) {
+                        let entry = contacts
+                            .entries
+                            .get_mut(&ticket.entity)
+                            .expect("current rebuild entry");
+                        entry.geometry = Some(geometry);
+                        entry.bounds_current = true;
+                        // Preserve last/reset_epoch and all cloth state. These metrics
+                        // are CPU wall durations, not GPU timestamps or GPU refit time.
+                        info!(entity = ?ticket.entity,
+                            snapshot_cpu_ms = times.snapshot_cpu.as_secs_f64() * 1000.0,
+                            map_wait_wall_ms = times.map_wait.as_secs_f64() * 1000.0,
+                            build_wall_ms = times.build_wall.as_secs_f64() * 1000.0,
+                            build_cpu_wall_ms = times.build_cpu.as_secs_f64() * 1000.0,
+                            upload_cpu_ms = times.upload_cpu.as_secs_f64() * 1000.0,
+                            switch_refit_submit_cpu_ms = start.elapsed().as_secs_f64() * 1000.0,
+                            "mesh BVH rebuild switched (CPU wall timings; not GPU timings)");
+                    } else {
+                        warn!(entity = ?ticket.entity, "mesh BVH rebuild refit rejected; old tree retained");
+                    }
+                }
+            }
+        }
+    }
+    if pending.stage.is_some() {
+        return;
+    }
+    while let Some((entity, snapshot)) = pending.queue.pop_front() {
+        let Some(entry) = contacts.entries.get(&entity) else {
+            continue;
+        };
+        if !Arc::ptr_eq(&snapshot, &entry.snapshot) {
+            continue;
+        }
+        let Some(geometry) = entry.geometry.clone() else {
+            continue;
+        };
+        let start = Instant::now();
+        let bytes = geometry.positions.current().size();
+        if !geometry
+            .positions
+            .current()
+            .usage()
+            .contains(BufferUsages::COPY_SRC)
+        {
+            warn!(
+                ?entity,
+                "mesh BVH rebuild requires COPY_SRC positions; old tree retained"
+            );
+            continue;
+        }
+        let staging = device.create_buffer(&BufferDescriptor {
+            label: Some("mesh BVH rebuild current-position snapshot"),
+            size: bytes,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("mesh BVH rebuild snapshot copy"),
+        });
+        encoder.copy_buffer_to_buffer(geometry.positions.current(), 0, &staging, 0, bytes);
+        queue.submit([encoder.finish()]);
+        let submitted = Instant::now();
+        let completion: MapCompletion = Arc::new(Mutex::new(None));
+        let callback = completion.clone();
+        staging.slice(..).map_async(MapMode::Read, move |result| {
+            *callback.lock().expect("mesh rebuild map callback") =
+                Some(result.map_err(|e| e.to_string()));
+        });
+        pending.stage = Some(RebuildStage::Mapping {
+            ticket: RebuildTicket {
+                entity,
+                snapshot,
+                geometry,
+                epoch: entry.reset_epoch,
+            },
+            staging,
+            completion,
+            submitted,
+            times: RebuildTimes {
+                snapshot_cpu: start.elapsed(),
+                ..default()
+            },
+        });
+        break;
+    }
 }
 
 /// Owns everything needed by one collider dispatch, independently of later revisions.
@@ -996,6 +1444,113 @@ mod tests {
     use super::*;
     use crate::cloth::{PreparedMeshCollider, bvh::build_triangle_bvh};
     use std::mem::{align_of, offset_of};
+
+    #[test]
+    fn rebuild_requests_are_single_flight_and_do_not_repeat() {
+        let mut requests = MeshRebuildRequests::default();
+        let mut pending = PendingRebuild::default();
+        assert!(!pending.accept_request(requests.sequence));
+        requests.request_all();
+        assert!(pending.accept_request(requests.sequence));
+        assert!(!pending.accept_request(requests.sequence));
+        let mut app = App::new();
+        app.init_resource::<Snapshots>()
+            .init_resource::<ColliderOutputs>()
+            .add_systems(Update, collect_snapshots);
+        let entity = app
+            .world_mut()
+            .spawn((ClothMeshCollider, Mesh3d::default(), preparation()))
+            .id();
+        app.update();
+        pending.queue.push_back((entity, snapshot(&app, entity)));
+        requests.request_all();
+        assert!(!pending.accept_request(requests.sequence));
+        pending.queue.clear();
+        assert!(!pending.accept_request(requests.sequence));
+        requests.request_all();
+        assert!(pending.accept_request(requests.sequence));
+        pending.poll_failed = true;
+        requests.request_all();
+        assert!(!pending.accept_request(requests.sequence));
+    }
+
+    #[test]
+    fn rebuild_requires_exact_snapshot_and_reset_epoch() {
+        let mut app = App::new();
+        app.init_resource::<Snapshots>()
+            .init_resource::<ColliderOutputs>()
+            .add_systems(Update, collect_snapshots);
+        let entity = app
+            .world_mut()
+            .spawn((ClothMeshCollider, Mesh3d::default(), preparation()))
+            .id();
+        app.update();
+        let original = snapshot(&app, entity);
+        assert!(same_rebuild_version(
+            &original,
+            &original.clone(),
+            Some(3),
+            Some(3)
+        ));
+        assert!(!same_rebuild_version(
+            &original,
+            &original,
+            Some(3),
+            Some(4)
+        ));
+        assert!(!same_rebuild_version(&original, &original, None, Some(3)));
+        // Group-only changes preserve CPU geometry, but still invalidate a ticket.
+        app.world_mut().entity_mut(entity).insert(CollisionGroup(1));
+        app.update();
+        let changed = snapshot(&app, entity);
+        assert!(Arc::ptr_eq(geometry(&original), geometry(&changed)));
+        assert!(!same_rebuild_version(&original, &changed, Some(3), Some(3)));
+    }
+
+    #[test]
+    fn rebuilt_snapshot_preserves_ids_and_independent_nearest_distance() {
+        let rest = [Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z];
+        let indices = [0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2];
+        let positions: Vec<_> = rest
+            .iter()
+            .map(|p| Vec3::new(p.x * 5.0 + p.y, p.y * 0.2, p.z * 3.0) + Vec3::new(7.0, -2.0, 1.0))
+            .collect();
+        let tree = build_triangle_bvh(&positions, &indices).unwrap();
+        let mut ids = tree.triangle_refs.clone();
+        ids.sort_unstable();
+        assert_eq!(ids, [0, 1, 2, 3]);
+        for probe in [Vec3::ZERO, Vec3::new(8.0, -1.0, 2.0), Vec3::splat(12.0)] {
+            let expected =
+                super::super::mesh_collision::brute_force_nearest(&positions, &indices, probe)
+                    .unwrap();
+            let mut stack = vec![0];
+            let mut nearest = f64::INFINITY;
+            while let Some(id) = stack.pop() {
+                let node = tree.nodes[id];
+                let closest = probe.clamp(Vec3::from_array(node.min), Vec3::from_array(node.max));
+                if f64::from(probe.distance_squared(closest)) > nearest + 1e-5 {
+                    continue;
+                }
+                if node.is_leaf() {
+                    for &triangle in &tree.triangle_refs[node.first_index as usize
+                        ..(node.first_index + node.primitive_count) as usize]
+                    {
+                        let start = triangle as usize * 3;
+                        let hit = super::super::mesh_collision::brute_force_nearest(
+                            &positions,
+                            &indices[start..start + 3],
+                            probe,
+                        )
+                        .unwrap();
+                        nearest = nearest.min(f64::from(hit.point[3]));
+                    }
+                } else {
+                    stack.extend([node.first_index as usize, node.first_index as usize + 1]);
+                }
+            }
+            assert!((nearest - f64::from(expected.point[3])).abs() < 1e-8);
+        }
+    }
 
     fn preparation() -> MeshColliderPreparation {
         let positions = vec![Vec3::ZERO, Vec3::X, Vec3::Y];
@@ -1456,6 +2011,7 @@ pub(crate) struct MeshContactPlugin;
 impl Plugin for MeshContactPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Snapshots>()
+            .init_resource::<MeshRebuildRequests>()
             .init_resource::<ColliderOutputs>()
             .add_systems(Last, (manage_outputs, collect_snapshots).chain());
         if app.get_sub_app(RenderApp).is_some() {
@@ -1463,11 +2019,19 @@ impl Plugin for MeshContactPlugin {
             embedded_asset!(app, "refit.wesl");
         }
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
-            render.init_resource::<StaticMeshContacts>().add_systems(
-                Render,
-                prepare_contacts.in_set(RenderSystems::PrepareResources),
-            );
-            app.add_plugins(ExtractResourcePlugin::<Snapshots>::default());
+            render
+                .init_resource::<StaticMeshContacts>()
+                .init_resource::<PendingRebuild>()
+                .add_systems(
+                    Render,
+                    (prepare_contacts, maintain_rebuilds)
+                        .chain()
+                        .in_set(RenderSystems::PrepareResources),
+                );
+            app.add_plugins((
+                ExtractResourcePlugin::<Snapshots>::default(),
+                ExtractResourcePlugin::<MeshRebuildRequests>::default(),
+            ));
         }
     }
 
