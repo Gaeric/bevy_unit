@@ -1,4 +1,4 @@
-//! Imported cloth preparation. GPU stepping/output will be added after this stage is reviewed.
+//! Imported cloth preparation and GPU initialization; fixed ticks/output are not connected yet.
 
 pub mod topology;
 
@@ -10,6 +10,9 @@ use bevy::{
 };
 
 use topology::{TriangleTopology, build_triangle_topology};
+
+pub use crate::gpu::imported::ClothSolverConfig;
+use crate::gpu::imported::ImportedClothPlugin;
 
 /// Application-selected cloth primitive. IDs refer to this Mesh's loaded vertices.
 /// All render vertices remain particles; this stage does not weld UV splits.
@@ -44,6 +47,7 @@ pub struct GpuClothPlugin;
 
 impl Plugin for GpuClothPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(ImportedClothPlugin);
         app.add_systems(
             PostUpdate,
             (clear_removed_cloth, prepare_cloth)

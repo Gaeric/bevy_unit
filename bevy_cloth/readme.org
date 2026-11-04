@@ -25,7 +25,8 @@
   当前方向更新于 2026-11-03，按 [[file:plan.org][新计划中的三个方向、12 个小步骤]] 顺序推进：
   先将已有 GPU 场景改为 GLB 加载，验证正式插件与 BVH 碰撞；再验证动态 refit、CPU rebuild 与更新策略；
   最后接入 =assets/materials/hs2_body_greybox_mini_2.glb= 中的人体和衣物（路径相对 workspace 根目录）。
-  CPU 使用 =obvhs= 建树，GPU 读取当前顶点 refit 和查询；目前 12 步均待实现，先讨论第 01 步的场景和资产制作。
+  CPU 使用 =obvhs= 建树，GPU 读取当前顶点 refit 和查询；当前已有 GLB 加载与三角拓扑准备，第02步的GPU初始化已接入，未编译/设备验证，tick/输出尚未连接。
+  继续使用 cloth.glb/sphere.glb 验证流程，不恢复旧网格约束；运行与本批预期日志见 [[file:plan.org::*当前批次与下一步][当前批次]]。
   既有 GPU 七场景及 CPU 参考作为基线保留，历史计划由 Git 保存。
   代码里的 M0–M6 等编号是历史标记，不是当前任务顺序。
 

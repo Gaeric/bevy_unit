@@ -1800,6 +1800,63 @@ impl LiveSolver {
         ))
     }
 
+    /// Upload imported initial data without constructing a fixture or running CPU physics.
+    /// The caller supplies validated particle/constraint tables and explicit simulation parameters.
+    pub(super) fn from_imported(
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        cache: &PipelineCache,
+        pipeline: &SolverPipeline,
+        solver: Solver,
+        params: SimParams,
+        dt: f32,
+    ) -> Result<Self, String> {
+        let n = solver.num_particles() as u64;
+        let limits = device.limits();
+        let buckets = n * 2;
+        let required = [
+            n * size_of::<GpuVec3>() as u64,
+            (n + 1) * size_of::<u32>() as u64,
+            n * u64::from(params.max_num_neighbors) * size_of::<u32>() as u64,
+            buckets * size_of::<u32>() as u64,
+            solver.constraints.stretch.indices.len() as u64 * 2 * size_of::<u32>() as u64,
+            solver.constraints.attach.particle_ids.len() as u64
+                * size_of::<GpuAttachEntry>() as u64,
+            (solver.constraints.attach.slot_positions.len() as u64).max(1)
+                * size_of::<GpuVec3>() as u64,
+            (solver.constraints.bend.indices.len() as u64).max(1)
+                * size_of::<GpuBendConstraint>() as u64,
+            solver.constraints.bend.indices.len() as u64 * 4 * size_of::<u32>() as u64,
+            size_of::<GpuSdfCollider>() as u64,
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+        if required > u64::from(limits.max_storage_buffer_binding_size)
+            || required > limits.max_buffer_size
+            || buckets.div_ceil(u64::from(WORKGROUP_SIZE))
+                > u64::from(limits.max_compute_workgroups_per_dimension)
+            || WORKGROUP_SIZE > limits.max_compute_workgroup_size_x
+            || WORKGROUP_SIZE > limits.max_compute_invocations_per_workgroup
+            || WORKGROUP_SIZE * size_of::<u32>() as u32 > limits.max_compute_workgroup_storage_size
+        {
+            return Err(format!(
+                "imported cloth exceeds GPU buffer/dispatch limits (largest binding: {required} bytes)"
+            ));
+        }
+        Ok(Self(initialize_solver_buffers(
+            device,
+            queue,
+            cache,
+            pipeline,
+            solver,
+            params,
+            Vec::new(),
+            dt,
+            false,
+        )))
+    }
+
     /// Upload before the corresponding submit_step; collider topology cannot change in-place.
     /// Keep caller-supplied history verbatim: CPU ColliderHistory starts translation-only,
     /// so the first scene tick intentionally does not use the initial scaled sphere model.

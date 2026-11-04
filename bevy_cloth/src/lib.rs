@@ -6,7 +6,9 @@ pub mod demo;
 pub mod gpu;
 pub mod sim;
 
-pub use cloth::{ClothMeshCollider, ClothPreparation, ClothSim, GpuClothPlugin, PreparedCloth};
+pub use cloth::{
+    ClothMeshCollider, ClothPreparation, ClothSim, ClothSolverConfig, GpuClothPlugin, PreparedCloth,
+};
 
 pub use demo::ClothInputPlugin;
 pub use demo::ClothPlugin;

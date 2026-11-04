@@ -7,7 +7,8 @@
 * 目标与工作顺序
   更新：2026-11-03。本文件重写为当前计划，旧计划与历史记录由 Git 保存。
   顺序：已有场景的 GLB 版本验证插件与碰撞框架 → 动态 BVH 的 refit/rebuild → 具体人体与衣物模型。
-  共 12 步，每步独立提交与验证，完成当前步后再讨论下一步。目前全部待实现，尚未开始第 01 步。
+  共 12 步，每步独立提交与验证，完成当前步后再讨论下一步。
+  当前已有 cloth.glb/sphere.glb、加载标记与三角拓扑准备；第 02 步正在接 GPU，初始化代码已接入，未编译/设备验证，tick 与输出尚未连接。
 
 * 已确定的技术方向
   - 使用 Bevy 原生 glTF 导入器和场景实体；应用选择并标记参与的 primitive，插件负责数据准备、GPU 求解与输出。
@@ -127,5 +128,19 @@
     Agent 容器设置私有 =CARGO_TARGET_DIR=，不写主机 target；GPU 探针读回用于诊断，生产 refit/查询留在 GPU。
   - 记录具体配置下的位置误差、接触残差与分阶段耗时；将代码、计算预期和设备测量分开记录。
 
-* 当前下一步
-  讨论第 01 步：选用场景、GLB 包含的对象、资产制作方式与初态对照标准。讨论后再开始实现。
+* 当前批次与下一步
+  2026-11-04 决定：继续使用现有 cloth.glb/sphere.glb 验证流程，不另造资产，不恢复旧规则网格约束。
+  导入路径采用唯一三角边 stretch、内部共享边 bend 及几何静止角；与旧网格双对角线 stretch/每格 bend 不同，不要求数值一致。
+  一般 GLB 的额外准备需求遇到后再处理；当前不自动焊接 UV 拆点。
+
+  本批：GpuClothPlugin 将 Ready 数据转为现有上传容器，生成 attachment/LRA，经 change-detected 集合提取到 Render World，按实体初始化/替换/释放 GPU buffers。
+  ClothSolverConfig 显式给定粒子直径、速度上限及其余 SimParams；不调用 fixture、CPU add_cloth 或 CPU step。
+  当前 generic CSR 暂不直传，复用旧 GPU CSR 构建器适配；固定 dt/配置变化会重建初态，不承诺运行中热调参。
+  源 Mesh 原地编辑/热重载不作为自动重初始化入口；不恢复 AssetEvent 监听。ClothSim/Mesh3d 移除及实体销毁清理实例。
+  外部碰撞数量为0，sphere仅显示；初始化无 tick、无动态输出或粒子读回。
+
+  用户运行：=cargo run -j 2 -p bevy_cloth --example velvet-gltf=。
+  预期日志 =imported cloth GPU initialized (no ticks/output yet)=：289粒子、800 stretch、736 bend、2 slots、578 attachments、0 external colliders；静态画面不变。
+  新增局部测试：=cargo test -j 2 -p bevy_cloth --lib gpu::imported::tests=，检查适配、参数和快照生命周期。
+  Agent 未运行 Cargo；仅静态检查，编译、上述测试及设备初始化均待用户验证。
+  下一批：初始化确认后接 fixed tick、暂停/单步/重置和独立可写 Mesh 的 GPU 输出，保留原层级并处理世界→局部坐标。

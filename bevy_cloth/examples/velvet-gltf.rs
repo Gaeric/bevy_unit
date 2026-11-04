@@ -1,5 +1,5 @@
-//! Stage A: native GLB loading, application-side roles, triangle cloth preparation.
-//! No GPU simulation or sphere contact yet.
+//! Native GLB loading, triangle cloth preparation and GPU initialization.
+//! No simulation ticks, dynamic mesh output or sphere contact yet.
 
 use bevy::{
     asset::RenderAssetUsages,
@@ -8,8 +8,8 @@ use bevy::{
     world_serialization::WorldInstanceReady,
 };
 use bevy_cloth::{
-    ClothMeshCollider, ClothPreparation, ClothSim, GpuClothPlugin, OrbitCameraPlugin,
-    demo::OrbitCamera,
+    ClothMeshCollider, ClothPreparation, ClothSim, ClothSolverConfig, GpuClothPlugin,
+    OrbitCameraPlugin, demo::OrbitCamera,
 };
 use std::path::Path;
 
@@ -33,7 +33,7 @@ fn main() {
                 })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "GLB cloth — preparation only".into(),
+                        title: "GLB cloth — GPU initialization only".into(),
                         ..default()
                     }),
                     ..default()
@@ -105,7 +105,9 @@ fn mark_instance_roles(
 
                 match find_cloth_pins(mesh) {
                     Ok(pinned_vertices) => {
-                        commands.entity(entity).insert(ClothSim { pinned_vertices });
+                        commands
+                            .entity(entity)
+                            .insert((ClothSim { pinned_vertices }, ClothSolverConfig::default()));
                     }
                     Err(error) => {
                         error!(?entity, %error, "test asset pin selection failed");
