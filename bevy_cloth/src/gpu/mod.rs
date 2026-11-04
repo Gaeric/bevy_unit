@@ -8,6 +8,7 @@ pub mod mesh_collision;
 pub mod mesh_contact;
 mod normals;
 pub mod pipeline;
+mod refit;
 pub mod solver_gpu;
 
 pub use layout::GpuParams;

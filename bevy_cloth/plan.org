@@ -109,6 +109,10 @@
    - 验证：平移、旋转和已知顶点变形的位置/速度符合预期；零、单、多 tick 显示帧及重置时历史正确。
 
 ** TODO 07 GPU 叶节点更新与分层 refit
+   实现：=gpu/refit.rs/.wesl= 叶AABB→倒序深度内部层，每层独立compute pass；位置更新→refit→接触同队列提交。
+   动态接触门控已解除；重置也refit到rest。已接受tick等待输出时阻止其他衣物推进共享几何。
+   动态场景：=cargo run -j 2 -p bevy_cloth --example velvet-gltf -- --motion=（旋转+波形变形）；不传参数为静态。
+   Agent：all-targets check、2项refit测试通过，逐节点与独立后代几何边界比较；GPU逐层读回/运动接触视觉/成本仍未实测。
    - 实现：根据第 06 步顶点重算叶 AABB，随后按层合并内部节点；与位置提供者、查询建立明确执行顺序。
    - 提交产物：固定拓扑下的 GPU 动态 BVH；运动/变形后的接触均使用更新的树。
    - 验证：逐层 AABB 与独立几何计算比较；运动和弯折场景中最近点及布料接触随动，记录 refit 和遍历成本。

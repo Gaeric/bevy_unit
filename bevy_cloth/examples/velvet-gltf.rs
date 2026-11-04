@@ -9,9 +9,9 @@ use bevy::{
     world_serialization::WorldInstanceReady,
 };
 use bevy_cloth::{
-    ClothControl, ClothMeshCollider, ClothPreparation, ClothSim, ClothSolverConfig, CollisionGroup,
-    GpuClothPlugin, MeshColliderPreparation, MeshQueryProbes, MeshQueryReadouts, OrbitCameraPlugin,
-    demo::OrbitCamera, gpu::mesh_collision::brute_force_nearest,
+    ClothControl, ClothMeshCollider, ClothPreparation, ClothSim, ClothSolverConfig, ColliderMotion,
+    CollisionGroup, GpuClothPlugin, MeshColliderPreparation, MeshQueryProbes, MeshQueryReadouts,
+    OrbitCameraPlugin, demo::OrbitCamera, gpu::mesh_collision::brute_force_nearest,
 };
 use std::path::Path;
 
@@ -168,6 +168,14 @@ fn mark_instance_roles(
             }
             AssetRole::Sphere => {
                 commands.entity(entity).insert(ClothMeshCollider);
+                if std::env::args().any(|arg| arg == "--motion") {
+                    commands.entity(entity).insert(ColliderMotion {
+                        angular_velocity: Vec3::Y * 0.4,
+                        deform_amplitude: 0.08,
+                        deform_frequency: 2.0,
+                        ..default()
+                    });
+                }
             }
         }
     }

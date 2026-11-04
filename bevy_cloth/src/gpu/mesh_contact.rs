@@ -1,5 +1,5 @@
 //! World-space mesh contacts with fixed-tick analytic collider positions.
-//! Dynamic queries remain blocked while their BVH bounds need a refit.
+//! Position updates and layered BVH refits are submitted before contact queries.
 
 use bevy::{
     asset::{RenderAssetUsages, embedded_asset, load_embedded_asset},
@@ -33,6 +33,7 @@ use super::{
     geometry::{ColliderMotion, GeometryTick, GpuPositions, PositionPipeline},
     live::{OutputPipeline, OutputRange, position_layout},
     normals::build_normal_csr,
+    refit::{GpuRefit, RefitPipeline},
 };
 
 struct OutputOwner {
@@ -133,6 +134,7 @@ struct Geometry {
     nodes: Vec<BvhNode>,
     triangle_refs: Vec<u32>,
     max_depth: u32,
+    refit_tree: crate::cloth::bvh::TriangleBvh,
     pivot: Vec3,
 }
 
@@ -212,6 +214,7 @@ fn collect_snapshots(
                             nodes: prepared.bvh.nodes.clone(),
                             triangle_refs: prepared.bvh.triangle_refs.clone(),
                             max_depth: prepared.bvh.max_depth,
+                            refit_tree: prepared.bvh.clone(),
                             pivot: prepared.initial_transform.transform_point3(Vec3::ZERO),
                         })
                     });
@@ -353,6 +356,7 @@ struct GpuGeometry {
     positions: GpuPositions,
     _indices: Buffer,
     _refs: Buffer,
+    refit: GpuRefit,
     normal_offsets: Buffer,
     normal_pairs: Buffer,
     group: BindGroup,
@@ -472,6 +476,7 @@ fn prepare_contacts(
                     None
                 } else {
                     (|| -> Result<Arc<GpuGeometry>, String> {
+                        let refit = GpuRefit::new(&device, &g.refit_tree)?;
                         let positions = GpuPositions::new(&device, &g.positions)?;
                         let csr = build_normal_csr(g.positions.len(), &g.indices);
                         let normal_offsets = upload(&device, &csr.offsets, BufferUsages::STORAGE);
@@ -507,6 +512,7 @@ fn prepare_contacts(
                             positions,
                             _indices: indices,
                             _refs: refs,
+                            refit,
                             normal_offsets,
                             normal_pairs,
                             group,
@@ -682,12 +688,14 @@ impl StaticMeshContacts {
     /// Call even while paused, before batching. Revisions clear the epoch marker.
     /// Restores both buffers in place; repeated calls in one epoch do no GPU work.
     /// False means required geometry/pipeline is unavailable; retry without ticking.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn reset_geometry(
         &mut self,
         device: &RenderDevice,
         queue: &RenderQueue,
         cache: &PipelineCache,
         pipeline: &PositionPipeline,
+        refit: &RefitPipeline,
         epoch: u64,
     ) -> bool {
         let mut ready = true;
@@ -702,8 +710,9 @@ impl StaticMeshContacts {
             let needs_update = entry.snapshot.motion != ColliderMotion::default()
                 || !entry.bounds_current
                 || entry.last.is_some_and(|last| last.index != 0);
-            if needs_update
-                && !geometry.positions.update(
+            if needs_update {
+                entry.bounds_current = false;
+                if !geometry.positions.update(
                     device,
                     queue,
                     cache,
@@ -712,6 +721,21 @@ impl StaticMeshContacts {
                     Vec3::ZERO,
                     0.0,
                     0.0,
+                ) {
+                    ready = false;
+                    continue;
+                }
+            }
+            if (needs_update || !entry.bounds_current)
+                && !geometry.refit.record_or_submit(
+                    device,
+                    queue,
+                    cache,
+                    refit,
+                    &geometry._nodes,
+                    geometry.positions.current(),
+                    &geometry._indices,
+                    &geometry._refs,
                 )
             {
                 ready = false;
@@ -719,7 +743,6 @@ impl StaticMeshContacts {
             }
             entry.last = None;
             entry.reset_epoch = Some(epoch);
-            // Step 06 nodes are still the immutable rest BVH.
             entry.bounds_current = true;
         }
         ready
@@ -735,6 +758,7 @@ impl StaticMeshContacts {
         queue: &RenderQueue,
         cache: &PipelineCache,
         pipeline: &PositionPipeline,
+        refit: &RefitPipeline,
         group: u32,
         stamp: GeometryTick,
     ) -> bool {
@@ -757,10 +781,12 @@ impl StaticMeshContacts {
         }
         for id in &self.order {
             let entry = self.entries.get_mut(id).expect("ordered collider");
-            if entry.snapshot.group != group
-                || entry.snapshot.motion == ColliderMotion::default()
-                || entry.last == Some(stamp)
-            {
+            if entry.snapshot.group != group {
+                continue;
+            }
+            let moving = entry.snapshot.motion != ColliderMotion::default();
+            let needs_update = moving && entry.last != Some(stamp);
+            if !needs_update && entry.bounds_current {
                 continue;
             }
             let SourceState::Ready(source) = &entry.snapshot.state else {
@@ -769,20 +795,35 @@ impl StaticMeshContacts {
             let Some(geometry) = &entry.geometry else {
                 return false;
             };
-            if !geometry.positions.update(
+            entry.bounds_current = false;
+            if needs_update
+                && !geometry.positions.update(
+                    device,
+                    queue,
+                    cache,
+                    pipeline,
+                    entry.snapshot.motion,
+                    source.pivot,
+                    time,
+                    previous_time,
+                )
+            {
+                return false;
+            }
+            if !geometry.refit.record_or_submit(
                 device,
                 queue,
                 cache,
-                pipeline,
-                entry.snapshot.motion,
-                source.pivot,
-                time,
-                previous_time,
+                refit,
+                &geometry._nodes,
+                geometry.positions.current(),
+                &geometry._indices,
+                &geometry._refs,
             ) {
                 return false;
             }
             entry.last = Some(stamp);
-            entry.bounds_current = stamp.index == 0;
+            entry.bounds_current = true;
         }
         true
     }
@@ -815,12 +856,11 @@ impl StaticMeshContacts {
         if matching.is_empty() {
             return Some(Vec::new());
         }
-        // Step 07 must refit before enabling moving contact queries.
-        if matching.iter().any(|entry| {
-            entry.geometry.is_none()
-                || !entry.bounds_current
-                || entry.snapshot.motion != ColliderMotion::default()
-        }) || substeps == 0
+        // advance_group refits these same buffers before any batch is dispatched.
+        if matching
+            .iter()
+            .any(|entry| entry.geometry.is_none() || !entry.bounds_current)
+            || substeps == 0
             || !thickness.is_finite()
             || thickness < 0.0
             || !friction.is_finite()
@@ -1402,6 +1442,7 @@ mod tests {
             nodes: g.nodes.clone(),
             triangle_refs: g.triangle_refs.clone(),
             max_depth: 127,
+            refit_tree: g.refit_tree.clone(),
             pivot: g.pivot,
         };
         assert!(validate_geometry(&deep, &limits).is_err());
@@ -1419,6 +1460,7 @@ impl Plugin for MeshContactPlugin {
             .add_systems(Last, (manage_outputs, collect_snapshots).chain());
         if app.get_sub_app(RenderApp).is_some() {
             embedded_asset!(app, "geometry.wesl");
+            embedded_asset!(app, "refit.wesl");
         }
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render.init_resource::<StaticMeshContacts>().add_systems(
@@ -1433,7 +1475,8 @@ impl Plugin for MeshContactPlugin {
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render
                 .init_resource::<ContactPipeline>()
-                .init_resource::<PositionPipeline>();
+                .init_resource::<PositionPipeline>()
+                .init_resource::<RefitPipeline>();
         }
     }
 }

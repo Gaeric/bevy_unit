@@ -31,6 +31,7 @@ use super::{
     mesh_contact::{CollisionGroup, ContactPipeline, StaticMeshContacts},
     normals::build_normal_csr,
     pipeline::{SolverPipeline, WORKGROUP_SIZE},
+    refit::RefitPipeline,
     solver_gpu::LiveSolver,
 };
 use crate::{
@@ -715,6 +716,7 @@ fn tick_and_output_imported(
     mut contacts: ResMut<StaticMeshContacts>,
     contact_pipeline: Res<ContactPipeline>,
     positions: Res<PositionPipeline>,
+    refit: Res<RefitPipeline>,
 ) {
     let Some(imported) = imported else {
         return;
@@ -724,6 +726,7 @@ fn tick_and_output_imported(
         &queue,
         &cache,
         &positions,
+        &refit,
         imported.epoch,
     );
     let mut prepared = Vec::new();
@@ -851,8 +854,20 @@ fn tick_and_output_imported(
 
     // Tick-major ordering is essential: all cloths sharing geometry consume tick N before
     // any cloth advances that geometry to N+1. Do not drain queues before successful work.
+    let waiting_for_output = instances.active.iter().any(|(entity, instance)| {
+        !prepared.iter().any(|(ready, _, _, _, _, _, _, _)| ready == entity)
+            && {
+                let ticks = instance.request.ticks.lock().expect("imported cloth ticks");
+                !ticks.closed && !ticks.pending.is_empty()
+            }
+    });
     let mut submissions = Vec::new();
-    if geometry_ready {
+    if waiting_for_output {
+        for (_, _, _, ticks, _, _, _, _) in &mut prepared {
+            ticks.ready = false;
+        }
+    }
+    if geometry_ready && !waiting_for_output {
         for (i, (entity, _, _, ticks, _, _, _, _)) in prepared.iter().enumerate() {
             submissions.extend(
                 ticks
@@ -870,6 +885,7 @@ fn tick_and_output_imported(
             &queue,
             &cache,
             &positions,
+            &refit,
             target.collision_group,
             stamp,
         ) {
