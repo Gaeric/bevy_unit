@@ -22,8 +22,8 @@ pub struct ClothSim {
     pub pinned_vertices: Vec<u32>,
 }
 
-/// Application-selected triangle-mesh collider. Stage 03 prepares a world-space BVH;
-/// GPU upload, queries and contact response are not connected yet.
+/// Application-selected triangle-mesh collider, prepared and queried in world space.
+/// Contact surfaces/groups are configured separately; source Mesh/hierarchy remain intact.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct ClothMeshCollider;
 
@@ -68,6 +68,7 @@ impl Plugin for GpuClothPlugin {
         app.add_plugins((
             ImportedClothPlugin,
             crate::gpu::mesh_collision::MeshCollisionPlugin,
+            crate::gpu::mesh_contact::MeshContactPlugin,
         ));
         app.add_systems(
             PostUpdate,

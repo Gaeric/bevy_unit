@@ -1,5 +1,30 @@
-// Step 04: world-space closest-point queries only; no collision response.
-// Exact host ABI (all offsets/strides in bytes):
+// Steps 04/05: world-space closest-point queries and discrete static-mesh contact.
+// query_closest uses group 0 bindings 0..6; resolve_contacts uses only group 0
+// bindings 0..4 and group 1 bindings 0..3 (omit probe/result bindings for contact).
+// ContactParams: 16 bytes, particle_count/two_sided/thickness/friction at 0/4/8/12.
+// Group 1: uniform ContactParams; read_write predicted vec4 stride 16;
+// read-only previous cloth vec4 stride 16; read-only inverse mass f32 stride 4.
+// Each contact invocation writes only its predicted particle, preserving w.
+// Nonpositive inverse mass skips ONLY this imported-mesh response, not legacy code.
+//
+// Contact is a closest-point signed shell, NOT CCD or a global inside/outside test.
+// One-sided mode assumes a CLOSED, consistently outward-wound mesh: face-plane
+// sign classifies p-q, distance is radial to the closest triangle point. Outside,
+// only distance < thickness responds (no remote edge/vertex plane attraction).
+// Inside, reverse the radial normal and expel by thickness + distance; on face
+// interiors this equals the outward winding-plane projection. Backside points
+// of an OPEN mesh can therefore be expelled arbitrarily far: use two-sided there.
+// Two-sided mode retains the side of the OLD cloth position relative to its
+// closest point on the SAME selected triangle (current static geometry). If old
+// lies on the plane, use predicted side; exact coincidence falls back to winding.
+// Signed radial separation on that retained side defines the same shell response.
+// This is a local discrete heuristic, not a swept intersection or crossing proof;
+// edge/vertex sign changes, sharp corners and nearest-triangle switches can jump.
+// Friction removes tangential (predicted - previous) displacement, capped by
+// friction * normal correction. No collider motion/history or persistent contacts.
+// Invalid query/arithmetic, zero face normal, or invalid contact inputs skip writes.
+//
+// Exact query host ABI (all offsets/strides in bytes):
 // QueryParams: 16 bytes, four u32 at 0/4/8/12.
 // Node: stride 32, min at 0, first at 12, max at 16, count at 28.
 // count == 0: children first and first + 1; otherwise triangle_refs[first..first+count].
@@ -43,6 +68,18 @@ struct Hit {
 @group(0) @binding(4) var<storage, read> triangle_refs: array<u32>;
 @group(0) @binding(5) var<storage, read> probes: array<vec4<f32>>;
 @group(0) @binding(6) var<storage, read_write> results: array<Hit>;
+
+struct ContactParams {
+    particle_count: u32,
+    two_sided: u32,
+    thickness: f32,
+    friction: f32,
+};
+
+@group(1) @binding(0) var<uniform> contact_params: ContactParams;
+@group(1) @binding(1) var<storage, read_write> predicted: array<vec4<f32>>;
+@group(1) @binding(2) var<storage, read> previous: array<vec4<f32>>;
+@group(1) @binding(3) var<storage, read> inv_masses: array<f32>;
 
 const INVALID_TRIANGLE: u32 = 0xffffffffu;
 const STACK_CAPACITY: u32 = 128u;
@@ -281,4 +318,72 @@ fn query_closest(@builtin(global_invocation_id) id: vec3<u32>) {
     results[query_id] = failed_hit(1u, 0u);
     if query_id >= arrayLength(&probes) { return; }
     results[query_id] = closest_hit(probes[query_id].xyz);
+}
+
+@compute @workgroup_size(256)
+fn resolve_contacts(@builtin(global_invocation_id) id: vec3<u32>) {
+    let particle_id = id.x;
+    if particle_id >= contact_params.particle_count
+        || particle_id >= arrayLength(&predicted)
+        || particle_id >= arrayLength(&previous)
+        || particle_id >= arrayLength(&inv_masses) { return; }
+    let inv_mass = inv_masses[particle_id];
+    if !finite_scalar(inv_mass) || inv_mass <= 0.0 { return; }
+    let thickness = contact_params.thickness;
+    let friction = contact_params.friction;
+    if !finite_scalar(thickness) || thickness < 0.0
+        || !finite_scalar(friction) || friction < 0.0 { return; }
+
+    let particle = predicted[particle_id];
+    let p = particle.xyz;
+    let old = previous[particle_id].xyz;
+    if !finite_vector(old) { return; }
+    let hit = closest_hit(p);
+    if hit.status != 0u || hit.triangle_id == INVALID_TRIANGLE { return; }
+    let winding = hit.normal.xyz;
+    if dot(winding, winding) <= 0.0 { return; }
+    let delta = p - hit.point.xyz;
+    let plane_distance = dot(delta, winding);
+    if !finite_scalar(plane_distance) { return; }
+    var predicted_side = 1.0;
+    if plane_distance < 0.0 { predicted_side = -1.0; }
+    var retained_side = 1.0;
+    if contact_params.two_sided != 0u {
+        // Reuse the selected triangle, not a second nearest-triangle search.
+        let old_hit = triangle_hit(old, hit.triangle_id);
+        if old_hit.status != 0u { return; }
+        let old_plane_distance = dot(old - old_hit.point.xyz, winding);
+        if !finite_scalar(old_plane_distance) { return; }
+        retained_side = predicted_side;
+        if old_plane_distance > 0.0 { retained_side = 1.0; }
+        if old_plane_distance < 0.0 { retained_side = -1.0; }
+    }
+
+    let distance = sqrt(hit.point.w);
+    let orientation = predicted_side * retained_side;
+    let separation = distance * orientation;
+    if separation >= thickness { return; }
+    let correction = thickness - separation;
+    // Signed radial normals round edge/vertex shells. Only exact coincidence
+    // lacks a direction; use the retained winding normal in that case.
+    var normal = winding * retained_side;
+    if distance > 0.0 { normal = (delta / distance) * orientation; }
+    if !finite_vector(normal) || !finite_scalar(correction) { return; }
+    let displacement = p - old;
+    let tangent = displacement - normal * dot(displacement, normal);
+    // Scale before length so finite, large tangential displacements need not
+    // overflow their squared length. The final correction must still be finite.
+    let tangent_scale = max_component(abs(tangent));
+    let friction_limit = friction * correction;
+    if !finite_vector(tangent) || !finite_scalar(friction_limit) { return; }
+    var friction_correction = vec3<f32>(0.0);
+    if tangent_scale > 0.0 && friction_limit > 0.0 {
+        let scaled_tangent = tangent / tangent_scale;
+        let scaled_length = length(scaled_tangent);
+        let removal = min(tangent_scale, friction_limit / scaled_length);
+        friction_correction = scaled_tangent * removal;
+    }
+    let corrected = p + normal * correction - friction_correction;
+    if !finite_vector(corrected) { return; }
+    predicted[particle_id] = vec4<f32>(corrected, particle.w);
 }

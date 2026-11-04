@@ -1684,6 +1684,7 @@ impl SolverBuffers {
         cache: &PipelineCache,
         pipeline: &SolverPipeline,
         mut timing: Option<&mut TimingSample>,
+        external_contacts: &mut impl FnMut(&mut ComputePass<'_>),
     ) {
         let groups = self.num_particles.div_ceil(WORKGROUP_SIZE);
         let dispatch = |pass: &mut ComputePass<'_>, id, bind_group: &BindGroup| {
@@ -1718,6 +1719,9 @@ impl SolverBuffers {
                 }
             }
             dispatch(pass, pipeline.collide_sdf(), &self.sdf_bind_group);
+            // Imported mesh contact is one-way, after external SDFs and before internal Jacobi.
+            // Legacy callers supply an empty hook and retain their original schedule.
+            external_contacts(pass);
             if let Some(sample) = timing.as_deref_mut() {
                 sample.begin_stage(pass, TimingStage::Constraints);
             }
@@ -1896,6 +1900,14 @@ impl LiveSolver {
         &self.0.positions
     }
 
+    pub(super) fn predicted(&self) -> &Buffer {
+        &self.0._predicted
+    }
+
+    pub(super) fn inverse_masses(&self) -> &Buffer {
+        &self.0._inv_masses
+    }
+
     pub(super) fn num_particles(&self) -> u32 {
         self.0.num_particles
     }
@@ -1917,7 +1929,23 @@ impl LiveSolver {
         cache: &PipelineCache,
         pipeline: &SolverPipeline,
         dt: f32,
+        timing: Option<&mut TimingSample>,
+    ) {
+        self.submit_step_with_contacts(device, queue, cache, pipeline, dt, timing, &mut |_| {});
+    }
+
+    /// The hook records one-way mesh contact after external SDFs in EACH substep.
+    /// No CPU stepping or fixture initialization occurs here.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn submit_step_with_contacts(
+        &self,
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        cache: &PipelineCache,
+        pipeline: &SolverPipeline,
+        dt: f32,
         mut timing: Option<&mut TimingSample>,
+        external_contacts: &mut impl FnMut(&mut ComputePass<'_>),
     ) {
         assert!(dt.is_finite() && dt > 0.0);
         let mut params = self.0.gpu_params;
@@ -1945,8 +1973,13 @@ impl LiveSolver {
                 label: Some("live cloth fixed tick"),
                 timestamp_writes: timing.as_ref().map(|sample| sample.tick_writes()),
             });
-            self.0
-                .record_step(&mut pass, cache, pipeline, timing.as_deref_mut());
+            self.0.record_step(
+                &mut pass,
+                cache,
+                pipeline,
+                timing.as_deref_mut(),
+                external_contacts,
+            );
         }
         if let Some(sample) = timing.as_ref() {
             sample.resolve(&mut encoder);
@@ -4036,7 +4069,7 @@ fn run_solver(
             timestamp_writes: None,
         });
         for _ in 0..STEPS {
-            buffers.record_step(&mut pass, &cache, &pipeline, None);
+            buffers.record_step(&mut pass, &cache, &pipeline, None, &mut |_| {});
         }
     }
     queue.submit(Some(encoder.finish()));

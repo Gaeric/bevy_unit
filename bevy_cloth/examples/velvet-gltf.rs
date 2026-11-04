@@ -1,4 +1,4 @@
-//! Native GLB cloth fixed ticks and independent GPU mesh output; sphere contact comes later.
+//! Native GLB cloth with one-way triangle-BVH sphere contact and independent GPU output.
 //! Space: pause, S: single fixed tick, R: reset paused. Two instances share source assets.
 
 use bevy::{
@@ -9,8 +9,8 @@ use bevy::{
     world_serialization::WorldInstanceReady,
 };
 use bevy_cloth::{
-    ClothControl, ClothMeshCollider, ClothPreparation, ClothSim, ClothSolverConfig, GpuClothPlugin,
-    MeshColliderPreparation, MeshQueryProbes, MeshQueryReadouts, OrbitCameraPlugin,
+    ClothControl, ClothMeshCollider, ClothPreparation, ClothSim, ClothSolverConfig, CollisionGroup,
+    GpuClothPlugin, MeshColliderPreparation, MeshQueryProbes, MeshQueryReadouts, OrbitCameraPlugin,
     demo::OrbitCamera, gpu::mesh_collision::brute_force_nearest,
 };
 use std::path::Path;
@@ -41,8 +41,7 @@ fn main() {
                 })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "GLB cloth — Space pause / S step / R reset (no mesh contact yet)"
-                            .into(),
+                        title: "GLB cloth + BVH contact — Space pause / S step / R reset".into(),
                         ..default()
                     }),
                     ..default()
@@ -91,10 +90,11 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                 });
             })
             .load(GltfAssetLabel::Scene(0).from_asset(path));
-        for x in [0.0, 3.0] {
+        for (group, x) in [0.0, 3.0].into_iter().enumerate() {
             commands.spawn((
                 WorldAssetRoot(handle.clone()),
                 role,
+                CollisionGroup(group as u32),
                 Transform::from_xyz(x, 0.0, 0.0),
             ));
         }
@@ -130,12 +130,12 @@ fn instance_meshes(
 fn mark_instance_roles(
     ready: On<WorldInstanceReady>,
     mut commands: Commands,
-    roots: Query<&AssetRole>,
+    roots: Query<(&AssetRole, &CollisionGroup)>,
     children: Query<&Children>,
     meshes: Res<Assets<Mesh>>,
     mesh_entities: Query<&Mesh3d>,
 ) {
-    let Ok(role) = roots.get(ready.entity) else {
+    let Ok((role, group)) = roots.get(ready.entity) else {
         return;
     };
 
@@ -143,6 +143,7 @@ fn mark_instance_roles(
         let Ok(mesh_handle) = mesh_entities.get(entity) else {
             continue;
         };
+        commands.entity(entity).insert(*group);
         commands.entity(entity).insert(PendingRoleLog {
             root: ready.entity,
             role: *role,

@@ -4,6 +4,7 @@ pub(crate) mod imported;
 pub mod layout;
 mod live;
 pub mod mesh_collision;
+pub mod mesh_contact;
 mod normals;
 pub mod pipeline;
 pub mod solver_gpu;

@@ -27,6 +27,7 @@ use std::{
 
 use super::{
     live::{OutputPipeline, OutputRange, position_layout},
+    mesh_contact::{CollisionGroup, ContactPipeline, StaticMeshContacts},
     normals::build_normal_csr,
     pipeline::{SolverPipeline, WORKGROUP_SIZE},
     solver_gpu::LiveSolver,
@@ -287,6 +288,7 @@ impl ImportedRequest {
 struct ImportedTarget {
     mesh: Handle<Mesh>,
     world_to_local: Mat4,
+    collision_group: u32,
 }
 
 #[derive(Resource, Default, Clone, ExtractResource)]
@@ -482,6 +484,7 @@ fn collect_imported_cloths(
     time: Res<Time<Fixed>>,
     control: Res<ClothControl>,
     cloths: ImportedSources,
+    groups: Query<&CollisionGroup>,
     mut imported: ResMut<ImportedCloths>,
 ) {
     // Last runs after preparation's deferred commands have been applied in PostUpdate.
@@ -513,6 +516,7 @@ fn collect_imported_cloths(
                 ImportedTarget {
                     mesh: mesh.0.clone(),
                     world_to_local,
+                    collision_group: groups.get(entity).map_or(0, |g| g.0),
                 },
             );
         }
@@ -663,7 +667,7 @@ fn initialize_imported_cloths(
                     bend = initial.solver.constraints.bend.indices.len(),
                     slots = initial.solver.constraints.attach.slot_positions.len(),
                     attachments = initial.solver.constraints.attach.particle_ids.len(),
-                    external_colliders = 0,
+                    analytic_colliders = 0,
                     dt = initial.dt,
                     "imported cloth GPU initialized; waiting for output readiness"
                 );
@@ -694,6 +698,8 @@ fn tick_and_output_imported(
     pipeline: Res<SolverPipeline>,
     output: Res<OutputPipeline>,
     queue: Res<RenderQueue>,
+    contacts: Res<StaticMeshContacts>,
+    contact_pipeline: Res<ContactPipeline>,
 ) {
     let Some(imported) = imported else {
         return;
@@ -767,18 +773,41 @@ fn tick_and_output_imported(
             continue;
         };
         range.world_to_local = target.world_to_local.to_cols_array_2d();
+        let Ok(initial) = &instance.request.initial else {
+            continue;
+        };
+        let Some(contact_batches) = contacts.prepare_batches(
+            context.render_device(),
+            &queue,
+            &cache,
+            &contact_pipeline,
+            target.collision_group,
+            count,
+            instance.solver.predicted(),
+            instance.solver.positions(),
+            instance.solver.inverse_masses(),
+            initial.params.collision_margin,
+            initial.params.friction,
+        ) else {
+            continue;
+        };
         ticks.ready = true;
         let pending = std::mem::take(&mut ticks.pending);
         // Hold the per-entity revision lock through submission: reset cannot retire this
         // revision halfway through a batch on a pipelined render thread.
         for dt in pending {
-            instance.solver.submit_step(
+            instance.solver.submit_step_with_contacts(
                 context.render_device(),
                 &queue,
                 &cache,
                 &pipeline,
                 dt,
                 None,
+                &mut |pass| {
+                    for batch in &contact_batches {
+                        batch.record(pass, &cache, &contact_pipeline);
+                    }
+                },
             );
         }
         let device = context.render_device();
