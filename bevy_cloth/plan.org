@@ -43,6 +43,11 @@
   以 velvet-gpu-scenes 的 Collision 为候选，在第 01 步确认资产内容和静态验证姿态；运动验证放到方向二。
 
 ** TODO 01 制作并加载已知场景的 GLB 验证资产
+   实现已接入，设备验收待运行。=velvet-gltf= 同时加载 x=0/3 两组 cloth/sphere，角色选择按资产根限定。
+   =GLB role selected= 日志输出根/primitive、角色、顶点/索引及累计变换；预期 cloth=289/1536，sphere=642/3840。
+   资产制作：=python3 bevy_cloth/tools/generate_glb.py=（输入包含 fabric2.jpg）；沿用 Collision 初态。
+   Agent：私有 target 下基线 all-targets check 通过；新增四个示例测试及显式重准备生命周期测试待执行。
+   运行：=cargo run -j 2 -p bevy_cloth --example velvet-gltf=；比较两组挂点、材质和 +3X 变换，不将静态检查当视觉验收。
    - 实现：确认选用场景，导出或生成可重复制作的 GLB，包含规则布料与简单碰撞网格；新增最小加载示例。
      布料先保留现有网格布局，以复用原约束生成；按名称或 extras 选中并标记布料/碰撞角色，原实体与材质保留。
    - 提交产物：验证资产及制作方式、加载示例、最小角色标记；不运行模拟。
