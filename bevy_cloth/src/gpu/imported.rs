@@ -27,7 +27,7 @@ use std::{
 
 use super::{
     geometry::{GeometryTick, PositionPipeline},
-    live::{OutputPipeline, OutputRange, position_layout},
+    live::{OutputPipeline, OutputRange, imported_output_layout},
     mesh_contact::{CollisionGroup, ContactPipeline, StaticMeshContacts},
     normals::build_normal_csr,
     pipeline::{SolverPipeline, WORKGROUP_SIZE},
@@ -760,12 +760,14 @@ fn tick_and_output_imported(
             continue;
         };
         let count = instance.solver.num_particles();
-        let Some(layout) = position_layout(mesh, count, true) else {
+        let Some((layout, uv_offset_words, tangent_offset_words)) =
+            imported_output_layout(mesh, count)
+        else {
             // This revision cannot run with an unsupported target. Avoid an error per frame.
             if !ticks.closed {
                 error!(
                     ?entity,
-                    "imported cloth requires only Float32x3 POSITION/NORMAL and Float32x2 UV_0; output rejected"
+                    "imported cloth requires Float32x3 POSITION/NORMAL, Float32x2 UV_0 and optional Float32x4 TANGENT in a valid non-overlapping layout; output rejected"
                 );
             }
             ticks.close();
@@ -798,6 +800,8 @@ fn tick_and_output_imported(
             ticks.close();
             continue;
         };
+        range.uv_offset_words = uv_offset_words;
+        range.tangent_offset_words = tangent_offset_words;
         range.world_to_local = target.world_to_local.to_cols_array_2d();
         let Ok(initial) = &instance.request.initial else {
             continue;

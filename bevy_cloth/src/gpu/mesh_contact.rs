@@ -53,7 +53,7 @@ impl MeshRebuildRequests {
 
 use super::{
     geometry::{ColliderMotion, GeometryTick, GpuPositions, PositionPipeline},
-    live::{OutputPipeline, OutputRange, position_layout},
+    live::{OutputPipeline, OutputRange, imported_output_layout},
     normals::build_normal_csr,
     refit::{GpuRefit, RefitPipeline},
     update_policy::{BvhUpdatePolicy, IntervalBoundary, snapshot_sah},
@@ -738,8 +738,12 @@ fn maintain_rebuilds(
 ) {
     let busy = pending.stage.is_some() || !pending.queue.is_empty() || pending.poll_failed;
     // Shared simulation clock; newly initialized/static entries may have no last tick.
-    let stamp = contacts.entries.values().filter_map(|entry| entry.last)
-        .map(|tick| (tick.epoch, tick.index)).max();
+    let stamp = contacts
+        .entries
+        .values()
+        .filter_map(|entry| entry.last)
+        .map(|tick| (tick.epoch, tick.index))
+        .max();
     let interval = pending.interval_boundary.observe(*policy, stamp, busy);
     let manual = pending.accept_request(requests.sequence);
     if manual || interval {
@@ -749,9 +753,11 @@ fn maintain_rebuilds(
             .filter_map(|entity| {
                 let entry = contacts.entries.get(entity)?;
                 entry.geometry.as_ref()?;
-                if !manual && !entry.last.is_some_and(|tick| {
-                    Some((tick.epoch, tick.index)) == stamp && policy.due(tick.index)
-                }) {
+                if !manual
+                    && !entry.last.is_some_and(|tick| {
+                        Some((tick.epoch, tick.index)) == stamp && policy.due(tick.index)
+                    })
+                {
                     return None;
                 }
                 Some((*entity, entry.snapshot.clone()))
@@ -1104,7 +1110,9 @@ impl StaticMeshContacts {
                 continue;
             };
             let count = geometry.positions.count();
-            let Some(layout) = position_layout(mesh, count, true) else {
+            let Some((layout, uv_offset_words, tangent_offset_words)) =
+                imported_output_layout(mesh, count)
+            else {
                 continue;
             };
             let Some(slice) = allocator.mesh_vertex_slice(&target.id()) else {
@@ -1129,6 +1137,8 @@ impl StaticMeshContacts {
             ) else {
                 continue;
             };
+            range.uv_offset_words = uv_offset_words;
+            range.tangent_offset_words = tangent_offset_words;
             range.world_to_local = entry.snapshot.world_to_local.to_cols_array_2d();
             let uniform = upload(
                 context.render_device(),

@@ -742,6 +742,9 @@ pub(super) struct OutputRange {
     position_offset_words: u32,
     normal_offset_words: u32,
     pad1: u32,
+    pub(super) uv_offset_words: u32,
+    pub(super) tangent_offset_words: u32,
+    pad2: [u32; 2],
     pub(super) world_to_local: [[f32; 4]; 4],
 }
 
@@ -779,6 +782,9 @@ impl OutputRange {
             position_offset_words: layout.position_offset_words,
             normal_offset_words: layout.normal_offset_words,
             pad1: 0,
+            uv_offset_words: u32::MAX,
+            tangent_offset_words: u32::MAX,
+            pad2: [0; 2],
             world_to_local: Mat4::IDENTITY.to_cols_array_2d(),
         })
     }
@@ -847,6 +853,63 @@ pub(super) fn position_layout(
         position_offset_words: u32::try_from(position.offset / 4).ok()?,
         normal_offset_words,
     })
+}
+
+/// Imported meshes keep every attribute except the dynamically written P/N/T words.
+/// Returns the position layout, UV0 word offset, and optional tangent word offset.
+/// Attribute IDs and actual buffer attributes are paired; shader locations are irrelevant.
+pub(super) fn imported_output_layout(
+    mesh: &RenderMesh,
+    count: u32,
+) -> Option<(PositionLayout, u32, u32)> {
+    let layout = mesh.layout.0.layout();
+    let ids = mesh.layout.0.attribute_ids();
+    if mesh.vertex_count != count
+        || ids.len() != layout.attributes.len()
+        || layout.array_stride < 32
+        || layout.array_stride % 4 != 0
+    {
+        return None;
+    }
+    // Even untouched packed attributes must fit and be disjoint from every other
+    // attribute. Their offsets need not be word-aligned: they are never loaded/stored.
+    for (index, attribute) in layout.attributes.iter().enumerate() {
+        let end = attribute.offset.checked_add(attribute.format.size())?;
+        if end > layout.array_stride || ids[..index].contains(&ids[index]) {
+            return None;
+        }
+        for previous in &layout.attributes[..index] {
+            let previous_end = previous.offset.checked_add(previous.format.size())?;
+            if attribute.offset < previous_end && previous.offset < end {
+                return None;
+            }
+        }
+    }
+    let offset = |id, format| {
+        let index = ids.iter().position(|candidate| *candidate == id)?;
+        let attribute = &layout.attributes[index];
+        if attribute.format != format || attribute.offset % 4 != 0 {
+            return None;
+        }
+        u32::try_from(attribute.offset / 4).ok()
+    };
+    let position_offset_words = offset(Mesh::ATTRIBUTE_POSITION.id, VertexFormat::Float32x3)?;
+    let normal_offset_words = offset(Mesh::ATTRIBUTE_NORMAL.id, VertexFormat::Float32x3)?;
+    let uv_offset_words = offset(Mesh::ATTRIBUTE_UV_0.id, VertexFormat::Float32x2)?;
+    let tangent_offset_words = if ids.contains(&Mesh::ATTRIBUTE_TANGENT.id) {
+        offset(Mesh::ATTRIBUTE_TANGENT.id, VertexFormat::Float32x4)?
+    } else {
+        u32::MAX
+    };
+    Some((
+        PositionLayout {
+            stride_words: u32::try_from(layout.array_stride / 4).ok()?,
+            position_offset_words,
+            normal_offset_words,
+        },
+        uv_offset_words,
+        tangent_offset_words,
+    ))
 }
 
 fn simulate_and_output(
@@ -1972,11 +2035,16 @@ mod tests {
                     position_offset_words: 0,
                     normal_offset_words,
                     pad1: 0,
+                    uv_offset_words: u32::MAX,
+                    tangent_offset_words: u32::MAX,
+                    pad2: [0; 2],
                     world_to_local: Mat4::IDENTITY.to_cols_array_2d(),
                 }
             );
-            assert_eq!(size_of::<OutputRange>(), 96);
-            assert_eq!(std::mem::offset_of!(OutputRange, world_to_local), 32);
+            assert_eq!(size_of::<OutputRange>(), 112);
+            assert_eq!(std::mem::offset_of!(OutputRange, uv_offset_words), 32);
+            assert_eq!(std::mem::offset_of!(OutputRange, tangent_offset_words), 36);
+            assert_eq!(std::mem::offset_of!(OutputRange, world_to_local), 48);
             assert!(OutputRange::checked(7..12, 3, 5, 8, bytes - 1, layout).is_none());
             assert!(OutputRange::checked(7..12, 3, 6, 9, bytes, layout).is_none());
             assert!(OutputRange::checked(7..12, 4, 5, 8, bytes, layout).is_none());
@@ -2138,6 +2206,10 @@ mod tests {
     }
 
     fn test_position_layout(mesh: &Mesh, count: u32, textured: bool) -> Option<PositionLayout> {
+        position_layout(&test_render_mesh(mesh), count, textured)
+    }
+
+    fn test_render_mesh(mesh: &Mesh) -> RenderMesh {
         use bevy::{
             mesh::{BaseMeshPipelineKey, MeshVertexBufferLayouts},
             render::mesh::RenderMeshBufferInfo,
@@ -2153,7 +2225,175 @@ mod tests {
             ),
             layout: mesh.get_mesh_vertex_buffer_layout(&mut MeshVertexBufferLayouts::default()),
         };
-        position_layout(&render_mesh, count, textured)
+        render_mesh
+    }
+
+    #[test]
+    fn imported_output_layout_preserves_packed_color_extra_uv_and_maps_ids() {
+        use bevy::mesh::{MeshVertexAttribute, MeshVertexBufferLayout, VertexAttributeValues};
+
+        let mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::RENDER_WORLD,
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0; 3]; 3])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 3])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0; 2]; 3])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_1, vec![[0.5; 2]; 3])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_TANGENT, vec![[1.0, 0.0, 0.0, 1.0]; 3])
+        .with_inserted_attribute(
+            MeshVertexAttribute {
+                name: "Packed_Color",
+                id: Mesh::ATTRIBUTE_COLOR.id,
+                format: VertexFormat::Unorm8x4,
+            },
+            VertexAttributeValues::Unorm8x4(vec![[255, 127, 0, 255]; 3]),
+        );
+        let mut render = test_render_mesh(&mesh);
+        let (position, uv, tangent) = imported_output_layout(&render, 3).unwrap();
+        assert_eq!(position.stride_words, 15);
+        assert_eq!(uv, 6);
+        assert_eq!(tangent, 10);
+        assert!(position_layout(&render, 3, true).is_none());
+        assert!(imported_output_layout(&render, 2).is_none());
+
+        // A byte-level address model: P/N/T writes leave UV0, UV1, packed color,
+        // and neighboring allocations exactly unchanged, including NaN bit patterns.
+        let mut slab: Vec<u32> = (0..5 * position.stride_words)
+            .map(|word| 0xffc0_0000 + word)
+            .collect();
+        let before = slab.clone();
+        let mut range =
+            OutputRange::checked(1..4, 0, 3, 3, (slab.len() * 4) as u64, position).unwrap();
+        range.uv_offset_words = uv;
+        range.tangent_offset_words = tangent;
+        for i in 0..range.count {
+            for (offset, width) in [
+                (position.position_offset_words, 3),
+                (position.normal_offset_words, 3),
+                (tangent, 4),
+            ] {
+                for axis in 0..width {
+                    slab[((range.start + i) * position.stride_words + offset + axis) as usize] = 0;
+                }
+            }
+        }
+        for (word, value) in slab.iter().enumerate() {
+            let vertex = word as u32 / position.stride_words;
+            let component = word as u32 % position.stride_words;
+            let written = (1..4).contains(&vertex)
+                && [
+                    (position.position_offset_words, 3),
+                    (position.normal_offset_words, 3),
+                    (tangent, 4),
+                ]
+                .into_iter()
+                .any(|(offset, width)| (offset..offset + width).contains(&component));
+            assert_eq!(*value, if written { 0 } else { before[word] });
+        }
+
+        let original = render.layout.0.clone();
+        let mut ids = original.attribute_ids().to_vec();
+        let mut layout = original.layout().clone();
+        ids.reverse();
+        layout.attributes.reverse();
+        for attribute in &mut layout.attributes {
+            attribute.shader_location = 99;
+        }
+        render.layout.0 = Arc::new(MeshVertexBufferLayout::new(
+            ids,
+            layout,
+            original.get_attribute_compression(),
+        ));
+        assert_eq!(
+            imported_output_layout(&render, 3),
+            Some((position, uv, tangent))
+        );
+
+        // Reject malformed actual layouts, not just malformed source formats.
+        for case in 0..4 {
+            let mut layout = original.layout().clone();
+            match case {
+                0 => layout.array_stride += 1,
+                1 => layout.attributes[1].offset = layout.attributes[0].offset,
+                2 => layout.attributes[0].offset = layout.array_stride,
+                _ => layout.attributes[0].format = VertexFormat::Float32x2,
+            }
+            render.layout.0 = Arc::new(MeshVertexBufferLayout::new(
+                original.attribute_ids().to_vec(),
+                layout,
+                original.get_attribute_compression(),
+            ));
+            assert!(imported_output_layout(&render, 3).is_none(), "case {case}");
+        }
+        let mut no_tangent = mesh.clone();
+        no_tangent.remove_attribute(Mesh::ATTRIBUTE_TANGENT);
+        assert_eq!(
+            imported_output_layout(&test_render_mesh(&no_tangent), 3)
+                .unwrap()
+                .2,
+            u32::MAX
+        );
+        for required in [
+            Mesh::ATTRIBUTE_POSITION,
+            Mesh::ATTRIBUTE_NORMAL,
+            Mesh::ATTRIBUTE_UV_0,
+        ] {
+            let mut missing = mesh.clone();
+            missing.remove_attribute(required);
+            assert!(imported_output_layout(&test_render_mesh(&missing), 3).is_none());
+        }
+    }
+
+    /// CPU formula model, not shader execution or device verification.
+    #[test]
+    fn imported_tangent_model_recovers_local_handedness_and_zero_degeneracy() {
+        let local = [Vec3::ZERO, Vec3::X * 2.0, Vec3::Y + Vec3::Z];
+        for scale in [Vec3::new(2.0, 0.5, 3.0), Vec3::new(-2.0, 0.5, 3.0)] {
+            let world = Mat4::from_scale_rotation_translation(
+                scale,
+                Quat::from_rotation_y(0.7),
+                Vec3::splat(3.0),
+            );
+            let recovered =
+                local.map(|p| world.inverse().transform_point3(world.transform_point3(p)));
+            for (uv, expected_w) in [
+                ([Vec2::ZERO, Vec2::X, Vec2::Y], 1.0),
+                ([Vec2::ZERO, Vec2::X, -Vec2::Y], -1.0),
+                ([Vec2::ZERO; 3], 0.0),
+            ] {
+                // Each cyclic row must recover the same tangent and UV handedness.
+                for i in 0..3 {
+                    let a = (i + 1) % 3;
+                    let b = (i + 2) % 3;
+                    let e0 = recovered[a] - recovered[i];
+                    let e1 = recovered[b] - recovered[i];
+                    let normal = e0.cross(e1).normalize();
+                    let d0 = uv[a] - uv[i];
+                    let d1 = uv[b] - uv[i];
+                    let determinant = d0.perp_dot(d1);
+                    let mut tangent = Vec4::ZERO;
+                    if determinant != 0.0 {
+                        let t = (e0 * d1.y - e1 * d0.y) / determinant;
+                        let bitangent = (e1 * d0.x - e0 * d1.x) / determinant;
+                        let orthogonal = t - normal * normal.dot(t);
+                        if orthogonal.length() > 0.0 {
+                            let direction = orthogonal.normalize();
+                            let handedness = normal.cross(direction).dot(bitangent);
+                            if handedness != 0.0 {
+                                tangent = direction.extend(handedness.signum());
+                            }
+                        }
+                    }
+                    assert_eq!(tangent.w, expected_w);
+                    if expected_w == 0.0 {
+                        assert_eq!(tangent, Vec4::ZERO);
+                    } else {
+                        assert!(tangent.truncate().distance(Vec3::X) < 2e-6);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
