@@ -14,6 +14,8 @@ bevy = { version = "0.20.0", features = [
 # same version bevy_math use
 glam = "0.33"
 rand = "0.10.0"
+# Ordinary CPU BVH2; GPU ABI remains owned by this crate.
+obvhs = "=0.3.3"
 bytemuck = { version = "1", features = ["derive"] }
 # Timestamp query types match the locally patched Bevy renderer; no extra backend features.
 wgpu = { version = "30", default-features = false }

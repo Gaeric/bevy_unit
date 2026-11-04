@@ -61,6 +61,11 @@
    - 验证：与原场景关闭外部碰撞后的同参数结果比较；挂点、暂停、单步、重置和 GPU 渲染均通过该入口工作。
 
 ** TODO 03 obvhs 首次建树与 GPU 数据布局
+   实现：=cloth/bvh.rs= 普通obvhs 0.3.3 BVH2（pre_split=false）；32字节独立节点ABI，原三角形引用、叶表与按深度倒序内部层表。
+   =MeshColliderPreparation= 按标记primitive生成世界坐标几何及树，保留原Mesh/层级；输入组件变化重准备，移除清理。
+   运行同velvet-gltf，观察 =mesh collider prepared (CPU BVH only)= 的nodes/leaves/max_depth；当前不上传GPU。
+   Agent：all-targets check通过，=cargo test -j 2 -p bevy_cloth --lib cloth::= 21项通过（含BVH新增5项、碰撞准备新增4项）。
+   包含关系、原三角形引用覆盖、ABI及孩子先更新层序均有独立测试；球体设备日志待运行。
    - 实现：读取标记的碰撞网格，CPU 建 BVH2，导出节点、原三角形引用、叶节点和内部节点分层表。
      GPU ABI 与库内部类型分开，固定索引和坐标约定，为后续 refit 预留层级数据。
    - 提交产物：CPU 适配模块、节点布局及测试；不增加运行时更新策略。

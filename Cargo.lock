@@ -1134,6 +1134,7 @@ dependencies = [
  "bevy 0.20.0",
  "bytemuck",
  "glam 0.33.12",
+ "obvhs",
  "rand 0.10.3",
  "wgpu 30.0.1",
 ]
