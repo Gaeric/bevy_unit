@@ -9,6 +9,7 @@ pub mod mesh_contact;
 mod normals;
 pub mod pipeline;
 mod refit;
+pub mod update_policy;
 pub mod solver_gpu;
 
 pub use layout::GpuParams;

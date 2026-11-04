@@ -56,6 +56,7 @@ use super::{
     live::{OutputPipeline, OutputRange, position_layout},
     normals::build_normal_csr,
     refit::{GpuRefit, RefitPipeline},
+    update_policy::{BvhUpdatePolicy, IntervalBoundary, snapshot_sah},
 };
 
 struct OutputOwner {
@@ -653,6 +654,7 @@ struct PendingRebuild {
     queue: VecDeque<(Entity, Arc<Snapshot>)>,
     stage: Option<RebuildStage>,
     poll_failed: bool,
+    interval_boundary: IntervalBoundary,
 }
 
 impl PendingRebuild {
@@ -725,6 +727,7 @@ fn upload_rebuilt_geometry(
 #[allow(clippy::too_many_arguments)]
 fn maintain_rebuilds(
     requests: Res<MeshRebuildRequests>,
+    policy: Res<BvhUpdatePolicy>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
@@ -733,19 +736,31 @@ fn maintain_rebuilds(
     mut contacts: ResMut<StaticMeshContacts>,
     mut pending: ResMut<PendingRebuild>,
 ) {
-    if pending.accept_request(requests.sequence) {
+    let busy = pending.stage.is_some() || !pending.queue.is_empty() || pending.poll_failed;
+    // Shared simulation clock; newly initialized/static entries may have no last tick.
+    let stamp = contacts.entries.values().filter_map(|entry| entry.last)
+        .map(|tick| (tick.epoch, tick.index)).max();
+    let interval = pending.interval_boundary.observe(*policy, stamp, busy);
+    let manual = pending.accept_request(requests.sequence);
+    if manual || interval {
         pending.queue = contacts
             .order
             .iter()
             .filter_map(|entity| {
                 let entry = contacts.entries.get(entity)?;
                 entry.geometry.as_ref()?;
+                if !manual && !entry.last.is_some_and(|tick| {
+                    Some((tick.epoch, tick.index)) == stamp && policy.due(tick.index)
+                }) {
+                    return None;
+                }
                 Some((*entity, entry.snapshot.clone()))
             })
             .collect();
         info!(
-            colliders = pending.queue.len(),
-            "mesh BVH manual rebuild requested"
+            colliders = pending.queue.len(), manual, interval_experiment = interval,
+            completed_tick = ?stamp,
+            "mesh BVH forced rebuild requested (not an automatic quality strategy)"
         );
     }
     // A failed poll must not drop/recycle an in-flight staging allocation.
@@ -820,7 +835,18 @@ fn maintain_rebuilds(
                             .spawn(move || {
                                 let start = Instant::now();
                                 let result = build_triangle_bvh(&positions, &source.indices)
-                                    .map(|tree| (tree, start.elapsed()))
+                                    .map(|tree| {
+                                        let elapsed = start.elapsed();
+                                        // Same GPU vertex snapshot, CPU-built bounds only.
+                                        // This does not measure the active GPU tree or query cost.
+                                        info!(
+                                            snapshot_rebuilt_sah = ?snapshot_sah(&tree),
+                                            nodes = tree.nodes.len(), leaves = tree.leaf_nodes.len(),
+                                            max_depth = tree.max_depth,
+                                            "mesh BVH rebuilt snapshot quality (CPU SAH proxy; not GPU traversal cost)"
+                                        );
+                                        (tree, elapsed)
+                                    })
                                     .map_err(|error| error.to_string());
                                 let _ = sender.send(result);
                             }) {
@@ -2011,6 +2037,7 @@ pub(crate) struct MeshContactPlugin;
 impl Plugin for MeshContactPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Snapshots>()
+            .init_resource::<BvhUpdatePolicy>()
             .init_resource::<MeshRebuildRequests>()
             .init_resource::<ColliderOutputs>()
             .add_systems(Last, (manage_outputs, collect_snapshots).chain());
@@ -2031,6 +2058,7 @@ impl Plugin for MeshContactPlugin {
             app.add_plugins((
                 ExtractResourcePlugin::<Snapshots>::default(),
                 ExtractResourcePlugin::<MeshRebuildRequests>::default(),
+                ExtractResourcePlugin::<BvhUpdatePolicy>::default(),
             ));
         }
     }
