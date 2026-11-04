@@ -171,7 +171,7 @@ fn imported_initial(
     for constraint in &prepared.topology.stretch {
         if constraint.indices.iter().any(|&id| id as usize >= count)
             || !constraint.rest_length.is_finite()
-            || constraint.rest_length <= 0.0
+            || constraint.rest_length < 0.0
         {
             return Err("invalid imported stretch constraint".into());
         }
@@ -1022,6 +1022,11 @@ mod tests {
         invalid = config.clone();
         invalid.params.max_num_neighbors = 0;
         assert!(imported_initial(&prepared, &invalid, 0.02).is_err());
+        prepared.topology.stretch[0].rest_length = 0.0;
+        let seam = imported_initial(&prepared, &config, 0.02).unwrap();
+        assert_eq!(seam.solver.constraints.stretch.lengths[0], 0.0);
+        prepared.topology.stretch[0].rest_length = -1.0;
+        assert!(imported_initial(&prepared, &config, 0.02).is_err());
         prepared.topology.stretch[0].rest_length = f32::NAN;
         assert!(imported_initial(&prepared, &config, 0.02).is_err());
     }

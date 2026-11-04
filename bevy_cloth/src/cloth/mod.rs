@@ -1,6 +1,7 @@
 //! Imported triangle cloth preparation and the fixed-tick GPU solver plugin.
 
 pub mod bvh;
+pub mod physical;
 pub mod topology;
 
 use bevy::{
@@ -10,7 +11,9 @@ use bevy::{
     transform::TransformSystems,
 };
 
-use topology::{TriangleTopology, build_triangle_topology};
+pub use physical::ClothPhysicalConfig;
+use physical::{prepare_inverse_masses, prepare_physical_topology};
+use topology::TriangleTopology;
 
 use crate::gpu::imported::ImportedClothPlugin;
 pub use crate::gpu::imported::{ClothControl, ClothSolverConfig};
@@ -44,6 +47,8 @@ pub enum MeshColliderPreparation {
 }
 
 /// Immutable world-space initial data. Source Mesh/material/hierarchy are not modified.
+/// Render vertex ID equals particle ID: positions and masses retain every vertex,
+/// and indices remain the original rendering triangles even with explicit seams.
 #[derive(Debug)]
 pub struct PreparedCloth {
     pub positions: Vec<Vec3>,
@@ -103,17 +108,26 @@ fn clear_removed_cloth(
 fn prepare_cloth(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
+    mut removed_physical: RemovedComponents<ClothPhysicalConfig>,
     cloths: Query<(
         Entity,
         Ref<ClothSim>,
         Ref<Mesh3d>,
         Ref<GlobalTransform>,
+        Option<Ref<ClothPhysicalConfig>>,
         Option<&ClothPreparation>,
     )>,
 ) {
-    for (entity, config, mesh_handle, transform, state) in &cloths {
+    let removed_physical: std::collections::HashSet<_> = removed_physical.read().collect();
+    for (entity, config, mesh_handle, transform, physical, state) in &cloths {
         let retry = state.is_none() || matches!(state, Some(ClothPreparation::WaitingForMesh));
-        if !retry && !config.is_changed() && !mesh_handle.is_changed() && !transform.is_changed() {
+        if !retry
+            && !config.is_changed()
+            && !mesh_handle.is_changed()
+            && !transform.is_changed()
+            && !physical.as_ref().is_some_and(|config| config.is_changed())
+            && !removed_physical.contains(&entity)
+        {
             continue;
         }
         let Some(mesh) = meshes.get(&mesh_handle.0) else {
@@ -125,7 +139,14 @@ fn prepare_cloth(
             }
             continue;
         };
-        let result = prepare_mesh(mesh, transform.to_matrix(), &config.pinned_vertices);
+        let default_physical = ClothPhysicalConfig::default();
+        let physical = physical.as_deref().unwrap_or(&default_physical);
+        let result = prepare_mesh_with_physical(
+            mesh,
+            transform.to_matrix(),
+            &config.pinned_vertices,
+            physical,
+        );
         let state = match result {
             Ok(prepared) => {
                 info!(?entity, particles = prepared.positions.len(),
@@ -246,6 +267,18 @@ pub fn prepare_mesh_collider(mesh: &Mesh, transform: Mat4) -> Result<PreparedMes
 /// Convert a loaded triangle Mesh into initial solver data without grid assumptions.
 /// Non-indexed triangle lists are supported with sequential indices.
 pub fn prepare_mesh(mesh: &Mesh, transform: Mat4, pins: &[u32]) -> Result<PreparedCloth, String> {
+    prepare_mesh_with_physical(mesh, transform, pins, &ClothPhysicalConfig::default())
+}
+
+/// Prepare explicit seams and per-render-vertex masses without changing rendering
+/// indices or reducing particles. Missing physical metadata uses the original
+/// disconnected-render-topology behavior; pin values override configured masses.
+pub fn prepare_mesh_with_physical(
+    mesh: &Mesh,
+    transform: Mat4,
+    pins: &[u32],
+    physical: &ClothPhysicalConfig,
+) -> Result<PreparedCloth, String> {
     if !mesh.asset_usage.contains(RenderAssetUsages::MAIN_WORLD) {
         return Err("cloth source Mesh must retain MAIN_WORLD data".into());
     }
@@ -272,17 +305,11 @@ pub fn prepare_mesh(mesh: &Mesh, transform: Mat4, pins: &[u32]) -> Result<Prepar
         Some(Indices::U32(values)) => values.clone(),
         None => (0..positions.len() as u32).collect(),
     };
-    let topology = build_triangle_topology(&positions, &indices).map_err(|e| e.to_string())?;
+    let topology = prepare_physical_topology(&positions, &indices, physical)?;
     let mut pinned_vertices = pins.to_vec();
     pinned_vertices.sort_unstable();
     pinned_vertices.dedup();
-    let mut inv_masses = vec![1.0; positions.len()];
-    for &pin in &pinned_vertices {
-        let Some(mass) = inv_masses.get_mut(pin as usize) else {
-            return Err(format!("pinned vertex {pin} out of range"));
-        };
-        *mass = 0.0;
-    }
+    let inv_masses = prepare_inverse_masses(positions.len(), &pinned_vertices, physical)?;
     Ok(PreparedCloth {
         positions,
         indices,
@@ -758,6 +785,76 @@ mod tests {
         for transform in [Mat4::ZERO, Mat4::from_cols_array(&[f32::NAN; 16])] {
             assert!(prepare_mesh_collider(&triangle(), transform).is_err());
         }
+    }
+
+    #[test]
+    fn physical_config_preserves_render_vertices_indices_and_pin_precedence() {
+        let mesh = triangle()
+            .with_inserted_attribute(
+                Mesh::ATTRIBUTE_POSITION,
+                vec![
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, -1.0, 0.0],
+                ],
+            )
+            .with_inserted_indices(Indices::U32(vec![2, 0, 1, 5, 4, 3]));
+        let config = ClothPhysicalConfig {
+            seams: vec![[0, 3], [1, 4]],
+            inverse_masses: Some(vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0]),
+        };
+        let data = prepare_mesh_with_physical(&mesh, Mat4::IDENTITY, &[4], &config).unwrap();
+        assert_eq!(data.positions.len(), 6);
+        assert_eq!(data.indices, [2, 0, 1, 5, 4, 3]);
+        assert_eq!(data.inv_masses, [2.0, 3.0, 4.0, 5.0, 0.0, 7.0]);
+        assert_eq!(
+            (data.topology.stretch.len(), data.topology.bend.len()),
+            (7, 1)
+        );
+        assert_eq!(
+            mesh.indices().unwrap().iter().collect::<Vec<_>>(),
+            [2, 0, 1, 5, 4, 3]
+        );
+    }
+
+    #[test]
+    fn physical_component_changes_and_removal_reprepare() {
+        let mut app = test_app();
+        let mesh = app
+            .world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .add(triangle());
+        let entity = app
+            .world_mut()
+            .spawn((Mesh3d(mesh), ClothSim::default(), Transform::IDENTITY))
+            .id();
+        app.update();
+        assert_eq!(prepared(&app, entity).inv_masses, [1.0; 3]);
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(ClothPhysicalConfig {
+                inverse_masses: Some(vec![2.0, 3.0, 4.0]),
+                ..default()
+            });
+        app.update();
+        assert_eq!(prepared(&app, entity).inv_masses, [2.0, 3.0, 4.0]);
+        let tick = preparation_tick(&app, entity);
+        app.update();
+        assert_eq!(preparation_tick(&app, entity), tick);
+        app.world_mut()
+            .get_mut::<ClothPhysicalConfig>(entity)
+            .unwrap()
+            .inverse_masses = Some(vec![5.0; 3]);
+        app.update();
+        assert_eq!(prepared(&app, entity).inv_masses, [5.0; 3]);
+        app.world_mut()
+            .entity_mut(entity)
+            .remove::<ClothPhysicalConfig>();
+        app.update();
+        assert_eq!(prepared(&app, entity).inv_masses, [1.0; 3]);
     }
 
     #[test]
