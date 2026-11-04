@@ -1,4 +1,4 @@
-//! Imported cloth preparation and GPU initialization; fixed ticks/output are not connected yet.
+//! Imported triangle cloth preparation and the fixed-tick GPU solver plugin.
 
 pub mod topology;
 
@@ -11,8 +11,8 @@ use bevy::{
 
 use topology::{TriangleTopology, build_triangle_topology};
 
-pub use crate::gpu::imported::ClothSolverConfig;
 use crate::gpu::imported::ImportedClothPlugin;
+pub use crate::gpu::imported::{ClothControl, ClothSolverConfig};
 
 /// Application-selected cloth primitive. IDs refer to this Mesh's loaded vertices.
 /// All render vertices remain particles; this stage does not weld UV splits.

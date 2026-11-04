@@ -695,9 +695,9 @@ fn update_timing_hud(
 struct InitialDt(f32);
 
 #[derive(Resource)]
-struct OutputPipeline {
-    layout: BindGroupLayoutDescriptor,
-    pipeline: CachedComputePipelineId,
+pub(super) struct OutputPipeline {
+    pub(super) layout: BindGroupLayoutDescriptor,
+    pub(super) pipeline: CachedComputePipelineId,
 }
 
 impl FromWorld for OutputPipeline {
@@ -733,19 +733,20 @@ impl FromWorld for OutputPipeline {
 /// Allocation ranges use vertex units; stride/position offset use f32 words, not bytes.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-struct OutputRange {
+pub(super) struct OutputRange {
     start: u32,
     end: u32,
     particle_offset: u32,
-    count: u32,
+    pub(super) count: u32,
     stride_words: u32,
     position_offset_words: u32,
     normal_offset_words: u32,
     pad1: u32,
+    pub(super) world_to_local: [[f32; 4]; 4],
 }
 
 impl OutputRange {
-    fn checked(
+    pub(super) fn checked(
         range: std::ops::Range<u32>,
         offset: u32,
         count: u32,
@@ -778,19 +779,24 @@ impl OutputRange {
             position_offset_words: layout.position_offset_words,
             normal_offset_words: layout.normal_offset_words,
             pad1: 0,
+            world_to_local: Mat4::IDENTITY.to_cols_array_2d(),
         })
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct PositionLayout {
+pub(super) struct PositionLayout {
     stride_words: u32,
     position_offset_words: u32,
     normal_offset_words: u32,
 }
 
 /// Whitelist both paths; compressed/extra attributes are not silently overwritten.
-fn position_layout(mesh: &RenderMesh, count: u32, textured: bool) -> Option<PositionLayout> {
+pub(super) fn position_layout(
+    mesh: &RenderMesh,
+    count: u32,
+    textured: bool,
+) -> Option<PositionLayout> {
     let layout = mesh.layout.0.layout();
     let ids = mesh.layout.0.attribute_ids();
     let expected_ids = if textured {
@@ -1966,9 +1972,11 @@ mod tests {
                     position_offset_words: 0,
                     normal_offset_words,
                     pad1: 0,
+                    world_to_local: Mat4::IDENTITY.to_cols_array_2d(),
                 }
             );
-            assert_eq!(size_of::<OutputRange>(), 32);
+            assert_eq!(size_of::<OutputRange>(), 96);
+            assert_eq!(std::mem::offset_of!(OutputRange, world_to_local), 32);
             assert!(OutputRange::checked(7..12, 3, 5, 8, bytes - 1, layout).is_none());
             assert!(OutputRange::checked(7..12, 3, 6, 9, bytes, layout).is_none());
             assert!(OutputRange::checked(7..12, 4, 5, 8, bytes, layout).is_none());
@@ -2104,6 +2112,28 @@ mod tests {
                     assert_eq!(slab[word], before[word], "stride {stride}, word {word}");
                 }
             }
+        }
+    }
+
+    /// Independent geometry expectation for the shader's local-space normal gather.
+    #[test]
+    fn imported_output_recovers_local_geometry_under_scaled_and_mirrored_parents() {
+        let local = [Vec3::ZERO, Vec3::X, Vec3::Y + Vec3::Z];
+        for scale in [Vec3::new(2.0, 0.5, 3.0), Vec3::new(-2.0, 0.5, 3.0)] {
+            let world = Mat4::from_scale_rotation_translation(
+                scale,
+                Quat::from_rotation_y(0.7),
+                Vec3::new(3.0, 4.0, 5.0),
+            );
+            let positions = local.map(|p| world.transform_point3(p));
+            let recovered = positions.map(|p| world.inverse().transform_point3(p));
+            for (expected, actual) in local.into_iter().zip(recovered) {
+                assert!(expected.distance(actual) < 2e-6);
+            }
+            let normal = (recovered[1] - recovered[0])
+                .cross(recovered[2] - recovered[0])
+                .normalize();
+            assert!(normal.distance(Vec3::new(0.0, -1.0, 1.0).normalize()) < 2e-6);
         }
     }
 

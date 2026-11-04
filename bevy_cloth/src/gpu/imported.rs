@@ -1,18 +1,36 @@
-//! Imported triangle cloth: initial data adaptation and GPU upload, without ticking/output.
+//! Imported triangle cloth: revision-gated fixed ticks and independent GPU mesh output.
 
 use bevy::{
-    asset::embedded_asset,
+    asset::{RenderAssetUsages, embedded_asset},
+    camera::visibility::NoFrustumCulling,
+    core_pipeline::schedule::camera_driver,
     prelude::*,
     render::{
         Render, RenderApp, RenderSystems,
         extract_resource::{ExtractResource, ExtractResourcePlugin},
-        render_resource::PipelineCache,
-        renderer::{RenderDevice, RenderQueue},
+        mesh::{
+            RenderMesh,
+            allocator::{MeshAllocator, MeshAllocatorSettings},
+        },
+        render_asset::RenderAssets,
+        render_resource::{
+            BindGroupEntries, Buffer, BufferDescriptor, BufferUsages, ComputePassDescriptor,
+            PipelineCache,
+        },
+        renderer::{RenderContext, RenderDevice, RenderGraph, RenderGraphSystems, RenderQueue},
     },
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::{Arc, Mutex},
+};
 
-use super::{pipeline::SolverPipeline, solver_gpu::LiveSolver};
+use super::{
+    live::{OutputPipeline, OutputRange, position_layout},
+    normals::build_normal_csr,
+    pipeline::{SolverPipeline, WORKGROUP_SIZE},
+    solver_gpu::LiveSolver,
+};
 use crate::{
     cloth::{ClothPreparation, ClothSim, PreparedCloth},
     sim::{params::SimParams, solver::Solver},
@@ -197,89 +215,320 @@ fn imported_initial(
     Ok(ImportedInitial { solver, params, dt })
 }
 
+/// Application-owned controls; keyboard/UI bindings are deliberately outside the plugin.
+#[derive(Resource, Default, Debug)]
+pub struct ClothControl {
+    pub paused: bool,
+    pub single_steps: u32,
+    reset_counter: u64,
+}
+
+impl ClothControl {
+    /// Restore the immutable initial state, discarding old queued ticks and step requests.
+    pub fn reset(&mut self) {
+        self.reset_counter = self.reset_counter.wrapping_add(1);
+        self.single_steps = 0;
+    }
+
+    /// Queue one fixed tick while paused. Requests wait until at least one cloth is ready.
+    pub fn request_step(&mut self) {
+        self.single_steps = self.single_steps.saturating_add(1);
+    }
+}
+
+#[derive(Default)]
+struct ImportedTickQueue {
+    ready: bool,
+    closed: bool,
+    pending: VecDeque<f32>,
+}
+
+impl ImportedTickQueue {
+    fn close(&mut self) {
+        self.closed = true;
+        self.ready = false;
+        self.pending.clear();
+    }
+}
+
 /// Immutable source revision. Extraction clones Arc handles, not particle/constraint arrays.
 struct ImportedRequest {
     preparation_tick: bevy::ecs::change_detection::Tick,
     config_tick: Option<bevy::ecs::change_detection::Tick>,
+    reset_counter: u64,
+    source_ticks: [Option<bevy::ecs::change_detection::Tick>; 3],
     dt: f32,
     initial: Result<ImportedInitial, String>,
+    ticks: Arc<Mutex<ImportedTickQueue>>,
+}
+
+impl ImportedRequest {
+    fn matches(
+        &self,
+        preparation: &Ref<ClothPreparation>,
+        config: Option<&Ref<ClothSolverConfig>>,
+        control: &ClothControl,
+        dt: f32,
+        source_ticks: [Option<bevy::ecs::change_detection::Tick>; 3],
+    ) -> bool {
+        self.source_ticks == source_ticks
+            && self.preparation_tick == preparation.last_changed()
+            && self.config_tick == config.map(|config| config.last_changed())
+            && self.reset_counter == control.reset_counter
+            && self.dt == dt
+    }
+
+    fn close(&self) {
+        self.ticks.lock().expect("imported cloth ticks").close();
+    }
+}
+
+#[derive(Clone)]
+struct ImportedTarget {
+    mesh: Handle<Mesh>,
+    world_to_local: Mat4,
 }
 
 #[derive(Resource, Default, Clone, ExtractResource)]
 #[extract_app(RenderApp)]
 struct ImportedCloths {
     entries: HashMap<Entity, Arc<ImportedRequest>>,
+    targets: HashMap<Entity, ImportedTarget>,
 }
+
+/// Owns only output handles, never a CPU copy of deformed GPU positions.
+struct OutputOwner {
+    source: Handle<Mesh>,
+    output: Handle<Mesh>,
+    added_no_culling: bool,
+}
+
+#[derive(Resource, Default)]
+struct ImportedOutputs(HashMap<Entity, OutputOwner>);
 
 pub(crate) struct ImportedClothPlugin;
 
 impl Plugin for ImportedClothPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ImportedCloths>()
+        app.init_resource::<ClothControl>()
+            .init_resource::<ImportedCloths>()
+            .add_systems(FixedUpdate, queue_imported_ticks)
             .add_systems(Last, collect_imported_cloths);
         if app.get_sub_app(RenderApp).is_none() {
             return;
         }
         // Same directory/path as the existing solver plugins; no fixture/demo plugin is installed.
         embedded_asset!(app, "solver.wesl");
-        app.add_plugins(ExtractResourcePlugin::<ImportedCloths>::default());
+        embedded_asset!(app, "output.wesl");
+        app.init_resource::<ImportedOutputs>()
+            .add_systems(
+                Last,
+                manage_imported_outputs.before(collect_imported_cloths),
+            )
+            .add_plugins(ExtractResourcePlugin::<ImportedCloths>::default());
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<ImportedGpuInstances>()
                 .add_systems(
                     Render,
                     initialize_imported_cloths.in_set(RenderSystems::PrepareResources),
+                )
+                .add_systems(
+                    RenderGraph,
+                    tick_and_output_imported
+                        .in_set(RenderGraphSystems::Render)
+                        .before(camera_driver),
                 );
         }
     }
 
     fn finish(&self, app: &mut App) {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<SolverPipeline>();
+            render_app
+                .world_mut()
+                .resource_mut::<MeshAllocatorSettings>()
+                .extra_buffer_usages |= BufferUsages::STORAGE;
+            render_app
+                .init_resource::<SolverPipeline>()
+                .init_resource::<OutputPipeline>();
         }
+    }
+}
+
+type ImportedSources<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Ref<'static, ClothPreparation>,
+        Option<Ref<'static, ClothSolverConfig>>,
+        Ref<'static, ClothSim>,
+        Ref<'static, Mesh3d>,
+        Option<Ref<'static, GlobalTransform>>,
+    ),
+>;
+
+fn source_ticks(
+    cloth: &Ref<ClothSim>,
+    mesh: &Ref<Mesh3d>,
+    transform: Option<&Ref<GlobalTransform>>,
+) -> [Option<bevy::ecs::change_detection::Tick>; 3] {
+    [
+        Some(cloth.last_changed()),
+        Some(mesh.last_changed()),
+        transform.map(|t| t.last_changed()),
+    ]
+}
+
+fn queue_imported_ticks(
+    time: Res<Time<Fixed>>,
+    mut control: ResMut<ClothControl>,
+    cloths: ImportedSources,
+    imported: Res<ImportedCloths>,
+) {
+    let dt = time.timestep().as_secs_f32();
+    let requested = !control.paused || control.single_steps > 0;
+    let mut queued = false;
+    for (&entity, request) in &imported.entries {
+        let current = cloths
+            .get(entity)
+            .is_ok_and(|(_, state, config, cloth, mesh, transform)| {
+                matches!(&*state, ClothPreparation::Ready(_))
+                    && request.matches(
+                        &state,
+                        config.as_ref(),
+                        &control,
+                        dt,
+                        source_ticks(&cloth, &mesh, transform.as_ref()),
+                    )
+            });
+        let mut ticks = request.ticks.lock().expect("imported cloth ticks");
+        // FixedUpdate precedes Last: reject a changed input before it can enqueue old work.
+        if !current {
+            ticks.close();
+        } else if requested && ticks.ready && !ticks.closed {
+            ticks.pending.push_back(dt);
+            queued = true;
+        }
+    }
+    // A global single-step advances all currently ready entities, not just the first one.
+    if queued && control.paused {
+        control.single_steps -= 1;
+    }
+}
+
+fn manage_imported_outputs(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut outputs: ResMut<ImportedOutputs>,
+    mut cloths: Query<(
+        Entity,
+        &mut Mesh3d,
+        Option<&ClothSim>,
+        Option<&ClothPreparation>,
+        Has<NoFrustumCulling>,
+    )>,
+) {
+    outputs.0.retain(|&entity, owner| {
+        let Ok((_, mut mesh, cloth, _, _)) = cloths.get_mut(entity) else {
+            if owner.added_no_culling {
+                if let Ok(mut entity) = commands.get_entity(entity) {
+                    entity.remove::<NoFrustumCulling>();
+                }
+            }
+            return false;
+        };
+        if cloth.is_none() || mesh.0 != owner.output {
+            if mesh.0 == owner.output {
+                mesh.0 = owner.source.clone();
+            }
+            if owner.added_no_culling {
+                commands.entity(entity).remove::<NoFrustumCulling>();
+            }
+            return false;
+        }
+        true
+    });
+    for (entity, mut mesh, cloth, prepared, no_culling) in &mut cloths {
+        if cloth.is_none()
+            || !matches!(prepared, Some(ClothPreparation::Ready(_)))
+            || outputs.0.contains_key(&entity)
+        {
+            continue;
+        }
+        let Some(source) = meshes.get(&mesh.0) else {
+            continue;
+        };
+        let mut output = source.clone();
+        output.asset_usage |= RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD;
+        let output = meshes.add(output);
+        let source = mesh.0.clone();
+        mesh.0 = output.clone();
+        if !no_culling {
+            commands.entity(entity).insert(NoFrustumCulling);
+        }
+        outputs.0.insert(
+            entity,
+            OutputOwner {
+                source,
+                output,
+                added_no_culling: !no_culling,
+            },
+        );
     }
 }
 
 fn collect_imported_cloths(
     time: Res<Time<Fixed>>,
-    cloths: Query<
-        (
-            Entity,
-            Ref<ClothPreparation>,
-            Option<Ref<ClothSolverConfig>>,
-        ),
-        (With<ClothSim>, With<Mesh3d>),
-    >,
+    control: Res<ClothControl>,
+    cloths: ImportedSources,
     mut imported: ResMut<ImportedCloths>,
 ) {
     // Last runs after preparation's deferred commands have been applied in PostUpdate.
-    let removed: Vec<_> = imported
-        .entries
-        .keys()
-        .copied()
-        .filter(|&entity| {
-            !cloths
-                .get(entity)
-                .is_ok_and(|(_, state, _)| matches!(&*state, ClothPreparation::Ready(_)))
-        })
-        .collect();
-    for entity in removed {
-        imported.entries.remove(&entity);
-    }
+    imported.entries.retain(|&entity, request| {
+        let keep = cloths
+            .get(entity)
+            .is_ok_and(|(_, state, _, _, _, _)| matches!(&*state, ClothPreparation::Ready(_)));
+        if !keep {
+            request.close();
+        }
+        keep
+    });
+    imported.targets.clear();
     let dt = time.timestep().as_secs_f32();
-    for (entity, state, config) in &cloths {
+    for (entity, state, config, cloth, mesh, transform) in &cloths {
         let ClothPreparation::Ready(prepared) = &*state else {
             continue;
         };
-        let preparation_tick = state.last_changed();
-        let config_tick = config.as_ref().map(|config| config.last_changed());
-        if imported.entries.get(&entity).is_some_and(|old| {
-            old.preparation_tick == preparation_tick
-                && old.config_tick == config_tick
-                && old.dt == dt
-        }) {
+        let world = transform.as_ref().map_or(Mat4::IDENTITY, |t| t.to_matrix());
+        // Invalid transforms must not reach the output shader, even for manually prepared cloths.
+        let world_to_local = world.inverse();
+        if world.is_finite()
+            && world.determinant().is_finite()
+            && world.determinant().abs() >= 1e-12
+            && world_to_local.is_finite()
+        {
+            imported.targets.insert(
+                entity,
+                ImportedTarget {
+                    mesh: mesh.0.clone(),
+                    world_to_local,
+                },
+            );
+        }
+        let source_ticks = source_ticks(&cloth, &mesh, transform.as_ref());
+        if imported
+            .entries
+            .get(&entity)
+            .is_some_and(|old| old.matches(&state, config.as_ref(), &control, dt, source_ticks))
+        {
             continue;
         }
+        if let Some(old) = imported.entries.remove(&entity) {
+            old.close();
+        }
+        let preparation_tick = state.last_changed();
+        let config_tick = config.as_ref().map(|config| config.last_changed());
         let config = config.as_deref().cloned().unwrap_or_default();
         let initial = imported_initial(prepared, &config, dt);
         if let Err(error) = &initial {
@@ -290,8 +539,11 @@ fn collect_imported_cloths(
             Arc::new(ImportedRequest {
                 preparation_tick,
                 config_tick,
+                source_ticks,
                 dt,
                 initial,
+                reset_counter: control.reset_counter,
+                ticks: Arc::new(Mutex::new(ImportedTickQueue::default())),
             }),
         );
     }
@@ -300,7 +552,51 @@ fn collect_imported_cloths(
 struct ImportedGpuInstance {
     // Identity distinguishes replacements, even if a component was removed/reinserted between frames.
     request: Arc<ImportedRequest>,
-    _solver: LiveSolver,
+    solver: LiveSolver,
+    normals: ImportedNormals,
+}
+
+/// Immutable oriented triangle incidence, private to this imported solver revision.
+struct ImportedNormals {
+    offsets: Buffer,
+    pairs: Buffer,
+}
+
+impl ImportedNormals {
+    fn new(
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        initial: &ImportedInitial,
+    ) -> Result<Self, String> {
+        let csr = build_normal_csr(initial.solver.positions.len(), &initial.solver.indices);
+        let limits = device.limits();
+        let limit = limits
+            .max_buffer_size
+            .min(u64::from(limits.max_storage_buffer_binding_size));
+        let upload = |label, data: &[u8]| -> Result<Buffer, String> {
+            let size = u64::try_from(data.len()).map_err(|_| "normal adjacency size overflow")?;
+            if size == 0 || size > limit {
+                return Err(
+                    "imported normal adjacency exceeds device buffer/storage limits".into(),
+                );
+            }
+            let buffer = device.create_buffer(&BufferDescriptor {
+                label: Some(label),
+                size,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&buffer, 0, data);
+            Ok(buffer)
+        };
+        Ok(Self {
+            offsets: upload(
+                "imported normal offsets",
+                bytemuck::cast_slice(&csr.offsets),
+            )?,
+            pairs: upload("imported normal pairs", bytemuck::cast_slice(&csr.pairs))?,
+        })
+    }
 }
 
 #[derive(Resource, Default)]
@@ -355,8 +651,11 @@ fn initialize_imported_cloths(
             initial.solver.clone(),
             initial.params.clone(),
             initial.dt,
-        ) {
-            Ok(solver) => {
+        )
+        .and_then(|solver| {
+            ImportedNormals::new(&device, &queue, initial).map(|normals| (solver, normals))
+        }) {
+            Ok((solver, normals)) => {
                 info!(
                     ?entity,
                     particles = solver.num_particles(),
@@ -366,13 +665,14 @@ fn initialize_imported_cloths(
                     attachments = initial.solver.constraints.attach.particle_ids.len(),
                     external_colliders = 0,
                     dt = initial.dt,
-                    "imported cloth GPU initialized (no ticks/output yet)"
+                    "imported cloth GPU initialized; waiting for output readiness"
                 );
                 instances.active.insert(
                     entity,
                     ImportedGpuInstance {
                         request: Arc::clone(request),
-                        _solver: solver,
+                        solver,
+                        normals,
                     },
                 );
             }
@@ -381,6 +681,134 @@ fn initialize_imported_cloths(
                 instances.failed.insert(entity, Arc::clone(request));
             }
         }
+    }
+}
+
+fn tick_and_output_imported(
+    mut context: RenderContext,
+    imported: Option<Res<ImportedCloths>>,
+    instances: Res<ImportedGpuInstances>,
+    allocator: Res<MeshAllocator>,
+    meshes: Res<RenderAssets<RenderMesh>>,
+    cache: Res<PipelineCache>,
+    pipeline: Res<SolverPipeline>,
+    output: Res<OutputPipeline>,
+    queue: Res<RenderQueue>,
+) {
+    let Some(imported) = imported else {
+        return;
+    };
+    for (&entity, instance) in &instances.active {
+        let mut ticks = instance.request.ticks.lock().expect("imported cloth ticks");
+        // Readiness is re-evaluated every frame. Keep already accepted ticks during temporary
+        // allocator/pipeline unavailability, but never accept ticks into a retired revision.
+        ticks.ready = false;
+        if ticks.closed
+            || !imported
+                .entries
+                .get(&entity)
+                .is_some_and(|request| Arc::ptr_eq(request, &instance.request))
+        {
+            ticks.close();
+            continue;
+        }
+        let Some(target) = imported.targets.get(&entity) else {
+            continue;
+        };
+        let Some(output_pipeline) = cache.get_compute_pipeline(output.pipeline) else {
+            continue;
+        };
+        if !LiveSolver::ready(&cache, &pipeline) {
+            continue;
+        }
+        let Some(mesh) = meshes.get(target.mesh.id()) else {
+            continue;
+        };
+        let Some(slice) = allocator.mesh_vertex_slice(&target.mesh.id()) else {
+            continue;
+        };
+        let count = instance.solver.num_particles();
+        let Some(layout) = position_layout(mesh, count, true) else {
+            // This revision cannot run with an unsupported target. Avoid an error per frame.
+            if !ticks.closed {
+                error!(
+                    ?entity,
+                    "imported cloth requires only Float32x3 POSITION/NORMAL and Float32x2 UV_0; output rejected"
+                );
+            }
+            ticks.close();
+            continue;
+        };
+        if slice.buffer.size()
+            > u64::from(
+                context
+                    .render_device()
+                    .limits()
+                    .max_storage_buffer_binding_size,
+            )
+        {
+            error!(
+                ?entity,
+                "imported cloth mesh slab exceeds storage binding limit"
+            );
+            ticks.close();
+            continue;
+        }
+        let Some(mut range) = OutputRange::checked(
+            slice.range.clone(),
+            0,
+            count,
+            count,
+            slice.buffer.size(),
+            layout,
+        ) else {
+            error!(?entity, "imported cloth output allocation rejected");
+            ticks.close();
+            continue;
+        };
+        range.world_to_local = target.world_to_local.to_cols_array_2d();
+        ticks.ready = true;
+        let pending = std::mem::take(&mut ticks.pending);
+        // Hold the per-entity revision lock through submission: reset cannot retire this
+        // revision halfway through a batch on a pipelined render thread.
+        for dt in pending {
+            instance.solver.submit_step(
+                context.render_device(),
+                &queue,
+                &cache,
+                &pipeline,
+                dt,
+                None,
+            );
+        }
+        let device = context.render_device();
+        let uniform = device.create_buffer(&BufferDescriptor {
+            label: Some("imported cloth output range"),
+            size: size_of::<OutputRange>() as u64,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&uniform, 0, bytemuck::bytes_of(&range));
+        let group = device.create_bind_group(
+            "imported cloth mesh output",
+            &cache.get_bind_group_layout(&output.layout),
+            &BindGroupEntries::sequential((
+                uniform.as_entire_binding(),
+                instance.solver.positions().as_entire_binding(),
+                slice.buffer.as_entire_binding(),
+                instance.normals.offsets.as_entire_binding(),
+                instance.normals.pairs.as_entire_binding(),
+            )),
+        );
+        let mut pass = context
+            .command_encoder()
+            .begin_compute_pass(&ComputePassDescriptor {
+                label: Some("imported cloth positions and normals to mesh"),
+                ..default()
+            });
+        pass.set_pipeline(output_pipeline);
+        pass.set_bind_group(0, &group, &[]);
+        pass.dispatch_workgroups(count.div_ceil(WORKGROUP_SIZE), 1, 1);
     }
 }
 
@@ -484,9 +912,148 @@ mod tests {
     }
 
     #[test]
+    fn controls_gate_all_entities_and_retire_old_queues_without_renderer() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(ImportedClothPlugin);
+        let spawn = |app: &mut App| {
+            app.world_mut()
+                .spawn((
+                    ClothSim::default(),
+                    Mesh3d::default(),
+                    ClothPreparation::Ready(Box::new(prepared_hinge())),
+                ))
+                .id()
+        };
+        let first = spawn(&mut app);
+        let second = spawn(&mut app);
+        app.update();
+        let snapshot = |app: &App, entity| {
+            Arc::clone(&app.world().resource::<ImportedCloths>().entries[&entity])
+        };
+        let a = snapshot(&app, first);
+        let b = snapshot(&app, second);
+        app.world_mut().resource_mut::<ClothControl>().paused = true;
+        app.world_mut()
+            .resource_mut::<ClothControl>()
+            .request_step();
+        app.world_mut().run_schedule(FixedUpdate);
+        assert_eq!(app.world().resource::<ClothControl>().single_steps, 1);
+        assert!(a.ticks.lock().unwrap().pending.is_empty());
+        a.ticks.lock().unwrap().ready = true;
+        b.ticks.lock().unwrap().ready = true;
+        app.world_mut().run_schedule(FixedUpdate);
+        assert_eq!(a.ticks.lock().unwrap().pending.len(), 1);
+        assert_eq!(b.ticks.lock().unwrap().pending.len(), 1);
+        assert_eq!(app.world().resource::<ClothControl>().single_steps, 0);
+        app.world_mut().run_schedule(FixedUpdate);
+        assert_eq!(a.ticks.lock().unwrap().pending.len(), 1);
+        app.world_mut().run_schedule(Last);
+        assert!(
+            Arc::ptr_eq(&a, &snapshot(&app, first)),
+            "control frames do not repack initial data"
+        );
+        app.world_mut().resource_mut::<ClothControl>().reset();
+        app.world_mut().run_schedule(FixedUpdate);
+        assert!(a.ticks.lock().unwrap().closed);
+        assert!(a.ticks.lock().unwrap().pending.is_empty());
+        app.world_mut().run_schedule(Last);
+        let reset = snapshot(&app, first);
+        assert!(!Arc::ptr_eq(&a, &reset));
+        assert!(!reset.ticks.lock().unwrap().ready);
+        assert_eq!(
+            reset.initial.as_ref().unwrap().solver.positions,
+            prepared_hinge().positions
+        );
+        reset.ticks.lock().unwrap().ready = true;
+        app.world_mut().resource_mut::<ClothControl>().paused = false;
+        app.world_mut().run_schedule(FixedUpdate);
+        assert_eq!(reset.ticks.lock().unwrap().pending.len(), 1);
+        app.world_mut()
+            .entity_mut(first)
+            .insert(ClothSolverConfig::default());
+        app.world_mut().run_schedule(FixedUpdate);
+        assert!(reset.ticks.lock().unwrap().closed);
+        assert!(reset.ticks.lock().unwrap().pending.is_empty());
+        app.world_mut().run_schedule(Last);
+        let configured = snapshot(&app, first);
+        app.world_mut().entity_mut(first).remove::<ClothSim>();
+        app.world_mut().run_schedule(Last);
+        assert!(configured.ticks.lock().unwrap().closed);
+        assert!(
+            !app.world()
+                .resource::<ImportedCloths>()
+                .entries
+                .contains_key(&first)
+        );
+    }
+
+    #[test]
+    fn output_meshes_are_unique_stable_and_restored_on_removal() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_resource::<ImportedOutputs>()
+            .add_systems(Last, manage_imported_outputs);
+        let source = app.world_mut().resource_mut::<Assets<Mesh>>().add(
+            Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::default(),
+            )
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0_f32; 3]; 4]),
+        );
+        let parent = app.world_mut().spawn_empty().id();
+        let spawn = |app: &mut App| {
+            app.world_mut()
+                .spawn((
+                    ClothSim::default(),
+                    Mesh3d(source.clone()),
+                    ChildOf(parent),
+                    ClothPreparation::Ready(Box::new(prepared_hinge())),
+                ))
+                .id()
+        };
+        let first = spawn(&mut app);
+        let second = spawn(&mut app);
+        app.update();
+        let output = app.world().get::<Mesh3d>(first).unwrap().0.clone();
+        assert_ne!(output, source);
+        assert_ne!(output, app.world().get::<Mesh3d>(second).unwrap().0);
+        assert!(app.world().get::<NoFrustumCulling>(first).is_some());
+        app.update();
+        assert_eq!(output, app.world().get::<Mesh3d>(first).unwrap().0);
+        assert_eq!(app.world().get::<ChildOf>(first).unwrap().parent(), parent);
+        let meshes = app.world().resource::<Assets<Mesh>>();
+        assert_eq!(
+            meshes
+                .get(&output)
+                .unwrap()
+                .attribute(Mesh::ATTRIBUTE_POSITION),
+            meshes
+                .get(&source)
+                .unwrap()
+                .attribute(Mesh::ATTRIBUTE_POSITION)
+        );
+        app.world_mut().entity_mut(first).remove::<ClothSim>();
+        app.update();
+        assert_eq!(source, app.world().get::<Mesh3d>(first).unwrap().0);
+        assert!(app.world().get::<NoFrustumCulling>(first).is_none());
+        assert!(
+            !app.world()
+                .resource::<ImportedOutputs>()
+                .0
+                .contains_key(&first)
+        );
+        app.world_mut().entity_mut(second).despawn();
+        app.update();
+        assert!(app.world().resource::<ImportedOutputs>().0.is_empty());
+    }
+
+    #[test]
     fn imported_snapshots_change_only_with_source_and_remove_with_cloth() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .init_resource::<ClothControl>()
             .init_resource::<ImportedCloths>()
             .add_systems(Last, collect_imported_cloths);
         let entity = app

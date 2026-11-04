@@ -9,6 +9,7 @@ struct OutputRange {
     position_offset_words: u32,
     normal_offset_words: u32,
     pad1: u32,
+    world_to_local: mat4x4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> range: OutputRange;
@@ -30,7 +31,7 @@ fn output_positions(@builtin(global_invocation_id) id: vec3<u32>) {
     // Divide first so malformed offsets cannot wrap during multiplication.
     let vertex_count = arrayLength(&vertices) / range.stride_words;
     if range.start >= vertex_count || i >= vertex_count - range.start { return; }
-    let p = positions[range.particle_offset + i].xyz;
+    let p = (range.world_to_local * vec4<f32>(positions[range.particle_offset + i].xyz, 1.0)).xyz;
     let has_normals = range.normal_offset_words != 0xffffffffu;
     var normal = vec3<f32>(0.0);
     if has_normals {
@@ -53,8 +54,8 @@ fn output_positions(@builtin(global_invocation_id) id: vec3<u32>) {
             let pair = normal_pairs[pair_index];
             if pair.x >= range.count || pair.y >= range.count { return; }
             if pair.x >= remaining_positions || pair.y >= remaining_positions { return; }
-            let other0 = positions[range.particle_offset + pair.x].xyz;
-            let other1 = positions[range.particle_offset + pair.y].xyz;
+            let other0 = (range.world_to_local * vec4<f32>(positions[range.particle_offset + pair.x].xyz, 1.0)).xyz;
+            let other1 = (range.world_to_local * vec4<f32>(positions[range.particle_offset + pair.y].xyz, 1.0)).xyz;
             // Cyclic per-vertex orientation preserves the raw triangle area vector.
             normal += cross(other0 - p, other1 - p);
         }

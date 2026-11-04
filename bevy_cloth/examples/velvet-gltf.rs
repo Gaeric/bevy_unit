@@ -1,5 +1,5 @@
-//! Native GLB loading, triangle cloth preparation and GPU initialization.
-//! No simulation ticks, dynamic mesh output or sphere contact yet.
+//! Native GLB cloth fixed ticks and independent GPU mesh output; sphere contact comes later.
+//! Space: pause, S: single fixed tick, R: reset paused. Two instances share source assets.
 
 use bevy::{
     asset::RenderAssetUsages,
@@ -9,7 +9,7 @@ use bevy::{
     world_serialization::WorldInstanceReady,
 };
 use bevy_cloth::{
-    ClothMeshCollider, ClothPreparation, ClothSim, ClothSolverConfig, GpuClothPlugin,
+    ClothControl, ClothMeshCollider, ClothPreparation, ClothSim, ClothSolverConfig, GpuClothPlugin,
     OrbitCameraPlugin, demo::OrbitCamera,
 };
 use std::path::Path;
@@ -40,7 +40,8 @@ fn main() {
                 })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "GLB cloth — GPU initialization only".into(),
+                        title: "GLB cloth — Space pause / S step / R reset (no mesh contact yet)"
+                            .into(),
                         ..default()
                     }),
                     ..default()
@@ -49,12 +50,27 @@ fn main() {
         .add_plugins((GpuClothPlugin, OrbitCameraPlugin))
         .add_observer(mark_instance_roles)
         .add_systems(Startup, setup)
+        .add_systems(PreUpdate, cloth_controls.after(bevy::input::InputSystems))
         .add_systems(Update, draw_preparation)
         .add_systems(
             PostUpdate,
             log_instance_roles.after(TransformSystems::Propagate),
         )
         .run();
+}
+
+fn cloth_controls(keys: Res<ButtonInput<KeyCode>>, mut control: ResMut<ClothControl>) {
+    if keys.just_pressed(KeyCode::KeyR) {
+        control.paused = true;
+        control.reset();
+    } else {
+        if keys.just_pressed(KeyCode::Space) {
+            control.paused = !control.paused;
+        }
+        if control.paused && keys.just_pressed(KeyCode::KeyS) {
+            control.request_step();
+        }
+    }
 }
 
 fn setup(mut commands: Commands, assets: Res<AssetServer>) {
@@ -247,7 +263,7 @@ mod tests {
         world.entity_mut(root_b).add_child(primitive_b);
 
         let mut queries = SystemState::<(Query<&Children>, Query<&Mesh3d>)>::new(&mut world);
-        let (children, meshes) = queries.get(&world);
+        let (children, meshes) = queries.get(&world).unwrap();
         assert_eq!(
             instance_meshes(root_a, &children, &meshes),
             vec![primitive_a]
@@ -264,11 +280,6 @@ fn draw_preparation(mut gizmos: Gizmos, cloths: Query<&ClothPreparation>) {
         let ClothPreparation::Ready(data) = state else {
             continue;
         };
-        for edge in &data.topology.stretch {
-            let [a, b] = edge.indices.map(|i| data.positions[i as usize]);
-            let offset = Vec3::Z * 0.002;
-            gizmos.line(a + offset, b + offset, Color::srgb(0.1, 0.9, 0.7));
-        }
         for &pin in &data.pinned_vertices {
             gizmos.sphere(
                 data.positions[pin as usize],
