@@ -1,4 +1,4 @@
-//! Imported triangle cloth: revision-gated fixed ticks and independent GPU mesh output.
+//! Imported triangle cloth: revision-gated solver groups and per-member GPU mesh output.
 
 use bevy::{
     asset::{RenderAssetUsages, embedded_asset},
@@ -26,7 +26,7 @@ use std::{
 };
 
 use super::{
-    geometry::{GeometryTick, PositionPipeline},
+    geometry::{ColliderMotion, GeometryTick, PositionPipeline, sample_position},
     live::{OutputPipeline, OutputRange, imported_output_layout},
     mesh_contact::{CollisionGroup, ContactPipeline, StaticMeshContacts},
     normals::build_normal_csr,
@@ -38,6 +38,13 @@ use crate::{
     cloth::{ClothPreparation, ClothSim, PreparedCloth},
     sim::{params::SimParams, solver::Solver},
 };
+
+/// Explicit opt-in to one imported solver and inter-garment particle collisions.
+/// Members are sorted by Entity identity; absent components retain independent solvers.
+/// All members must use identical validated parameters, fixed dt and CollisionGroup.
+/// Membership or source changes rebuild the entire group from rest.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClothSimulationGroup(pub u32);
 
 /// Per-entity solver settings. Distances/speed are explicit world-space values, not grid-derived.
 #[derive(Component, Clone, Debug)]
@@ -113,7 +120,40 @@ impl ClothSolverConfig {
     }
 }
 
+/// Rigid motion of every imported pin's initial world-space target about an explicit
+/// world-space pivot. Use the same motion and pivot as the desired collider provider.
+/// This samples rest targets, not a surface binding: deformation amplitude must be zero.
+/// Adding, changing or removing this immutable configuration rebuilds the solver at rest;
+/// `ClothControl::reset` also restarts its fixed-tick motion clock. No Transform is followed.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct ClothAttachmentMotion {
+    pub motion: ColliderMotion,
+    pub pivot: Vec3,
+}
+
+impl ClothAttachmentMotion {
+    fn validate(self) -> Result<(), String> {
+        self.motion.validate()?;
+        if !self.pivot.is_finite() || self.motion.deform_amplitude != 0.0 {
+            return Err(
+                "imported attachment motion requires a finite world pivot and zero deformation amplitude"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
+    fn sample_slots(self, rest: &[Vec3], stamp: GeometryTick) -> Option<Vec<Vec3>> {
+        self.validate().ok()?;
+        let (time, _) = stamp.times()?;
+        rest.iter()
+            .map(|&target| sample_position(target, self.pivot, self.motion, time))
+            .collect()
+    }
+}
+
 /// Solver is used only as the existing upload container; no CPU stepping/grid builder is called.
+#[derive(Clone)]
 struct ImportedInitial {
     solver: Solver,
     params: SimParams,
@@ -256,10 +296,65 @@ impl ImportedTickQueue {
     }
 }
 
+type Routing = (
+    Option<(u32, bevy::ecs::change_detection::Tick)>,
+    Option<(u32, bevy::ecs::change_detection::Tick)>,
+);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum SolverKey {
+    Independent(Entity),
+    Group(u32),
+}
+
+impl SolverKey {
+    fn new(entity: Entity, routing: Routing) -> Self {
+        routing
+            .0
+            .map_or(Self::Independent(entity), |(id, _)| Self::Group(id))
+    }
+}
+
+type Membership<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Option<Ref<'static, ClothSimulationGroup>>,
+        Option<Ref<'static, CollisionGroup>>,
+    ),
+    With<ClothSim>,
+>;
+
+fn routing(groups: &Membership, entity: Entity) -> Option<Routing> {
+    groups.get(entity).ok().map(|(_, simulation, collision)| {
+        (
+            simulation.map(|g| (g.0, g.last_changed())),
+            collision.map(|g| (g.0, g.last_changed())),
+        )
+    })
+}
+
+fn membership(groups: &Membership) -> HashMap<SolverKey, Vec<Entity>> {
+    let mut result: HashMap<_, Vec<_>> = HashMap::new();
+    for (entity, group, _) in groups.iter() {
+        let key = SolverKey::new(entity, (group.map(|g| (g.0, g.last_changed())), None));
+        result.entry(key).or_default().push(entity);
+    }
+    for members in result.values_mut() {
+        members.sort_by_key(|e| e.to_bits());
+    }
+    result
+}
+
 /// Immutable source revision. Extraction clones Arc handles, not particle/constraint arrays.
+#[derive(Clone)]
 struct ImportedRequest {
+    routing: Routing,
     preparation_tick: bevy::ecs::change_detection::Tick,
     config_tick: Option<bevy::ecs::change_detection::Tick>,
+    attachment_tick: Option<bevy::ecs::change_detection::Tick>,
+    attachment_motion: Option<ClothAttachmentMotion>,
     reset_counter: u64,
     source_ticks: [Option<bevy::ecs::change_detection::Tick>; 3],
     dt: f32,
@@ -272,6 +367,7 @@ impl ImportedRequest {
         &self,
         preparation: &Ref<ClothPreparation>,
         config: Option<&Ref<ClothSolverConfig>>,
+        attachment: Option<&Ref<ClothAttachmentMotion>>,
         control: &ClothControl,
         dt: f32,
         source_ticks: [Option<bevy::ecs::change_detection::Tick>; 3],
@@ -279,6 +375,7 @@ impl ImportedRequest {
         self.source_ticks == source_ticks
             && self.preparation_tick == preparation.last_changed()
             && self.config_tick == config.map(|config| config.last_changed())
+            && self.attachment_tick == attachment.map(|motion| motion.last_changed())
             && self.reset_counter == control.reset_counter
             && self.dt == dt
     }
@@ -300,7 +397,246 @@ struct ImportedTarget {
 struct ImportedCloths {
     entries: HashMap<Entity, Arc<ImportedRequest>>,
     targets: HashMap<Entity, ImportedTarget>,
+    batches: HashMap<SolverKey, Arc<ImportedBatch>>,
     epoch: u64,
+}
+
+/// Combined upload only; member-local normal CSR remains separate for output.
+struct CombinedInitial {
+    solver: Solver,
+    params: SimParams,
+    garment_ids: Vec<u32>,
+    ranges: Vec<(u32, u32)>,
+    collision_group: u32,
+}
+
+fn combine_imported(members: &[(Entity, Arc<ImportedRequest>)]) -> Result<CombinedInitial, String> {
+    let first = members
+        .first()
+        .ok_or("empty imported solver group")?
+        .1
+        .as_ref();
+    let initial = first.initial.as_ref().map_err(Clone::clone)?;
+    let mut params = initial.params.clone();
+    params.num_particles = 0;
+    let collision_group = first.routing.1.map_or(0, |(id, _)| id);
+    let mut combined = CombinedInitial {
+        solver: Solver::default(),
+        params: params.clone(),
+        garment_ids: Vec::new(),
+        ranges: Vec::new(),
+        collision_group,
+    };
+    for (garment, (_, request)) in members.iter().enumerate() {
+        let initial = request.initial.as_ref().map_err(Clone::clone)?;
+        let mut candidate = initial.params.clone();
+        candidate.num_particles = 0;
+        if candidate != params
+            || initial.dt != first.dt
+            || request.routing.1.map_or(0, |(id, _)| id) != collision_group
+        {
+            return Err("simulation group requires identical validated SimParams (except num_particles), fixed dt and external CollisionGroup".into());
+        }
+        let source = &initial.solver;
+        let particle_offset = u32::try_from(combined.solver.positions.len())
+            .map_err(|_| "combined particle offset exceeds u32")?;
+        let count =
+            u32::try_from(source.positions.len()).map_err(|_| "member count exceeds u32")?;
+        let total = particle_offset
+            .checked_add(count)
+            .ok_or("combined particle count exceeds u32")?;
+        let slot_offset = u32::try_from(combined.solver.constraints.attach.slot_positions.len())
+            .map_err(|_| "combined slot offset exceeds u32")?;
+        slot_offset
+            .checked_add(
+                u32::try_from(source.constraints.attach.slot_positions.len())
+                    .map_err(|_| "member slot count exceeds u32")?,
+            )
+            .ok_or("combined slot count exceeds u32")?;
+        let garment = u32::try_from(garment).map_err(|_| "garment count exceeds u32")?;
+        combined.garment_ids.resize(total as usize, garment);
+        combined.ranges.push((particle_offset, count));
+        let target = &mut combined.solver;
+        target.positions.extend_from_slice(&source.positions);
+        target
+            .initial_positions
+            .extend_from_slice(&source.initial_positions);
+        target.predicted.extend_from_slice(&source.predicted);
+        target.velocities.extend_from_slice(&source.velocities);
+        target.deltas.extend_from_slice(&source.deltas);
+        target.delta_counts.extend_from_slice(&source.delta_counts);
+        target
+            .indices
+            .extend(source.indices.iter().map(|id| id + particle_offset));
+        target
+            .constraints
+            .inv_masses
+            .extend_from_slice(&source.constraints.inv_masses);
+        target.constraints.stretch.indices.extend(
+            source
+                .constraints
+                .stretch
+                .indices
+                .iter()
+                .map(|ids| ids.map(|id| id + particle_offset)),
+        );
+        target
+            .constraints
+            .stretch
+            .lengths
+            .extend_from_slice(&source.constraints.stretch.lengths);
+        target.constraints.bend.indices.extend(
+            source
+                .constraints
+                .bend
+                .indices
+                .iter()
+                .map(|ids| ids.map(|id| id + particle_offset)),
+        );
+        target
+            .constraints
+            .bend
+            .angles
+            .extend_from_slice(&source.constraints.bend.angles);
+        let attach = &mut target.constraints.attach;
+        let source = &source.constraints.attach;
+        attach
+            .slot_positions
+            .extend_from_slice(&source.slot_positions);
+        attach
+            .particle_ids
+            .extend(source.particle_ids.iter().map(|id| id + particle_offset));
+        attach
+            .slot_ids
+            .extend(source.slot_ids.iter().map(|id| id + slot_offset));
+        attach.distances.extend_from_slice(&source.distances);
+    }
+    combined.params =
+        ClothSolverConfig { params }.validate(combined.solver.positions.len(), first.dt)?;
+    // Guard the combined CSR builders, which use u32 offsets, before they allocate.
+    for (count, arity) in [
+        (combined.solver.indices.len(), 1),
+        (combined.solver.constraints.stretch.indices.len(), 2),
+        (combined.solver.constraints.bend.indices.len(), 4),
+        (combined.solver.constraints.attach.particle_ids.len(), 1),
+    ] {
+        if count
+            .checked_mul(arity)
+            .and_then(|n| u32::try_from(n).ok())
+            .is_none()
+        {
+            return Err("combined constraint/normal incidence exceeds u32".into());
+        }
+    }
+    Ok(combined)
+}
+
+/// A shared queue makes render readiness, main-world acceptance and retirement atomic.
+struct ImportedBatch {
+    members: Vec<(Entity, Arc<ImportedRequest>)>,
+    initial: Result<CombinedInitial, String>,
+    ticks: Arc<Mutex<ImportedTickQueue>>,
+}
+
+impl ImportedBatch {
+    fn sample_slots(&self, stamp: GeometryTick) -> Option<Vec<Vec3>> {
+        let mut slots = Vec::new();
+        for (_, request) in &self.members {
+            let rest = &request
+                .initial
+                .as_ref()
+                .ok()?
+                .solver
+                .constraints
+                .attach
+                .slot_positions;
+            if let Some(motion) = request.attachment_motion {
+                slots.extend(motion.sample_slots(rest, stamp)?);
+            } else {
+                slots.extend_from_slice(rest);
+            }
+        }
+        Some(slots)
+    }
+
+    fn close(&self) {
+        self.ticks.lock().expect("imported group ticks").close();
+        for (_, request) in &self.members {
+            request.close();
+        }
+    }
+
+    fn current(&self, imported: &ImportedCloths) -> bool {
+        self.members.iter().all(|(entity, request)| {
+            imported
+                .entries
+                .get(entity)
+                .is_some_and(|new| Arc::ptr_eq(new, request))
+        })
+    }
+}
+
+/// Replace every member revision when any source/membership changes. In particular, no
+/// surviving garment carries particle history or pending ticks into a smaller/new group.
+fn reconcile_batches(imported: &mut ImportedCloths, expected: HashMap<SolverKey, Vec<Entity>>) {
+    let mut previous = std::mem::take(&mut imported.batches);
+    for (key, entities) in expected {
+        let old = previous.remove(&key);
+        let unchanged = old.as_ref().is_some_and(|batch| {
+            batch
+                .members
+                .iter()
+                .map(|(e, _)| *e)
+                .eq(entities.iter().copied())
+                && batch.current(imported)
+        });
+        if unchanged {
+            imported.batches.insert(key, old.unwrap());
+            continue;
+        }
+        if let Some(old) = old {
+            old.close();
+        }
+        for entity in &entities {
+            if let Some(request) = imported.entries.get_mut(entity) {
+                request.close();
+                let mut replacement = (**request).clone();
+                replacement.ticks = Arc::new(Mutex::new(ImportedTickQueue::default()));
+                *request = Arc::new(replacement);
+            }
+        }
+        // Missing/loading/failed preparations block the entire group, not just one source.
+        let members: Option<Vec<_>> = entities
+            .iter()
+            .map(|entity| {
+                imported
+                    .entries
+                    .get(entity)
+                    .map(|r| (*entity, Arc::clone(r)))
+            })
+            .collect();
+        if let Some(members) = members {
+            let ticks = match key {
+                SolverKey::Independent(_) => Arc::clone(&members[0].1.ticks),
+                SolverKey::Group(_) => Arc::new(Mutex::new(ImportedTickQueue::default())),
+            };
+            let initial = combine_imported(&members);
+            if let Err(error) = &initial {
+                error!(?key, %error, "imported solver group rejected; no ticks will advance");
+            }
+            imported.batches.insert(
+                key,
+                Arc::new(ImportedBatch {
+                    members,
+                    initial,
+                    ticks,
+                }),
+            );
+        }
+    }
+    for old in previous.into_values() {
+        old.close();
+    }
 }
 
 /// Owns only output handles, never a CPU copy of deformed GPU positions.
@@ -369,6 +705,7 @@ type ImportedSources<'w, 's> = Query<
         Entity,
         Ref<'static, ClothPreparation>,
         Option<Ref<'static, ClothSolverConfig>>,
+        Option<Ref<'static, ClothAttachmentMotion>>,
         Ref<'static, ClothSim>,
         Ref<'static, Mesh3d>,
         Option<Ref<'static, GlobalTransform>>,
@@ -391,6 +728,7 @@ fn queue_imported_ticks(
     time: Res<Time<Fixed>>,
     mut control: ResMut<ClothControl>,
     cloths: ImportedSources,
+    groups: Membership,
     imported: Res<ImportedCloths>,
 ) {
     let dt = time.timestep().as_secs_f32();
@@ -400,30 +738,51 @@ fn queue_imported_ticks(
         index: control.tick_index.wrapping_add(1),
         dt,
     };
-    let mut queued = false;
-    for (&entity, request) in &imported.entries {
-        let current = cloths
-            .get(entity)
-            .is_ok_and(|(_, state, config, cloth, mesh, transform)| {
-                matches!(&*state, ClothPreparation::Ready(_))
-                    && request.matches(
-                        &state,
-                        config.as_ref(),
-                        &control,
-                        dt,
-                        source_ticks(&cloth, &mesh, transform.as_ref()),
+    let expected = membership(&groups);
+    // FixedUpdate precedes Last. Inspect every expected member (including loading entries)
+    // before accepting anything, otherwise HashMap order can accept half of a changed tick.
+    let mut current = expected.len() == imported.batches.len();
+    for (key, batch) in &imported.batches {
+        let valid = expected.get(key).is_some_and(|entities| {
+            batch
+                .members
+                .iter()
+                .map(|(e, _)| *e)
+                .eq(entities.iter().copied())
+        }) && batch.current(&imported)
+            && batch.members.iter().all(|(entity, request)| {
+                routing(&groups, *entity) == Some(request.routing)
+                    && cloths.get(*entity).is_ok_and(
+                        |(_, state, config, attachment, cloth, mesh, transform)| {
+                            matches!(&*state, ClothPreparation::Ready(_))
+                                && request.matches(
+                                    &state,
+                                    config.as_ref(),
+                                    attachment.as_ref(),
+                                    &control,
+                                    dt,
+                                    source_ticks(&cloth, &mesh, transform.as_ref()),
+                                )
+                        },
                     )
             });
-        let mut ticks = request.ticks.lock().expect("imported cloth ticks");
-        // FixedUpdate precedes Last: reject a changed input before it can enqueue old work.
-        if !current {
-            ticks.close();
-        } else if requested && ticks.ready && !ticks.closed {
+        if !valid {
+            batch.close();
+            current = false;
+        }
+    }
+    if !current {
+        return;
+    }
+    let mut queued = false;
+    for batch in imported.batches.values() {
+        let mut ticks = batch.ticks.lock().expect("imported group ticks");
+        if requested && batch.initial.is_ok() && ticks.ready && !ticks.closed {
             ticks.pending.push_back(stamp);
             queued = true;
         }
     }
-    // One global stamp per accepted FixedUpdate, shared by all ready entities.
+    // One global stamp per accepted FixedUpdate, shared by all ready groups.
     if queued {
         control.tick_index = stamp.index;
         if control.paused {
@@ -497,16 +856,18 @@ fn collect_imported_cloths(
     time: Res<Time<Fixed>>,
     control: Res<ClothControl>,
     cloths: ImportedSources,
-    groups: Query<&CollisionGroup>,
+    groups: Membership,
     mut imported: ResMut<ImportedCloths>,
 ) {
     // Extract the epoch even with no ready cloths or while paused, so geometry resets too.
     imported.epoch = control.reset_counter;
+    // Include ClothSim entries without a preparation/Mesh3d yet: they block their group.
+    let expected = membership(&groups);
     // Last runs after preparation's deferred commands have been applied in PostUpdate.
     imported.entries.retain(|&entity, request| {
         let keep = cloths
             .get(entity)
-            .is_ok_and(|(_, state, _, _, _, _)| matches!(&*state, ClothPreparation::Ready(_)));
+            .is_ok_and(|(_, state, _, _, _, _, _)| matches!(&*state, ClothPreparation::Ready(_)));
         if !keep {
             request.close();
         }
@@ -514,8 +875,11 @@ fn collect_imported_cloths(
     });
     imported.targets.clear();
     let dt = time.timestep().as_secs_f32();
-    for (entity, state, config, cloth, mesh, transform) in &cloths {
+    for (entity, state, config, attachment, cloth, mesh, transform) in &cloths {
         let ClothPreparation::Ready(prepared) = &*state else {
+            continue;
+        };
+        let Some(routing) = routing(&groups, entity) else {
             continue;
         };
         let world = transform.as_ref().map_or(Mat4::IDENTITY, |t| t.to_matrix());
@@ -531,16 +895,22 @@ fn collect_imported_cloths(
                 ImportedTarget {
                     mesh: mesh.0.clone(),
                     world_to_local,
-                    collision_group: groups.get(entity).map_or(0, |g| g.0),
+                    collision_group: routing.1.map_or(0, |(id, _)| id),
                 },
             );
         }
         let source_ticks = source_ticks(&cloth, &mesh, transform.as_ref());
-        if imported
-            .entries
-            .get(&entity)
-            .is_some_and(|old| old.matches(&state, config.as_ref(), &control, dt, source_ticks))
-        {
+        if imported.entries.get(&entity).is_some_and(|old| {
+            old.routing == routing
+                && old.matches(
+                    &state,
+                    config.as_ref(),
+                    attachment.as_ref(),
+                    &control,
+                    dt,
+                    source_ticks,
+                )
+        }) {
             continue;
         }
         if let Some(old) = imported.entries.remove(&entity) {
@@ -549,15 +919,22 @@ fn collect_imported_cloths(
         let preparation_tick = state.last_changed();
         let config_tick = config.as_ref().map(|config| config.last_changed());
         let config = config.as_deref().cloned().unwrap_or_default();
-        let initial = imported_initial(prepared, &config, dt);
+        let attachment_tick = attachment.as_ref().map(|motion| motion.last_changed());
+        let attachment_motion = attachment.as_deref().copied();
+        let initial = attachment_motion
+            .map_or(Ok(()), ClothAttachmentMotion::validate)
+            .and_then(|()| imported_initial(prepared, &config, dt));
         if let Err(error) = &initial {
             warn!(?entity, %error, "imported cloth GPU input rejected");
         }
         imported.entries.insert(
             entity,
             Arc::new(ImportedRequest {
+                routing,
                 preparation_tick,
                 config_tick,
+                attachment_tick,
+                attachment_motion,
                 source_ticks,
                 dt,
                 initial,
@@ -566,13 +943,14 @@ fn collect_imported_cloths(
             }),
         );
     }
+    reconcile_batches(&mut imported, expected);
 }
 
 struct ImportedGpuInstance {
     // Identity distinguishes replacements, even if a component was removed/reinserted between frames.
-    request: Arc<ImportedRequest>,
+    batch: Arc<ImportedBatch>,
     solver: LiveSolver,
-    normals: ImportedNormals,
+    normals: Vec<ImportedNormals>,
 }
 
 /// Immutable oriented triangle incidence, private to this imported solver revision.
@@ -620,9 +998,9 @@ impl ImportedNormals {
 
 #[derive(Resource, Default)]
 struct ImportedGpuInstances {
-    active: HashMap<Entity, ImportedGpuInstance>,
-    // A failed upload is retried only when the source revision changes, not every render frame.
-    failed: HashMap<Entity, Arc<ImportedRequest>>,
+    active: HashMap<SolverKey, ImportedGpuInstance>,
+    // A failed upload is retried only when the batch revision changes, not every render frame.
+    failed: HashMap<SolverKey, Arc<ImportedBatch>>,
 }
 
 fn initialize_imported_cloths(
@@ -636,68 +1014,84 @@ fn initialize_imported_cloths(
     let Some(imported) = imported else {
         return;
     };
-    instances.active.retain(|entity, instance| {
-        let keep = imported
-            .entries
-            .get(entity)
-            .is_some_and(|request| Arc::ptr_eq(request, &instance.request));
-        if !keep {
-            info!(?entity, "imported cloth GPU instance released");
-        }
-        keep
-    });
-    instances.failed.retain(|entity, failed| {
+    instances.active.retain(|key, instance| {
         imported
-            .entries
-            .get(entity)
-            .is_some_and(|request| Arc::ptr_eq(request, failed))
+            .batches
+            .get(key)
+            .is_some_and(|batch| Arc::ptr_eq(batch, &instance.batch))
+    });
+    instances.failed.retain(|key, failed| {
+        imported
+            .batches
+            .get(key)
+            .is_some_and(|batch| Arc::ptr_eq(batch, failed))
     });
     if !LiveSolver::ready(&cache, &pipeline) {
         return;
     }
-    for (&entity, request) in &imported.entries {
-        if instances.active.contains_key(&entity) || instances.failed.contains_key(&entity) {
+    for (&key, batch) in &imported.batches {
+        if instances.active.contains_key(&key) || instances.failed.contains_key(&key) {
             continue;
         }
-        let Ok(initial) = &request.initial else {
+        let Ok(initial) = &batch.initial else {
             continue;
         };
-        match LiveSolver::from_imported(
-            &device,
-            &queue,
-            &cache,
-            &pipeline,
-            initial.solver.clone(),
-            initial.params.clone(),
-            initial.dt,
-        )
+        let result = match key {
+            SolverKey::Group(_) => LiveSolver::from_imported_group(
+                &device,
+                &queue,
+                &cache,
+                &pipeline,
+                &initial.solver,
+                initial.params.clone(),
+                &initial.garment_ids,
+            ),
+            SolverKey::Independent(_) => LiveSolver::from_imported(
+                &device,
+                &queue,
+                &cache,
+                &pipeline,
+                initial.solver.clone(),
+                initial.params.clone(),
+                initial.params.delta_time,
+            ),
+        }
         .and_then(|solver| {
-            ImportedNormals::new(&device, &queue, initial).map(|normals| (solver, normals))
-        }) {
+            batch
+                .members
+                .iter()
+                .map(|(_, request)| {
+                    ImportedNormals::new(
+                        &device,
+                        &queue,
+                        request.initial.as_ref().expect("validated member"),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(|normals| (solver, normals))
+        });
+        match result {
             Ok((solver, normals)) => {
                 info!(
-                    ?entity,
+                    ?key,
+                    members = batch.members.len(),
                     particles = solver.num_particles(),
-                    stretch = initial.solver.constraints.stretch.indices.len(),
-                    bend = initial.solver.constraints.bend.indices.len(),
                     slots = initial.solver.constraints.attach.slot_positions.len(),
-                    attachments = initial.solver.constraints.attach.particle_ids.len(),
-                    analytic_colliders = 0,
-                    dt = initial.dt,
-                    "imported cloth GPU initialized; waiting for output readiness"
+                    dt = initial.params.delta_time,
+                    "imported cloth GPU initialized; waiting for all member outputs"
                 );
                 instances.active.insert(
-                    entity,
+                    key,
                     ImportedGpuInstance {
-                        request: Arc::clone(request),
+                        batch: Arc::clone(batch),
                         solver,
                         normals,
                     },
                 );
             }
             Err(error) => {
-                warn!(?entity, %error, "imported cloth GPU upload rejected");
-                instances.failed.insert(entity, Arc::clone(request));
+                error!(?key, %error, "imported cloth GPU upload rejected; no ticks will advance");
+                instances.failed.insert(key, Arc::clone(batch));
             }
         }
     }
@@ -706,7 +1100,7 @@ fn initialize_imported_cloths(
 fn tick_and_output_imported(
     mut context: RenderContext,
     imported: Option<Res<ImportedCloths>>,
-    instances: Res<ImportedGpuInstances>,
+    mut instances: ResMut<ImportedGpuInstances>,
     allocator: Res<MeshAllocator>,
     meshes: Res<RenderAssets<RenderMesh>>,
     cache: Res<PipelineCache>,
@@ -729,89 +1123,118 @@ fn tick_and_output_imported(
         &refit,
         imported.epoch,
     );
+    let pending_keys: Vec<_> = instances
+        .active
+        .iter()
+        .filter_map(|(&key, instance)| {
+            let ticks = instance.batch.ticks.lock().expect("imported group ticks");
+            (!ticks.closed && !ticks.pending.is_empty()).then_some(key)
+        })
+        .collect();
     let mut prepared = Vec::new();
-    for (&entity, instance) in &instances.active {
-        let mut ticks = instance.request.ticks.lock().expect("imported cloth ticks");
-        // Readiness is re-evaluated every frame. Keep already accepted ticks during temporary
-        // allocator/pipeline unavailability, but never accept ticks into a retired revision.
+    'batches: for (&key, instance) in &mut instances.active {
+        let mut ticks = instance.batch.ticks.lock().expect("imported group ticks");
         ticks.ready = false;
         if ticks.closed
             || !imported
-                .entries
-                .get(&entity)
-                .is_some_and(|request| Arc::ptr_eq(request, &instance.request))
+                .batches
+                .get(&key)
+                .is_some_and(|batch| Arc::ptr_eq(batch, &instance.batch))
         {
             ticks.close();
             continue;
         }
-        let Some(target) = imported.targets.get(&entity) else {
-            continue;
-        };
         let Some(output_pipeline) = cache.get_compute_pipeline(output.pipeline) else {
             continue;
         };
         if !LiveSolver::ready(&cache, &pipeline) {
             continue;
         }
-        let Some(mesh) = meshes.get(target.mesh.id()) else {
-            continue;
-        };
-        let Some(slice) = allocator.mesh_vertex_slice(&target.mesh.id()) else {
-            continue;
-        };
+        let initial = instance.batch.initial.as_ref().expect("validated batch");
         let count = instance.solver.num_particles();
-        let Some((layout, uv_offset_words, tangent_offset_words)) =
-            imported_output_layout(mesh, count)
-        else {
-            // This revision cannot run with an unsupported target. Avoid an error per frame.
-            if !ticks.closed {
+        let mut outputs = Vec::new();
+        for (i, (entity, _)) in instance.batch.members.iter().enumerate() {
+            let Some(target) = imported.targets.get(entity) else {
+                continue 'batches;
+            };
+            debug_assert_eq!(target.collision_group, initial.collision_group);
+            let Some(mesh) = meshes.get(target.mesh.id()) else {
+                continue 'batches;
+            };
+            let Some(slice) = allocator.mesh_vertex_slice(&target.mesh.id()) else {
+                continue 'batches;
+            };
+            let (offset, member_count) = initial.ranges[i];
+            let Some((layout, uv_offset_words, tangent_offset_words)) =
+                imported_output_layout(mesh, member_count)
+            else {
                 error!(
+                    ?key,
                     ?entity,
-                    "imported cloth requires Float32x3 POSITION/NORMAL, Float32x2 UV_0 and optional Float32x4 TANGENT in a valid non-overlapping layout; output rejected"
+                    "imported group output requires valid Float32x3 POSITION/NORMAL, Float32x2 UV_0 and optional Float32x4 TANGENT"
                 );
+                ticks.close();
+                continue 'batches;
+            };
+            if slice.buffer.size()
+                > u64::from(
+                    context
+                        .render_device()
+                        .limits()
+                        .max_storage_buffer_binding_size,
+                )
+            {
+                error!(
+                    ?key,
+                    ?entity,
+                    "imported group mesh slab exceeds storage binding limit"
+                );
+                ticks.close();
+                continue 'batches;
             }
-            ticks.close();
-            continue;
-        };
-        if slice.buffer.size()
-            > u64::from(
-                context
-                    .render_device()
-                    .limits()
-                    .max_storage_buffer_binding_size,
-            )
-        {
-            error!(
-                ?entity,
-                "imported cloth mesh slab exceeds storage binding limit"
+            let Some(mut range) = OutputRange::checked(
+                slice.range.clone(),
+                offset,
+                member_count,
+                count,
+                slice.buffer.size(),
+                layout,
+            ) else {
+                error!(?key, ?entity, "imported group output allocation rejected");
+                ticks.close();
+                continue 'batches;
+            };
+            range.uv_offset_words = uv_offset_words;
+            range.tangent_offset_words = tangent_offset_words;
+            range.world_to_local = target.world_to_local.to_cols_array_2d();
+            let device = context.render_device();
+            let uniform = device.create_buffer(&BufferDescriptor {
+                label: Some("imported cloth member output range"),
+                size: size_of::<OutputRange>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&uniform, 0, bytemuck::bytes_of(&range));
+            let normals = &instance.normals[i];
+            let group = device.create_bind_group(
+                "imported cloth member output",
+                &cache.get_bind_group_layout(&output.layout),
+                &BindGroupEntries::sequential((
+                    uniform.as_entire_binding(),
+                    instance.solver.positions().as_entire_binding(),
+                    slice.buffer.as_entire_binding(),
+                    normals.offsets.as_entire_binding(),
+                    normals.pairs.as_entire_binding(),
+                )),
             );
-            ticks.close();
-            continue;
+            outputs.push((group, member_count));
         }
-        let Some(mut range) = OutputRange::checked(
-            slice.range.clone(),
-            0,
-            count,
-            count,
-            slice.buffer.size(),
-            layout,
-        ) else {
-            error!(?entity, "imported cloth output allocation rejected");
-            ticks.close();
-            continue;
-        };
-        range.uv_offset_words = uv_offset_words;
-        range.tangent_offset_words = tangent_offset_words;
-        range.world_to_local = target.world_to_local.to_cols_array_2d();
-        let Ok(initial) = &instance.request.initial else {
-            continue;
-        };
         let Some(contact_batches) = contacts.prepare_batches(
             context.render_device(),
             &queue,
             &cache,
             &contact_pipeline,
-            target.collision_group,
+            initial.collision_group,
             initial.params.num_substeps,
             count,
             instance.solver.predicted(),
@@ -823,84 +1246,64 @@ fn tick_and_output_imported(
             continue;
         };
         ticks.ready = geometry_ready;
-        let device = context.render_device();
-        let uniform = device.create_buffer(&BufferDescriptor {
-            label: Some("imported cloth output range"),
-            size: size_of::<OutputRange>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        queue.write_buffer(&uniform, 0, bytemuck::bytes_of(&range));
-        let group = device.create_bind_group(
-            "imported cloth mesh output",
-            &cache.get_bind_group_layout(&output.layout),
-            &BindGroupEntries::sequential((
-                uniform.as_entire_binding(),
-                instance.solver.positions().as_entire_binding(),
-                slice.buffer.as_entire_binding(),
-                instance.normals.offsets.as_entire_binding(),
-                instance.normals.pairs.as_entire_binding(),
-            )),
-        );
-        // Retain revision locks until submissions/output are recorded. Reset cannot retire
-        // a source halfway through this frame; immutable source Arc identities are unchanged.
+        // Hold the shared revision lock through all submissions and member outputs.
         prepared.push((
-            entity,
-            instance,
-            target,
+            key,
+            &mut instance.solver,
+            &instance.batch,
             ticks,
             contact_batches,
-            group,
-            count,
+            outputs,
             output_pipeline,
         ));
     }
-
-    // Tick-major ordering is essential: all cloths sharing geometry consume tick N before
-    // any cloth advances that geometry to N+1. Do not drain queues before successful work.
-    let waiting_for_output = instances.active.iter().any(|(entity, instance)| {
-        !prepared.iter().any(|(ready, _, _, _, _, _, _, _)| ready == entity)
-            && {
-                let ticks = instance.request.ticks.lock().expect("imported cloth ticks");
-                !ticks.closed && !ticks.pending.is_empty()
-            }
-    });
+    // All batches consume tick N before any advances shared external geometry to N+1.
+    let waiting_for_output = pending_keys
+        .iter()
+        .any(|key| !prepared.iter().any(|(ready, ..)| ready == key));
     let mut submissions = Vec::new();
     if waiting_for_output {
-        for (_, _, _, ticks, _, _, _, _) in &mut prepared {
+        for (_, _, _, ticks, _, _, _) in &mut prepared {
             ticks.ready = false;
         }
     }
     if geometry_ready && !waiting_for_output {
-        for (i, (entity, _, _, ticks, _, _, _, _)) in prepared.iter().enumerate() {
-            submissions.extend(
-                ticks
-                    .pending
-                    .iter()
-                    .map(|&stamp| (stamp, entity.to_bits(), i)),
-            );
+        for (i, (_, _, batch, ticks, _, _, _)) in prepared.iter().enumerate() {
+            let identity = batch.members[0].0.to_bits();
+            submissions.extend(ticks.pending.iter().map(|&stamp| (stamp, identity, i)));
         }
     }
-    submissions.sort_by_key(|(stamp, entity, _)| (stamp.index, *entity));
+    submissions.sort_by_key(|(stamp, identity, _)| (stamp.index, *identity));
     for (stamp, _, i) in submissions {
-        let (_, instance, target, ticks, batches, _, _, _) = &mut prepared[i];
+        let (_, solver, batch, ticks, batches, _, _) = &mut prepared[i];
+        // Sample every member, including static slots, before mutating geometry/history.
+        let Some(slots) = batch.sample_slots(stamp) else {
+            error!("imported group attachment sample rejected; tick retained");
+            for (_, _, _, ticks, _, _, _) in &mut prepared {
+                ticks.ready = false;
+            }
+            break;
+        };
+        let initial = batch.initial.as_ref().expect("validated batch");
         if !contacts.advance_group(
             context.render_device(),
             &queue,
             &cache,
             &positions,
             &refit,
-            target.collision_group,
+            initial.collision_group,
             stamp,
         ) {
-            // Preserve this tick and every later one. Do not allow another group to run
-            // ahead while this frame is blocked; readiness is retried next render frame.
-            for (_, _, _, ticks, _, _, _, _) in &mut prepared {
+            for (_, _, _, ticks, _, _, _) in &mut prepared {
                 ticks.ready = false;
             }
             break;
         }
-        instance.solver.submit_step_with_contacts(
+        // A slot write is immediately followed by its own submission, including multi-tick frames.
+        if !slots.is_empty() {
+            solver.update_attachment_slots(&queue, &slots);
+        }
+        solver.submit_step_with_contacts(
             context.render_device(),
             &queue,
             &cache,
@@ -915,18 +1318,19 @@ fn tick_and_output_imported(
         );
         ticks.pending.pop_front();
     }
-
-    // Record outputs only after all direct queue submissions, including when paused.
-    for (_, _, _, _ticks, _, group, count, output_pipeline) in prepared {
-        let mut pass = context
-            .command_encoder()
-            .begin_compute_pass(&ComputePassDescriptor {
-                label: Some("imported cloth positions and normals to mesh"),
-                ..default()
-            });
-        pass.set_pipeline(output_pipeline);
-        pass.set_bind_group(0, &group, &[]);
-        pass.dispatch_workgroups(count.div_ceil(WORKGROUP_SIZE), 1, 1);
+    // Record every member output only after direct queue submissions, also when paused.
+    for (_, _, _, _ticks, _, outputs, output_pipeline) in prepared {
+        for (group, count) in outputs {
+            let mut pass = context
+                .command_encoder()
+                .begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("imported cloth positions and normals to member mesh"),
+                    ..default()
+                });
+            pass.set_pipeline(output_pipeline);
+            pass.set_bind_group(0, &group, &[]);
+            pass.dispatch_workgroups(count.div_ceil(WORKGROUP_SIZE), 1, 1);
+        }
     }
     contacts.record_outputs(&mut context, &allocator, &meshes, &cache, &output, &queue);
 }
@@ -961,6 +1365,234 @@ mod tests {
             &[0, 1],
         )
         .unwrap()
+    }
+
+    #[test]
+    fn grouped_upload_offsets_preserve_member_constraints_and_local_normals() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(ImportedClothPlugin);
+        let entities: Vec<_> = (0..2)
+            .map(|_| {
+                app.world_mut()
+                    .spawn((
+                        ClothSim::default(),
+                        Mesh3d::default(),
+                        ClothSimulationGroup(7),
+                        ClothPreparation::Ready(Box::new(prepared_hinge())),
+                    ))
+                    .id()
+            })
+            .collect();
+        let motion = ClothAttachmentMotion {
+            pivot: Vec3::ZERO,
+            motion: ColliderMotion {
+                linear_velocity: Vec3::X,
+                ..default()
+            },
+        };
+        app.world_mut().entity_mut(entities[1]).insert(motion);
+        app.world_mut().run_schedule(Last);
+        let imported = app.world().resource::<ImportedCloths>();
+        let batch = &imported.batches[&SolverKey::Group(7)];
+        let combined = batch.initial.as_ref().unwrap();
+        assert_eq!(combined.ranges, [(0, 4), (4, 4)]);
+        assert_eq!(combined.garment_ids, [0, 0, 0, 0, 1, 1, 1, 1]);
+        assert_eq!(combined.params.num_particles, 8);
+        assert_eq!(combined.solver.constraints.attach.particle_ids.len(), 16);
+        assert_eq!(combined.solver.constraints.attach.slot_positions.len(), 4);
+        let mut index_cursor = 0;
+        let mut stretch_cursor = 0;
+        let mut bend_cursor = 0;
+        let mut attachment_cursor = 0;
+        let mut slot_cursor = 0;
+        let stamp = GeometryTick {
+            epoch: 0,
+            index: 2,
+            dt: 0.25,
+        };
+        let sampled = batch.sample_slots(stamp).unwrap();
+        for (i, (_, request)) in batch.members.iter().enumerate() {
+            let source = &request.initial.as_ref().unwrap().solver;
+            let (offset, count) = combined.ranges[i];
+            for &id in &source.indices {
+                assert_eq!(combined.solver.indices[index_cursor], id + offset);
+                index_cursor += 1;
+            }
+            for ids in &source.constraints.stretch.indices {
+                assert_eq!(
+                    combined.solver.constraints.stretch.indices[stretch_cursor],
+                    ids.map(|id| id + offset)
+                );
+                stretch_cursor += 1;
+            }
+            for ids in &source.constraints.bend.indices {
+                assert_eq!(
+                    combined.solver.constraints.bend.indices[bend_cursor],
+                    ids.map(|id| id + offset)
+                );
+                bend_cursor += 1;
+            }
+            let attach = &source.constraints.attach;
+            for j in 0..attach.particle_ids.len() {
+                let combined_attach = &combined.solver.constraints.attach;
+                assert_eq!(
+                    combined_attach.particle_ids[attachment_cursor],
+                    attach.particle_ids[j] + offset
+                );
+                assert_eq!(
+                    combined_attach.slot_ids[attachment_cursor],
+                    attach.slot_ids[j] + slot_cursor
+                );
+                assert_eq!(
+                    combined_attach.distances[attachment_cursor],
+                    attach.distances[j]
+                );
+                assert!(
+                    (offset..offset + count)
+                        .contains(&combined_attach.particle_ids[attachment_cursor])
+                );
+                attachment_cursor += 1;
+            }
+            let expected = request.attachment_motion.map_or_else(
+                || attach.slot_positions.clone(),
+                |motion| motion.sample_slots(&attach.slot_positions, stamp).unwrap(),
+            );
+            assert_eq!(
+                &sampled[slot_cursor as usize..slot_cursor as usize + expected.len()],
+                &expected
+            );
+            slot_cursor += attach.slot_positions.len() as u32;
+            let csr = build_normal_csr(count as usize, &source.indices);
+            assert_eq!(csr.offsets.len(), count as usize + 1);
+            assert!(csr.pairs.iter().flatten().all(|&id| id < count));
+        }
+    }
+
+    #[test]
+    fn grouped_ticks_require_complete_membership_and_rebuild_on_config_removal_reset() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(ImportedClothPlugin);
+        app.world_mut().resource_mut::<ClothControl>().paused = true;
+        let spawn = |app: &mut App| {
+            app.world_mut()
+                .spawn((
+                    ClothSim::default(),
+                    Mesh3d::default(),
+                    ClothSimulationGroup(9),
+                    ClothPreparation::Ready(Box::new(prepared_hinge())),
+                ))
+                .id()
+        };
+        let a = spawn(&mut app);
+        let b = spawn(&mut app);
+        let snapshot = |app: &App| {
+            Arc::clone(&app.world().resource::<ImportedCloths>().batches[&SolverKey::Group(9)])
+        };
+        app.world_mut().run_schedule(Last);
+        let original = snapshot(&app);
+        // Individual source readiness must never accept half a grouped tick.
+        for (_, request) in &original.members {
+            request.ticks.lock().unwrap().ready = true;
+        }
+        app.world_mut()
+            .resource_mut::<ClothControl>()
+            .request_step();
+        app.world_mut().run_schedule(FixedUpdate);
+        assert!(original.ticks.lock().unwrap().pending.is_empty());
+        assert_eq!(app.world().resource::<ClothControl>().single_steps, 1);
+        original.ticks.lock().unwrap().ready = true;
+        app.world_mut().run_schedule(FixedUpdate);
+        assert_eq!(original.ticks.lock().unwrap().pending.len(), 1);
+        assert_eq!(app.world().resource::<ClothControl>().tick_index, 1);
+        let mut config = ClothSolverConfig::default();
+        config.params.max_speed = 7.0;
+        app.world_mut().entity_mut(b).insert(config);
+        app.world_mut()
+            .resource_mut::<ClothControl>()
+            .request_step();
+        app.world_mut().run_schedule(FixedUpdate);
+        assert!(original.ticks.lock().unwrap().closed);
+        assert!(original.ticks.lock().unwrap().pending.is_empty());
+        assert_eq!(app.world().resource::<ClothControl>().tick_index, 1);
+        app.world_mut().run_schedule(Last);
+        let invalid = snapshot(&app);
+        assert!(invalid.initial.is_err());
+        invalid.ticks.lock().unwrap().ready = true;
+        app.world_mut().run_schedule(FixedUpdate);
+        assert!(invalid.ticks.lock().unwrap().pending.is_empty());
+        app.world_mut().entity_mut(b).remove::<ClothSolverConfig>();
+        app.world_mut().run_schedule(Last);
+        let restored = snapshot(&app);
+        assert!(restored.initial.is_ok());
+        // Different external groups are rejected, too.
+        app.world_mut().entity_mut(b).insert(CollisionGroup(3));
+        app.world_mut().run_schedule(Last);
+        assert!(snapshot(&app).initial.is_err());
+        app.world_mut().entity_mut(b).remove::<CollisionGroup>();
+        app.world_mut().run_schedule(Last);
+        let before_loading = snapshot(&app);
+        before_loading.ticks.lock().unwrap().ready = true;
+        let independent = app
+            .world_mut()
+            .spawn((
+                ClothSim::default(),
+                Mesh3d::default(),
+                ClothPreparation::Ready(Box::new(prepared_hinge())),
+            ))
+            .id();
+        app.world_mut().run_schedule(Last);
+        let independent_request =
+            Arc::clone(&app.world().resource::<ImportedCloths>().entries[&independent]);
+        independent_request.ticks.lock().unwrap().ready = true;
+        let loading = app
+            .world_mut()
+            .spawn((ClothSim::default(), ClothSimulationGroup(9)))
+            .id();
+        app.world_mut().run_schedule(FixedUpdate);
+        assert!(before_loading.ticks.lock().unwrap().closed);
+        assert!(
+            independent_request.ticks.lock().unwrap().pending.is_empty(),
+            "changed membership must gate all groups before accepting any tick"
+        );
+        app.world_mut().run_schedule(Last);
+        assert!(
+            !app.world()
+                .resource::<ImportedCloths>()
+                .batches
+                .contains_key(&SolverKey::Group(9))
+        );
+        app.world_mut().entity_mut(loading).despawn();
+        app.world_mut().run_schedule(Last);
+        let before_remove = snapshot(&app);
+        app.world_mut().entity_mut(b).remove::<ClothSim>();
+        app.world_mut().run_schedule(FixedUpdate);
+        assert!(before_remove.ticks.lock().unwrap().closed);
+        app.world_mut().run_schedule(Last);
+        let smaller = snapshot(&app);
+        assert_eq!(smaller.members.len(), 1);
+        assert_eq!(smaller.members[0].0, a);
+        assert_eq!(
+            smaller.initial.as_ref().unwrap().solver.positions,
+            prepared_hinge().positions
+        );
+        smaller.ticks.lock().unwrap().ready = true;
+        app.world_mut().resource_mut::<ClothControl>().reset();
+        app.world_mut().run_schedule(FixedUpdate);
+        assert!(smaller.ticks.lock().unwrap().closed);
+        app.world_mut().run_schedule(Last);
+        let reset = snapshot(&app);
+        assert!(!Arc::ptr_eq(&smaller, &reset));
+        assert!(!reset.ticks.lock().unwrap().ready);
+        reset.ticks.lock().unwrap().ready = true;
+        app.world_mut()
+            .resource_mut::<ClothControl>()
+            .request_step();
+        app.world_mut().run_schedule(FixedUpdate);
+        let ticks = reset.ticks.lock().unwrap();
+        assert_eq!(ticks.pending.front().unwrap().epoch, 1);
+        assert_eq!(ticks.pending.front().unwrap().index, 1);
     }
 
     #[test]
@@ -1005,6 +1637,173 @@ mod tests {
         assert_eq!(initial.params.delta_time, 1.0 / 60.0);
         assert_eq!(initial.params.particle_diameter, 0.15);
         assert_eq!(initial.params.max_speed, 50.0);
+    }
+
+    #[test]
+    fn rigid_attachment_targets_preserve_slot_order_rest_lengths_and_initial_history() {
+        let prepared = prepared_hinge();
+        let initial = imported_initial(&prepared, &ClothSolverConfig::default(), 0.25).unwrap();
+        let attach = &initial.solver.constraints.attach;
+        let motion = ClothAttachmentMotion {
+            pivot: prepared.positions[0],
+            motion: ColliderMotion {
+                linear_velocity: Vec3::Z * 2.0,
+                angular_velocity: Vec3::Z * std::f32::consts::FRAC_PI_2,
+                ..default()
+            },
+        };
+        let stamp = |epoch, index| GeometryTick {
+            epoch,
+            index,
+            dt: 0.25,
+        };
+        let rest = attach.slot_positions.clone();
+        let distances = attach.distances.clone();
+        let ids = attach.slot_ids.clone();
+        let sample = |tick| motion.sample_slots(&rest, tick).unwrap();
+        assert_eq!(sample(stamp(0, 0)), rest);
+        let moved = sample(stamp(0, 4));
+        assert!((moved[0] - (motion.pivot + Vec3::Z * 2.0)).length() < 1e-5);
+        assert!((moved[1] - (motion.pivot + Vec3::Y + Vec3::Z * 2.0)).length() < 1e-5);
+        assert!((moved[0].distance(moved[1]) - rest[0].distance(rest[1])).abs() < 1e-5);
+        // Multiple ticks per frame and skipped display frames always sample immutable rest,
+        // never the preceding sampled positions. Reset returns the original world targets.
+        let first = sample(stamp(0, 1));
+        let _second = sample(stamp(0, 2));
+        assert_eq!(sample(stamp(0, 1)), first);
+        assert_eq!(sample(stamp(1, 0)), rest);
+        assert_eq!(sample(stamp(1, 1)), first);
+        assert_eq!(attach.slot_positions, rest);
+        assert_eq!(attach.slot_ids, ids);
+        assert_eq!(attach.distances, distances);
+        assert_eq!(initial.solver.positions, prepared.positions);
+        assert_eq!(initial.solver.predicted, prepared.positions);
+        assert_eq!(initial.solver.velocities, vec![Vec3::ZERO; 4]);
+        for i in 0..distances.len() {
+            assert_eq!(
+                distances[i],
+                prepared.positions[attach.particle_ids[i] as usize].distance(rest[ids[i] as usize])
+            );
+        }
+        assert!(
+            motion
+                .sample_slots(
+                    &rest,
+                    GeometryTick {
+                        dt: 0.0,
+                        ..stamp(0, 1)
+                    }
+                )
+                .is_none()
+        );
+        assert!(
+            ClothAttachmentMotion {
+                pivot: Vec3::NAN,
+                ..motion
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            ClothAttachmentMotion {
+                motion: ColliderMotion {
+                    deform_amplitude: 0.1,
+                    ..motion.motion
+                },
+                ..motion
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            ClothAttachmentMotion {
+                motion: ColliderMotion {
+                    linear_velocity: Vec3::splat(f32::MAX),
+                    ..default()
+                },
+                ..motion
+            }
+            .sample_slots(&rest, stamp(0, 16))
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn attachment_configuration_changes_retire_queued_ticks_and_reset_at_rest() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(ImportedClothPlugin);
+        app.world_mut().resource_mut::<ClothControl>().paused = true;
+        let entity = app
+            .world_mut()
+            .spawn((
+                ClothSim::default(),
+                Mesh3d::default(),
+                ClothPreparation::Ready(Box::new(prepared_hinge())),
+            ))
+            .id();
+        app.world_mut().run_schedule(Last);
+        let snapshot =
+            |app: &App| Arc::clone(&app.world().resource::<ImportedCloths>().entries[&entity]);
+        let mut old = snapshot(&app);
+        for motion in [
+            Some(ClothAttachmentMotion {
+                pivot: Vec3::ONE,
+                motion: ColliderMotion::default(),
+            }),
+            Some(ClothAttachmentMotion {
+                pivot: Vec3::ZERO,
+                motion: ColliderMotion {
+                    linear_velocity: Vec3::X,
+                    ..default()
+                },
+            }),
+            None,
+        ] {
+            old.ticks.lock().unwrap().ready = true;
+            app.world_mut()
+                .resource_mut::<ClothControl>()
+                .request_step();
+            app.world_mut().run_schedule(FixedUpdate);
+            assert_eq!(old.ticks.lock().unwrap().pending.len(), 1);
+            if let Some(motion) = motion {
+                app.world_mut().entity_mut(entity).insert(motion);
+            } else {
+                app.world_mut()
+                    .entity_mut(entity)
+                    .remove::<ClothAttachmentMotion>();
+            }
+            app.world_mut().run_schedule(FixedUpdate);
+            assert!(old.ticks.lock().unwrap().closed);
+            assert!(old.ticks.lock().unwrap().pending.is_empty());
+            app.world_mut().run_schedule(Last);
+            let new = snapshot(&app);
+            assert!(!Arc::ptr_eq(&old, &new));
+            assert_eq!(new.attachment_motion, motion);
+            assert_eq!(
+                new.initial
+                    .as_ref()
+                    .unwrap()
+                    .solver
+                    .constraints
+                    .attach
+                    .slot_positions,
+                prepared_hinge().positions[..2]
+            );
+            assert!(!new.ticks.lock().unwrap().ready);
+            old = new;
+        }
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(ClothAttachmentMotion {
+                pivot: Vec3::ZERO,
+                motion: ColliderMotion {
+                    deform_amplitude: 1.0,
+                    ..default()
+                },
+            });
+        app.world_mut().run_schedule(Last);
+        assert!(snapshot(&app).initial.is_err());
     }
 
     #[test]

@@ -67,7 +67,9 @@ impl ColliderMotion {
     }
 }
 
-/// CPU diagnostic reference; production positions and their history stay on GPU.
+/// Shared analytic sampler for CPU diagnostics and imported rigid attachment targets;
+/// production collider positions and their history stay on GPU. Sampling a rest point
+/// with deformation is not a barycentric surface binding (attachments reject deformation).
 /// Invalid inputs or unrepresentable outputs return None. At t=0 this returns rest.
 /// Contact surface displacement is the barycentric interpolation of current minus
 /// previous positions; dividing by fixed dt gives the discrete surface velocity.

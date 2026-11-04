@@ -7,12 +7,13 @@ pub mod gpu;
 pub mod sim;
 
 pub use cloth::{
-    ClothControl, ClothMeshCollider, ClothPhysicalConfig, ClothPreparation, ClothSim, ClothSolverConfig,
-    GpuClothPlugin,
-    MeshColliderPreparation, PreparedCloth, PreparedMeshCollider,
+    ClothControl, ClothMeshCollider, ClothPhysicalConfig, ClothPreparation, ClothSim,
+    ClothSolverConfig, GpuClothPlugin, MeshColliderPreparation, PreparedCloth,
+    PreparedMeshCollider,
 };
 
 pub use gpu::geometry::ColliderMotion;
+pub use gpu::imported::{ClothAttachmentMotion, ClothSimulationGroup};
 pub use gpu::mesh_collision::{MeshQueryHit, MeshQueryProbes, MeshQueryReadout, MeshQueryReadouts};
 pub use gpu::mesh_contact::{CollisionGroup, MeshContactSurface, MeshRebuildRequests};
 pub use gpu::update_policy::BvhUpdatePolicy;

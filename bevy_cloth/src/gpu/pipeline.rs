@@ -311,6 +311,7 @@ impl FromWorld for SolverPipeline {
                         storage_buffer_read_only_sized(false, None),
                     ),
                     (binding::BUCKET_IDS, storage_buffer_sized(false, None)),
+                    // Rest xyz + garment ID bits in w: no additional storage binding.
                     (
                         binding::INITIAL_POSITIONS,
                         storage_buffer_read_only_sized(false, None),

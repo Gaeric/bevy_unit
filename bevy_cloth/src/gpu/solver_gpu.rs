@@ -530,6 +530,25 @@ fn uniform_buffer<T: bytemuck::Pod>(
     buffer
 }
 
+/// Only the neighbor cache reads this buffer: xyz is rest position, w holds opaque garment
+/// ID bits, never a numeric float. Other GpuVec3 buffers retain their zero padding. Legacy
+/// callers use ID zero for every particle, preserving the original rest-distance exclusion.
+fn pack_neighbor_initial(
+    initial: &[Vec3],
+    garment_ids: Option<&[u32]>,
+) -> Result<Vec<GpuVec3>, String> {
+    if garment_ids.is_some_and(|ids| ids.len() != initial.len()) {
+        return Err("garment ID count must match the particle count".into());
+    }
+    let mut packed = pack_vec3(initial);
+    if let Some(ids) = garment_ids {
+        for (point, &id) in packed.iter_mut().zip(ids) {
+            point.pad = f32::from_bits(id);
+        }
+    }
+    Ok(packed)
+}
+
 impl NeighborBuffers {
     fn new(
         device: &RenderDevice,
@@ -588,8 +607,10 @@ impl NeighborBuffers {
         let initial = storage_buffer(
             device,
             queue,
-            "cloth original positions",
-            bytemuck::cast_slice(&pack_vec3(initial)),
+            "cloth original positions and garment ID bits",
+            bytemuck::cast_slice(
+                &pack_neighbor_initial(initial, None).expect("legacy zero garment IDs"),
+            ),
         );
         let neighbors = storage_buffer(
             device,
@@ -822,8 +843,19 @@ fn reference_neighbors(
     initial: &[Vec3],
     config: NeighborParams,
 ) -> (Vec<u32>, NeighborStats) {
+    reference_neighbors_labeled(predicted, initial, config, None)
+}
+
+/// CPU-only diagnostic mirror of the labeled GPU membership rule, not a CPU solver change.
+fn reference_neighbors_labeled(
+    predicted: &[Vec3],
+    initial: &[Vec3],
+    config: NeighborParams,
+    garment_ids: Option<&[u32]>,
+) -> (Vec<u32>, NeighborStats) {
     let n = predicted.len();
     assert_eq!(initial.len(), n);
+    assert!(garment_ids.is_none_or(|ids| ids.len() == n));
     let mut table = vec![EMPTY; n * config.capacity as usize];
     let mut stats = NeighborStats::default();
     for (i, &point) in predicted.iter().enumerate() {
@@ -837,7 +869,8 @@ fn reference_neighbors(
                 continue;
             }
             if point.distance_squared(other) < config.spacing * config.spacing
-                && initial[i].distance_squared(initial[j]) > config.diameter_squared
+                && (garment_ids.is_some_and(|ids| ids[i] != ids[j])
+                    || initial[i].distance_squared(initial[j]) > config.diameter_squared)
             {
                 if required < config.capacity {
                     table[i + n * required as usize] = j as u32;
@@ -1861,6 +1894,63 @@ impl LiveSolver {
         )))
     }
 
+    /// Upload a combined imported solver with stable per-particle garment labels.
+    /// `params.delta_time` is the fixed tick duration. Distinct labels bypass only the
+    /// rest-distance neighbor exclusion; current-distance and all other filters still apply.
+    /// No extra storage binding is needed: only the neighbor rest buffer's w lane carries IDs.
+    pub(super) fn from_imported_group(
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        cache: &PipelineCache,
+        pipeline: &SolverPipeline,
+        solver: &Solver,
+        params: SimParams,
+        garment_ids: &[u32],
+    ) -> Result<Self, String> {
+        let n = solver.num_particles();
+        if n == 0
+            || n != params.num_particles as usize
+            || n != solver.initial_positions.len()
+            || n != garment_ids.len()
+        {
+            return Err("grouped cloth particle, initial-position and garment ID counts must match and be nonzero".into());
+        }
+        if params.num_particles.checked_mul(2).is_none()
+            || params
+                .num_particles
+                .checked_mul(params.max_num_neighbors)
+                .is_none()
+        {
+            return Err("grouped cloth hash/neighbor table exceeds u32 indexing".into());
+        }
+        let dt = params.delta_time;
+        let spacing = params.particle_diameter * params.hash_cell_size_scalar;
+        if !dt.is_finite()
+            || dt <= 0.0
+            || params.num_substeps == 0
+            || params.max_num_neighbors == 0
+            || !params.particle_diameter.is_finite()
+            || params.particle_diameter <= 0.0
+            || !(params.particle_diameter * params.particle_diameter).is_finite()
+            || !spacing.is_finite()
+            || spacing <= 0.0
+            || !(spacing * spacing).is_finite()
+        {
+            return Err(
+                "grouped cloth requires valid tick, substep and neighbor search parameters".into(),
+            );
+        }
+        // Reuse all imported allocation/binding/dispatch checks before allocating label data.
+        let live = Self::from_imported(device, queue, cache, pipeline, solver.clone(), params, dt)?;
+        let initial = pack_neighbor_initial(&solver.initial_positions, Some(garment_ids))?;
+        queue.write_buffer(
+            &live.0.neighbor_search._initial,
+            0,
+            bytemuck::cast_slice(&initial),
+        );
+        Ok(live)
+    }
+
     /// Upload before the corresponding submit_step; collider topology cannot change in-place.
     /// Keep caller-supplied history verbatim: CPU ColliderHistory starts translation-only,
     /// so the first scene tick intentionally does not use the initial scaled sphere model.
@@ -2446,6 +2536,64 @@ fn attachment_errors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn garment_labels_pack_opaque_bits_and_reject_wrong_counts() {
+        let ids = [0, 1, 0x8000_0000, 0x7f80_0001, 0x7fc0_0000, u32::MAX];
+        let initial: Vec<_> = (0..ids.len()).map(|i| Vec3::X * i as f32).collect();
+        let packed = pack_neighbor_initial(&initial, Some(&ids)).unwrap();
+        for ((point, &position), &id) in packed.iter().zip(&initial).zip(&ids) {
+            assert_eq!(point.xyz, position.to_array());
+            assert_eq!(point.pad.to_bits(), id);
+        }
+        assert!(pack_neighbor_initial(&initial, Some(&ids[..1])).is_err());
+        assert!(pack_neighbor_initial(&[], Some(&[1])).is_err());
+        assert!(pack_neighbor_initial(&[], Some(&[])).unwrap().is_empty());
+        let legacy = pack_neighbor_initial(&initial, None).unwrap();
+        assert!(legacy.iter().all(|point| point.pad.to_bits() == 0));
+        assert_eq!(
+            bytemuck::cast_slice::<_, u8>(&legacy),
+            bytemuck::cast_slice::<_, u8>(&pack_vec3(&initial))
+        );
+    }
+
+    #[test]
+    fn garment_neighbors_bypass_only_cross_garment_rest_exclusion() {
+        let config = NeighborParams {
+            num_particles: 2,
+            num_buckets: 1,
+            capacity: 1,
+            spacing: 1.0,
+            diameter_squared: 0.0625,
+            pad: [0; 3],
+        };
+        let points = [Vec3::ZERO, Vec3::X * 0.1];
+        for initial in [
+            [Vec3::ZERO; 2],
+            [Vec3::ZERO, Vec3::X * 0.25], // Equal to diameter: strict old exclusion.
+            [Vec3::ZERO, Vec3::X * 2.0],
+        ] {
+            let legacy = reference_neighbors(&points, &initial, config);
+            for label in [0, 17, u32::MAX] {
+                assert_eq!(
+                    reference_neighbors_labeled(&points, &initial, config, Some(&[label; 2])),
+                    legacy,
+                );
+            }
+            let (table, stats) =
+                reference_neighbors_labeled(&points, &initial, config, Some(&[17, 29]));
+            assert_eq!(table, [1, 0]);
+            assert_eq!(stats.stored_entries, 2);
+            assert_eq!(stats.max_required, 1); // Self is never included.
+            validate_neighbors(2, 1, &table).unwrap();
+        }
+        let labels = Some(&[0, u32::MAX][..]);
+        for other in [Vec3::X, Vec3::X * 2.0, Vec3::splat(f32::NAN)] {
+            let (table, _) =
+                reference_neighbors_labeled(&[Vec3::ZERO, other], &[Vec3::ZERO; 2], config, labels);
+            assert_eq!(table, [EMPTY; 2]);
+        }
+    }
 
     #[test]
     fn live_config_rejects_invalid_bounds_and_accepts_endpoints() {

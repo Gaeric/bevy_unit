@@ -8,7 +8,8 @@
   更新：2026-11-03。本文件重写为当前计划，旧计划与历史记录由 Git 保存。
   顺序：已有场景的 GLB 版本验证插件与碰撞框架 → 动态 BVH 的 refit/rebuild → 具体人体与衣物模型。
   共 12 步，每步独立提交与验证，完成当前步后再讨论下一步。
-  当前已有 cloth.glb/sphere.glb、加载标记与三角拓扑准备；第 02 步正在接 GPU，初始化代码已接入，未编译/设备验证，tick 与输出尚未连接。
+  2026-11-04：01–08及10–12的实现已接入；09仅有受控实验模式，尚缺实测自动策略。
+  所有TODO标题保留为验收状态，不等于代码未实现；GPU设备视觉、数值与性能验收未执行。
 
 * 已确定的技术方向
   - 使用 Bevy 原生 glTF 导入器和场景实体；应用选择并标记参与的 primitive，插件负责数据准备、GPU 求解与输出。
@@ -160,6 +161,16 @@
    - 验证：挂接、褶皱、接触、摩擦、法线贴图和阴影；独立实例不互相覆盖，暂停/重置可重复。
 
 ** TODO 12 上衣与裙子共同运行，完成模型级验证
+   已实现ClothSimulationGroup显式共享求解器：成员原约束/LRA独立，偏移合并粒子/slot，按成员输出原Mesh。
+   跨衣物粒子跳过初始距离排除；同衣物保留旧规则。标签复用邻居rest缓冲w位，不增加storage binding。
+   ClothAttachmentMotion按同GeometryTick采样刚体挂点；示例从人体准备数据取同一pivot，等待绑定就绪再启动。
+   参数/dt/外部CollisionGroup不一致明确拒绝；组成员/输入变化关闭旧队列，整组从rest重建，不承诺保留运行状态。
+   示例--top开启上衣；--motion人体与挂点同步旋转；T增删上衣并暂停重置，L重载整场景并暂停重置。
+   Agent：166项lib及8项模型示例CPU测试通过；实际资产裙子1135粒子/24pins/22接缝，上衣3103/22/749，人体30304三角形准备通过。
+   互碰为离散粒子接触，非三角形/边接触或CCD；精确重合粒子零方向不分离，有限邻居容量可能丢候选。
+   Torso有开口，单面接触的朝向/边缘效果待设备验证；挂点沿用Jacobi软恢复，非严格钳制。
+   此资产无骨骼/动画，当前不提供蒙皮或变形表面重心挂接；一般顶点提供者接口已用于refit/接触，挂点仅支持刚体。
+   设备视觉、邻居溢出、摩擦/挂点残差、七场景视觉回归与阶段计时仍未完成；不将CPU准备或Naga验证当设备证据。
    - 实现：接入上衣、局部参数和挂接配置，明确两件衣物的模拟分组与互碰；通过统一位置接口驱动人体运动/变形。
      将后续选定的人体变形提供者接在接口前，不改 BVH 和接触逻辑；完成场景重载及角色增删的整合。
    - 提交产物：两件衣物与动态人体的完整示例、角色/参数说明、refit/rebuild 行为与阶段计时记录。
@@ -173,22 +184,22 @@
   - 记录具体配置下的位置误差、接触残差与分阶段耗时；将代码、计算预期和设备测量分开记录。
 
 * 当前批次与下一步
-  2026-11-04 决定：继续使用现有 cloth.glb/sphere.glb 验证流程，不另造资产，不恢复旧规则网格约束。
-  导入路径采用唯一三角边 stretch、内部共享边 bend 及几何静止角；与旧网格双对角线 stretch/每格 bend 不同，不要求数值一致。
-  一般 GLB 的额外准备需求遇到后再处理；当前不自动焊接 UV 拆点。
+  2026-11-04：实现提交已推进至模型双衣物路径；第09步实测策略和各步设备验收仍待完成。
+  导入路径保留全部渲染顶点；默认不焊接，显式接缝使用零rest连接，不等价于质量合并后的焊接粒子。
+  世界坐标求解→成员局部输出；仅改位置/法线/可选切线，保留层级/材质/UV/颜色。CPU参考与七场景入口未修改。
+  未指定ClothSimulationGroup则独立求解；显式组原子等待所有成员输出就绪、共享tick队列。
+  固定dt/配置/变换/角色/组成员变化重建初态；源Mesh原地编辑/热重载不自动重初始化，可用示例L显式场景重载。
 
-  第02步代码已接入 fixed tick、暂停/单步/重置和独立可写 Mesh 输出；设备验收待运行。
-  ClothControl 由应用绑定按键：示例 Space 暂停/继续，S 暂停时单步，R 重置并暂停。
-  每实体/每代维护就绪门控队列；输出管线/分配就绪后接收 tick，重置/配置变化/移除关闭旧队列。
-  求解使用世界坐标，输出先转换到实体局部坐标再从三角形生成法线；保留原层级、材质和UV。
-  输出Mesh按实体克隆，移除ClothSim恢复原Mesh；不读回粒子，不调用fixture、CPU add_cloth或CPU step。
-  ClothSolverConfig 显式给定粒子直径、速度上限及其余 SimParams；当前复用旧GPU CSR构建器。
-  固定dt/配置/变换变化重建初态，不承诺运行中热调参；源Mesh原地编辑/热重载不是自动重初始化入口。
-  外部碰撞数量仍为0，sphere仅显示；已知严格输出布局为POSITION/NORMAL Float32x3和UV_0 Float32x2。
-
-  用户运行：=cargo run -j 2 -p bevy_cloth --example velvet-gltf=。
-  预期初始化日志每实例289粒子、800 stretch、736 bend、2 slots、578 attachments、0 external colliders。
-  检查两实例分别变形且不互相覆盖，暂停稳定、S单步、R恢复初态及原材质/阴影。
-  Agent 2026-11-04：私有target的all-targets check通过；=cargo test -j 2 -p bevy_cloth --lib= 112项通过。
-  容器测试链接使用/tmp中的ALSA/Wayland运行库及临时pkg-config stub；未写主机target，未运行GPU设备。
-  下一步：第03步obvhs BVH2准备及数据布局，之后第04步GPU查询。
+  主机运行（无需容器的临时库路径）：
+  - cargo run -j 2 -p bevy_cloth --example velvet-gltf -- --motion
+  - cargo run -j 2 -p bevy_cloth --example velvet-model -- --join-render-splits
+  - cargo run -j 2 -p bevy_cloth --example velvet-model -- --top --motion --join-render-splits
+  Space暂停/继续，S暂停时单步，R重置并暂停，B请求异步rebuild；模型另有T增删上衣、L重载并暂停。
+  检查零/单/多tick、两件独立输出、挂点与人体同步、接触/摩擦、暂停稳定、重置复现、T/L后无旧实例继续输出。
+  默认BvhUpdatePolicy::RefitOnly；应用可插入RebuildEvery{ticks: NonZeroU64}做固定间隔对比，不是已选定的自动策略。
+  探针读回为诊断；生产位置/refit/接触留GPU。现有查询探针针对准备快照，不证明动态树查询正确。
+  Agent最终验证：all-targets check通过；lib166、velvet-gltf4、velvet-model8、velvet-gpu-scenes CLI5项通过；修改文件格式/diff检查通过。
+  不限定目标的整包cargo test在构建阶段超时，未计为通过；上述限定目标已随后完整运行。solver/output shader独立Naga验证通过。
+  容器使用私有target、临时ALSA/Wayland库与pkg-config stub；没有/dev/dri，不写主机target，不宣称GPU执行或性能结果。
+  下一批需设备记录：refit/rebuild前后查询误差/访问量/总耗时、组内邻居容量与穿透残差、挂点漂移、七场景视觉回归。
+  第09步阈值必须据上述测量决定，不能用固定tick间隔或CPU新树SAH代理替代实测。

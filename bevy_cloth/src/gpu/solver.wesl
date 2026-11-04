@@ -108,6 +108,8 @@ struct ScanParams {
 @group(0) @binding(22) var<storage, read_write> bucket_cursors: array<atomic<u32>>;
 @group(0) @binding(23) var<storage, read> bucket_offsets: array<u32>;
 @group(0) @binding(24) var<storage, read_write> bucket_ids: array<u32>;
+// xyz: rest position; w: opaque garment ID bits (legacy uploads use zero).
+// Never perform floating-point arithmetic on w: even NaN bit patterns are valid IDs.
 @group(0) @binding(25) var<storage, read> initial_positions: array<vec4<f32>>;
 // Same buffer as binding 19, but NEVER bound twice in one dispatch.
 @group(0) @binding(26) var<storage, read_write> neighbor_output: array<u32>;
@@ -216,8 +218,11 @@ fn cache_neighbors(@builtin(global_invocation_id) gid: vec3<u32>) {
           if (i == j || any(cell_of(predicted[j].xyz) != cell)) { continue; }
           let difference = point - predicted[j].xyz;
           let original = initial_positions[i].xyz - initial_positions[j].xyz;
+          let different_garments = bitcast<u32>(initial_positions[i].w)
+            != bitcast<u32>(initial_positions[j].w);
           if (!(dot(difference, difference) < neighbor_params.spacing * neighbor_params.spacing
-            && dot(original, original) > neighbor_params.diameter_squared)) { continue; }
+            && (different_garments
+              || dot(original, original) > neighbor_params.diameter_squared))) { continue; }
           required++;
           // Sorted insertion, dropping the maximum when full. Scatter order cannot change the
           // retained set, collision reduction order, or overflow diagnostic.
