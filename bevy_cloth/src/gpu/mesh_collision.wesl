@@ -1,7 +1,10 @@
-// Steps 04/05: world-space closest-point queries and discrete static-mesh contact.
-// query_closest uses group 0 bindings 0..6; resolve_contacts uses only group 0
-// bindings 0..4 and group 1 bindings 0..3 (omit probe/result bindings for contact).
-// ContactParams: 16 bytes, particle_count/two_sided/thickness/friction at 0/4/8/12.
+// Steps 04/05/06: world-space closest-point queries and discrete moving-mesh contact.
+// query_closest uses group 0 bindings 0..6; resolve_contacts uses group 0
+// bindings 0..5 and group 1 bindings 0..3 (8 SSBOs total, no result binding).
+// Group 0 binding 5 (probes) is dual-use by pipeline entry: query probe positions
+// for query_closest, previous-tick collider positions for resolve_contacts.
+// ContactParams: 32 bytes, particle_count/two_sided/thickness/friction at 0/4/8/12,
+// motion_fraction f32 at 16 (per-cloth-substep tick fraction), u32 padding at 20/24/28.
 // Group 1: uniform ContactParams; read_write predicted vec4 stride 16;
 // read-only previous cloth vec4 stride 16; read-only inverse mass f32 stride 4.
 // Each contact invocation writes only its predicted particle, preserving w.
@@ -14,14 +17,16 @@
 // Inside, reverse the radial normal and expel by thickness + distance; on face
 // interiors this equals the outward winding-plane projection. Backside points
 // of an OPEN mesh can therefore be expelled arbitrarily far: use two-sided there.
-// Two-sided mode retains the side of the OLD cloth position relative to its
-// closest point on the SAME selected triangle (current static geometry). If old
-// lies on the plane, use predicted side; exact coincidence falls back to winding.
+// Two-sided mode retains the side of the OLD cloth position relative to the
+// previous-tick surface at the selected hit's SAME barycentrics, using CURRENT
+// winding. If old lies on the plane, use predicted side; coincidence uses winding.
 // Signed radial separation on that retained side defines the same shell response.
 // This is a local discrete heuristic, not a swept intersection or crossing proof;
 // edge/vertex sign changes, sharp corners and nearest-triangle switches can jump.
-// Friction removes tangential (predicted - previous) displacement, capped by
-// friction * normal correction. No collider motion/history or persistent contacts.
+// Friction removes tangential (predicted - previous - surface_displacement),
+// capped by friction * normal correction. Collider current/previous-tick points
+// share hit barycentrics; their displacement is scaled by motion_fraction for
+// each cloth substep. No CCD, persistent contacts, or interpolated query geometry.
 // Invalid query/arithmetic, zero face normal, or invalid contact inputs skip writes.
 //
 // Exact query host ABI (all offsets/strides in bytes):
@@ -74,6 +79,10 @@ struct ContactParams {
     two_sided: u32,
     thickness: f32,
     friction: f32,
+    motion_fraction: f32,
+    pad0: u32,
+    pad1: u32,
+    pad2: u32,
 };
 
 @group(1) @binding(0) var<uniform> contact_params: ContactParams;
@@ -331,8 +340,10 @@ fn resolve_contacts(@builtin(global_invocation_id) id: vec3<u32>) {
     if !finite_scalar(inv_mass) || inv_mass <= 0.0 { return; }
     let thickness = contact_params.thickness;
     let friction = contact_params.friction;
+    let motion_fraction = contact_params.motion_fraction;
     if !finite_scalar(thickness) || thickness < 0.0
-        || !finite_scalar(friction) || friction < 0.0 { return; }
+        || !finite_scalar(friction) || friction < 0.0
+        || !finite_scalar(motion_fraction) || motion_fraction < 0.0 { return; }
 
     let particle = predicted[particle_id];
     let p = particle.xyz;
@@ -342,6 +353,29 @@ fn resolve_contacts(@builtin(global_invocation_id) id: vec3<u32>) {
     if hit.status != 0u || hit.triangle_id == INVALID_TRIANGLE { return; }
     let winding = hit.normal.xyz;
     if dot(winding, winding) <= 0.0 { return; }
+    // Binding 5 is previous collider geometry for this entry, not query probes.
+    // Guard before index multiplication/access, including independently bound history.
+    if hit.triangle_id >= params.triangle_count
+        || hit.triangle_id >= arrayLength(&indices) / 3u { return; }
+    let base = hit.triangle_id * 3u;
+    let ia = indices[base];
+    let ib = indices[base + 1u];
+    let ic = indices[base + 2u];
+    let vertex_count = arrayLength(&positions);
+    let history_count = arrayLength(&probes);
+    if ia >= vertex_count || ib >= vertex_count || ic >= vertex_count
+        || ia >= history_count || ib >= history_count || ic >= history_count { return; }
+    let old_a = probes[ia].xyz;
+    let old_b = probes[ib].xyz;
+    let old_c = probes[ic].xyz;
+    if !finite_vector(old_a) || !finite_vector(old_b) || !finite_vector(old_c) { return; }
+    let bary = hit.barycentric.xyz;
+    let current_surface = positions[ia].xyz * bary.x
+        + positions[ib].xyz * bary.y + positions[ic].xyz * bary.z;
+    let old_surface = old_a * bary.x + old_b * bary.y + old_c * bary.z;
+    let surface_displacement = (current_surface - old_surface) * motion_fraction;
+    if !finite_vector(current_surface) || !finite_vector(old_surface)
+        || !finite_vector(surface_displacement) { return; }
     let delta = p - hit.point.xyz;
     let plane_distance = dot(delta, winding);
     if !finite_scalar(plane_distance) { return; }
@@ -349,10 +383,8 @@ fn resolve_contacts(@builtin(global_invocation_id) id: vec3<u32>) {
     if plane_distance < 0.0 { predicted_side = -1.0; }
     var retained_side = 1.0;
     if contact_params.two_sided != 0u {
-        // Reuse the selected triangle, not a second nearest-triangle search.
-        let old_hit = triangle_hit(old, hit.triangle_id);
-        if old_hit.status != 0u { return; }
-        let old_plane_distance = dot(old - old_hit.point.xyz, winding);
+        // Same material point in collider history, with current winding.
+        let old_plane_distance = dot(old - old_surface, winding);
         if !finite_scalar(old_plane_distance) { return; }
         retained_side = predicted_side;
         if old_plane_distance > 0.0 { retained_side = 1.0; }
@@ -369,7 +401,7 @@ fn resolve_contacts(@builtin(global_invocation_id) id: vec3<u32>) {
     var normal = winding * retained_side;
     if distance > 0.0 { normal = (delta / distance) * orientation; }
     if !finite_vector(normal) || !finite_scalar(correction) { return; }
-    let displacement = p - old;
+    let displacement = p - old - surface_displacement;
     let tangent = displacement - normal * dot(displacement, normal);
     // Scale before length so finite, large tangential displacements need not
     // overflow their squared length. The final correction must still be finite.

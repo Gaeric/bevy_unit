@@ -11,6 +11,7 @@ pub use cloth::{
     MeshColliderPreparation, PreparedCloth, PreparedMeshCollider,
 };
 
+pub use gpu::geometry::ColliderMotion;
 pub use gpu::mesh_collision::{MeshQueryHit, MeshQueryProbes, MeshQueryReadout, MeshQueryReadouts};
 pub use gpu::mesh_contact::{CollisionGroup, MeshContactSurface};
 

@@ -26,6 +26,7 @@ use std::{
 };
 
 use super::{
+    geometry::{GeometryTick, PositionPipeline},
     live::{OutputPipeline, OutputRange, position_layout},
     mesh_contact::{CollisionGroup, ContactPipeline, StaticMeshContacts},
     normals::build_normal_csr,
@@ -222,12 +223,14 @@ pub struct ClothControl {
     pub paused: bool,
     pub single_steps: u32,
     reset_counter: u64,
+    tick_index: u64,
 }
 
 impl ClothControl {
     /// Restore the immutable initial state, discarding old queued ticks and step requests.
     pub fn reset(&mut self) {
         self.reset_counter = self.reset_counter.wrapping_add(1);
+        self.tick_index = 0;
         self.single_steps = 0;
     }
 
@@ -241,7 +244,7 @@ impl ClothControl {
 struct ImportedTickQueue {
     ready: bool,
     closed: bool,
-    pending: VecDeque<f32>,
+    pending: VecDeque<GeometryTick>,
 }
 
 impl ImportedTickQueue {
@@ -296,6 +299,7 @@ struct ImportedTarget {
 struct ImportedCloths {
     entries: HashMap<Entity, Arc<ImportedRequest>>,
     targets: HashMap<Entity, ImportedTarget>,
+    epoch: u64,
 }
 
 /// Owns only output handles, never a CPU copy of deformed GPU positions.
@@ -390,6 +394,11 @@ fn queue_imported_ticks(
 ) {
     let dt = time.timestep().as_secs_f32();
     let requested = !control.paused || control.single_steps > 0;
+    let stamp = GeometryTick {
+        epoch: control.reset_counter,
+        index: control.tick_index.wrapping_add(1),
+        dt,
+    };
     let mut queued = false;
     for (&entity, request) in &imported.entries {
         let current = cloths
@@ -409,13 +418,16 @@ fn queue_imported_ticks(
         if !current {
             ticks.close();
         } else if requested && ticks.ready && !ticks.closed {
-            ticks.pending.push_back(dt);
+            ticks.pending.push_back(stamp);
             queued = true;
         }
     }
-    // A global single-step advances all currently ready entities, not just the first one.
-    if queued && control.paused {
-        control.single_steps -= 1;
+    // One global stamp per accepted FixedUpdate, shared by all ready entities.
+    if queued {
+        control.tick_index = stamp.index;
+        if control.paused {
+            control.single_steps -= 1;
+        }
     }
 }
 
@@ -487,6 +499,8 @@ fn collect_imported_cloths(
     groups: Query<&CollisionGroup>,
     mut imported: ResMut<ImportedCloths>,
 ) {
+    // Extract the epoch even with no ready cloths or while paused, so geometry resets too.
+    imported.epoch = control.reset_counter;
     // Last runs after preparation's deferred commands have been applied in PostUpdate.
     imported.entries.retain(|&entity, request| {
         let keep = cloths
@@ -698,12 +712,21 @@ fn tick_and_output_imported(
     pipeline: Res<SolverPipeline>,
     output: Res<OutputPipeline>,
     queue: Res<RenderQueue>,
-    contacts: Res<StaticMeshContacts>,
+    mut contacts: ResMut<StaticMeshContacts>,
     contact_pipeline: Res<ContactPipeline>,
+    positions: Res<PositionPipeline>,
 ) {
     let Some(imported) = imported else {
         return;
     };
+    let geometry_ready = contacts.reset_geometry(
+        context.render_device(),
+        &queue,
+        &cache,
+        &positions,
+        imported.epoch,
+    );
+    let mut prepared = Vec::new();
     for (&entity, instance) in &instances.active {
         let mut ticks = instance.request.ticks.lock().expect("imported cloth ticks");
         // Readiness is re-evaluated every frame. Keep already accepted ticks during temporary
@@ -782,6 +805,7 @@ fn tick_and_output_imported(
             &cache,
             &contact_pipeline,
             target.collision_group,
+            initial.params.num_substeps,
             count,
             instance.solver.predicted(),
             instance.solver.positions(),
@@ -791,25 +815,7 @@ fn tick_and_output_imported(
         ) else {
             continue;
         };
-        ticks.ready = true;
-        let pending = std::mem::take(&mut ticks.pending);
-        // Hold the per-entity revision lock through submission: reset cannot retire this
-        // revision halfway through a batch on a pipelined render thread.
-        for dt in pending {
-            instance.solver.submit_step_with_contacts(
-                context.render_device(),
-                &queue,
-                &cache,
-                &pipeline,
-                dt,
-                None,
-                &mut |pass| {
-                    for batch in &contact_batches {
-                        batch.record(pass, &cache, &contact_pipeline);
-                    }
-                },
-            );
-        }
+        ticks.ready = geometry_ready;
         let device = context.render_device();
         let uniform = device.create_buffer(&BufferDescriptor {
             label: Some("imported cloth output range"),
@@ -829,6 +835,69 @@ fn tick_and_output_imported(
                 instance.normals.pairs.as_entire_binding(),
             )),
         );
+        // Retain revision locks until submissions/output are recorded. Reset cannot retire
+        // a source halfway through this frame; immutable source Arc identities are unchanged.
+        prepared.push((
+            entity,
+            instance,
+            target,
+            ticks,
+            contact_batches,
+            group,
+            count,
+            output_pipeline,
+        ));
+    }
+
+    // Tick-major ordering is essential: all cloths sharing geometry consume tick N before
+    // any cloth advances that geometry to N+1. Do not drain queues before successful work.
+    let mut submissions = Vec::new();
+    if geometry_ready {
+        for (i, (entity, _, _, ticks, _, _, _, _)) in prepared.iter().enumerate() {
+            submissions.extend(
+                ticks
+                    .pending
+                    .iter()
+                    .map(|&stamp| (stamp, entity.to_bits(), i)),
+            );
+        }
+    }
+    submissions.sort_by_key(|(stamp, entity, _)| (stamp.index, *entity));
+    for (stamp, _, i) in submissions {
+        let (_, instance, target, ticks, batches, _, _, _) = &mut prepared[i];
+        if !contacts.advance_group(
+            context.render_device(),
+            &queue,
+            &cache,
+            &positions,
+            target.collision_group,
+            stamp,
+        ) {
+            // Preserve this tick and every later one. Do not allow another group to run
+            // ahead while this frame is blocked; readiness is retried next render frame.
+            for (_, _, _, ticks, _, _, _, _) in &mut prepared {
+                ticks.ready = false;
+            }
+            break;
+        }
+        instance.solver.submit_step_with_contacts(
+            context.render_device(),
+            &queue,
+            &cache,
+            &pipeline,
+            stamp.dt,
+            None,
+            &mut |pass| {
+                for batch in batches.iter() {
+                    batch.record(pass, &cache, &contact_pipeline);
+                }
+            },
+        );
+        ticks.pending.pop_front();
+    }
+
+    // Record outputs only after all direct queue submissions, including when paused.
+    for (_, _, _, _ticks, _, group, count, output_pipeline) in prepared {
         let mut pass = context
             .command_encoder()
             .begin_compute_pass(&ComputePassDescriptor {
@@ -839,6 +908,7 @@ fn tick_and_output_imported(
         pass.set_bind_group(0, &group, &[]);
         pass.dispatch_workgroups(count.div_ceil(WORKGROUP_SIZE), 1, 1);
     }
+    contacts.record_outputs(&mut context, &allocator, &meshes, &cache, &output, &queue);
 }
 
 #[cfg(test)]
@@ -1014,6 +1084,106 @@ mod tests {
                 .resource::<ImportedCloths>()
                 .entries
                 .contains_key(&first)
+        );
+    }
+
+    #[test]
+    fn fixed_ticks_share_one_global_stamp_and_reset_epoch() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(ImportedClothPlugin);
+        let entities: Vec<_> = (0..2)
+            .map(|_| {
+                app.world_mut()
+                    .spawn((
+                        ClothSim::default(),
+                        Mesh3d::default(),
+                        ClothPreparation::Ready(Box::new(prepared_hinge())),
+                    ))
+                    .id()
+            })
+            .collect();
+        app.world_mut().resource_mut::<ClothControl>().paused = true;
+        app.world_mut().run_schedule(Last);
+        let requests: Vec<_> = entities
+            .iter()
+            .map(|entity| Arc::clone(&app.world().resource::<ImportedCloths>().entries[entity]))
+            .collect();
+        app.world_mut()
+            .resource_mut::<ClothControl>()
+            .request_step();
+        app.world_mut().run_schedule(FixedUpdate);
+        assert_eq!(app.world().resource::<ClothControl>().tick_index, 0);
+        for request in &requests {
+            request.ticks.lock().unwrap().ready = true;
+        }
+        app.world_mut().run_schedule(FixedUpdate);
+        let dt = app
+            .world()
+            .resource::<Time<Fixed>>()
+            .timestep()
+            .as_secs_f32();
+        let first = GeometryTick {
+            epoch: 0,
+            index: 1,
+            dt,
+        };
+        for request in &requests {
+            assert_eq!(request.ticks.lock().unwrap().pending.front(), Some(&first));
+        }
+        assert_eq!(app.world().resource::<ClothControl>().tick_index, 1);
+        app.world_mut().run_schedule(FixedUpdate);
+        assert_eq!(app.world().resource::<ClothControl>().tick_index, 1);
+        requests[1].ticks.lock().unwrap().ready = false;
+        app.world_mut()
+            .resource_mut::<ClothControl>()
+            .request_step();
+        app.world_mut().run_schedule(FixedUpdate);
+        assert_eq!(app.world().resource::<ClothControl>().tick_index, 2);
+        assert_eq!(
+            requests[0]
+                .ticks
+                .lock()
+                .unwrap()
+                .pending
+                .back()
+                .unwrap()
+                .index,
+            2
+        );
+        assert_eq!(requests[1].ticks.lock().unwrap().pending.len(), 1);
+        requests[1].ticks.lock().unwrap().ready = true;
+        app.world_mut()
+            .resource_mut::<ClothControl>()
+            .request_step();
+        app.world_mut().run_schedule(FixedUpdate);
+        for request in &requests {
+            assert_eq!(
+                request.ticks.lock().unwrap().pending.back().unwrap().index,
+                3
+            );
+        }
+        app.world_mut().resource_mut::<ClothControl>().reset();
+        app.world_mut().run_schedule(Last);
+        assert_eq!(app.world().resource::<ImportedCloths>().epoch, 1);
+        assert_eq!(app.world().resource::<ClothControl>().tick_index, 0);
+        for request in &requests {
+            let ticks = request.ticks.lock().unwrap();
+            assert!(ticks.closed && ticks.pending.is_empty());
+        }
+        let reset = Arc::clone(&app.world().resource::<ImportedCloths>().entries[&entities[0]]);
+        reset.ticks.lock().unwrap().ready = true;
+        app.world_mut()
+            .resource_mut::<ClothControl>()
+            .request_step();
+        app.world_mut().run_schedule(FixedUpdate);
+        assert_eq!(
+            reset.ticks.lock().unwrap().pending.front(),
+            Some(&GeometryTick {
+                epoch: 1,
+                index: 1,
+                dt
+            })
         );
     }
 

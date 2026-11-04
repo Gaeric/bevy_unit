@@ -98,6 +98,11 @@
   目标：沿用方向一的小场景，独立验证动态更新，再决定何时重建；不引入人体资产复杂度。
 
 ** TODO 06 当前/上一 tick 几何输入与运动接触
+   实现：=gpu/geometry.rs/.wesl= ColliderMotion整体运动/测试波形变形，GPU current/previous从同一rest和tick时刻计算。
+   全体就绪布料共享epoch/index/dt，按tick再实体顺序提交，碰撞组同tick只更新一次；重置清历史，零tick不推进。
+   摩擦使用同三角形同重心的current-previous表面位移，按子步分摊；运动碰撞体独立Mesh输出复用current缓冲。
+   阶段边界：动态接触仍门控关闭，防止旧树查询；第07步refit接入后启用。没有GPU位置/速度实测。
+   Agent：all-targets check、geometry新增8项、imported6项、contact7项通过；32字节接触uniform与shader Naga验证通过。
    - 实现：建立统一 GPU 位置接口，先接整体运动和测试 compute 非刚性变形；顶点与渲染显示使用同一时刻的数据。
      按模拟 tick 保存当前位置历史，用接触三角形重心坐标计算表面速度并接入摩擦。
    - 提交产物：动态位置提供者和时间约定；非刚性变形先用于位置/速度探针，下一步更新其 BVH。

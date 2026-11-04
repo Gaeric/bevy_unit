@@ -1,5 +1,6 @@
 //! bevy-side gpu solver (plan.org M6); the compute work itself lives in `solver.wesl`.
 
+pub mod geometry;
 pub(crate) mod imported;
 pub mod layout;
 mod live;

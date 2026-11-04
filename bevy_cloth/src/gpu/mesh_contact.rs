@@ -1,8 +1,9 @@
-//! Step 05: immutable world-space mesh contacts, without probes or particle readback.
-//! Geometry is copied only on preparation revisions; dynamic geometry/refit is future work.
+//! World-space mesh contacts with fixed-tick analytic collider positions.
+//! Dynamic queries remain blocked while their BVH bounds need a refit.
 
 use bevy::{
-    asset::load_embedded_asset,
+    asset::{RenderAssetUsages, embedded_asset, load_embedded_asset},
+    camera::visibility::NoFrustumCulling,
     ecs::change_detection::Tick,
     material::descriptor::{
         BindGroupLayoutDescriptor, CachedComputePipelineId, ComputePipelineDescriptor,
@@ -11,20 +12,109 @@ use bevy::{
     render::{
         Render, RenderApp, RenderSystems,
         extract_resource::{ExtractResource, ExtractResourcePlugin},
+        mesh::{RenderMesh, allocator::MeshAllocator},
+        render_asset::RenderAssets,
         render_resource::{
             BindGroup, BindGroupEntries, BindGroupLayoutEntries, Buffer, BufferInitDescriptor,
-            BufferUsages, ComputePass, PipelineCache, ShaderStages,
+            BufferUsages, ComputePass, ComputePassDescriptor, PipelineCache, ShaderStages,
             binding_types::{
                 storage_buffer_read_only_sized, storage_buffer_sized, uniform_buffer_sized,
             },
         },
-        renderer::{RenderDevice, RenderQueue},
+        renderer::{RenderContext, RenderDevice, RenderQueue},
     },
 };
 use bytemuck::{Pod, Zeroable};
 use std::{collections::HashMap, sync::Arc};
 
 use crate::cloth::{ClothMeshCollider, MeshColliderPreparation, bvh::BvhNode};
+
+use super::{
+    geometry::{ColliderMotion, GeometryTick, GpuPositions, PositionPipeline},
+    live::{OutputPipeline, OutputRange, position_layout},
+    normals::build_normal_csr,
+};
+
+struct OutputOwner {
+    source: Handle<Mesh>,
+    output: Handle<Mesh>,
+    added_no_culling: bool,
+}
+
+#[derive(Resource, Default)]
+struct ColliderOutputs(HashMap<Entity, OutputOwner>);
+
+/// Only the Mesh handle changes: scene hierarchy, materials and source assets stay intact.
+fn manage_outputs(
+    mut commands: Commands,
+    meshes: Option<ResMut<Assets<Mesh>>>,
+    mut outputs: ResMut<ColliderOutputs>,
+    mut sources: Query<(
+        Entity,
+        &mut Mesh3d,
+        Has<ClothMeshCollider>,
+        Option<&ColliderMotion>,
+        Has<NoFrustumCulling>,
+    )>,
+) {
+    outputs.0.retain(|&entity, owner| {
+        let Ok((_, mut mesh, marked, motion, _)) = sources.get_mut(entity) else {
+            if owner.added_no_culling {
+                if let Ok(mut entity) = commands.get_entity(entity) {
+                    entity.remove::<NoFrustumCulling>();
+                }
+            }
+            return false;
+        };
+        let moving = motion.is_some_and(|m| *m != ColliderMotion::default());
+        if !marked || !moving || mesh.0 != owner.output {
+            if mesh.0 == owner.output {
+                mesh.0 = owner.source.clone();
+            }
+            if owner.added_no_culling {
+                commands.entity(entity).remove::<NoFrustumCulling>();
+            }
+            return false;
+        }
+        true
+    });
+    let Some(mut meshes) = meshes else {
+        return;
+    };
+    for (entity, mut mesh, marked, motion, no_culling) in &mut sources {
+        if !marked
+            || !motion.is_some_and(|m| *m != ColliderMotion::default())
+            || outputs.0.contains_key(&entity)
+        {
+            continue;
+        }
+        let Some(source) = meshes.get(&mesh.0) else {
+            continue;
+        };
+        let mut output = source.clone();
+        // Step 06 reuses the strict P/N/UV output path. Never change the source.
+        if output.attribute(Mesh::ATTRIBUTE_UV_0).is_none() {
+            output.insert_attribute(
+                Mesh::ATTRIBUTE_UV_0,
+                vec![[0.0_f32; 2]; output.count_vertices()],
+            );
+        }
+        output.asset_usage |= RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD;
+        let output = meshes.add(output);
+        outputs.0.insert(
+            entity,
+            OutputOwner {
+                source: mesh.0.clone(),
+                output: output.clone(),
+                added_no_culling: !no_culling,
+            },
+        );
+        mesh.0 = output;
+        if !no_culling {
+            commands.entity(entity).insert(NoFrustumCulling);
+        }
+    }
+}
 
 /// Cloth and collider match by exact group equality, not a bit mask. Missing means 0.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -43,6 +133,7 @@ struct Geometry {
     nodes: Vec<BvhNode>,
     triangle_refs: Vec<u32>,
     max_depth: u32,
+    pivot: Vec3,
 }
 
 enum SourceState {
@@ -52,10 +143,13 @@ enum SourceState {
 }
 
 struct Snapshot {
-    // Preparation, marker, Mesh3d, group, surface. None differs from explicit defaults.
-    ticks: [Option<Tick>; 5],
+    // Preparation, marker, Mesh3d, group, surface, motion. None differs from defaults.
+    ticks: [Option<Tick>; 6],
     group: u32,
     surface: MeshContactSurface,
+    motion: ColliderMotion,
+    output_mesh: Option<Handle<Mesh>>,
+    world_to_local: Mat4,
     state: SourceState,
 }
 
@@ -73,21 +167,27 @@ type Sources<'w, 's> = Query<
         Ref<'static, Mesh3d>,
         Option<Ref<'static, CollisionGroup>>,
         Option<Ref<'static, MeshContactSurface>>,
+        Option<Ref<'static, ColliderMotion>>,
     ),
 >;
 
-fn collect_snapshots(sources: Sources, mut snapshots: ResMut<Snapshots>) {
+fn collect_snapshots(
+    sources: Sources,
+    outputs: Res<ColliderOutputs>,
+    mut snapshots: ResMut<Snapshots>,
+) {
     let state = snapshots.bypass_change_detection();
     let old_len = state.0.len();
     state.0.retain(|&entity, _| sources.contains(entity));
     let mut changed = state.0.len() != old_len;
-    for (entity, preparation, marker, mesh, group, surface) in &sources {
+    for (entity, preparation, marker, mesh, group, surface, motion) in &sources {
         let ticks = [
             preparation.as_ref().map(|p| p.last_changed()),
             Some(marker.last_changed()),
             Some(mesh.last_changed()),
             group.as_ref().map(|g| g.last_changed()),
             surface.as_ref().map(|s| s.last_changed()),
+            motion.as_ref().map(|m| m.last_changed()),
         ];
         let previous = state.0.get(&entity);
         if previous.is_some_and(|old| old.ticks == ticks) {
@@ -112,6 +212,7 @@ fn collect_snapshots(sources: Sources, mut snapshots: ResMut<Snapshots>) {
                             nodes: prepared.bvh.nodes.clone(),
                             triangle_refs: prepared.bvh.triangle_refs.clone(),
                             max_depth: prepared.bvh.max_depth,
+                            pivot: prepared.initial_transform.transform_point3(Vec3::ZERO),
                         })
                     });
                 SourceState::Ready(geometry)
@@ -119,12 +220,29 @@ fn collect_snapshots(sources: Sources, mut snapshots: ResMut<Snapshots>) {
             Some(MeshColliderPreparation::Failed(error)) => SourceState::Rejected(error.clone()),
             _ => SourceState::Waiting,
         };
+        let motion = motion.map_or_else(ColliderMotion::default, |m| *m);
+        let input = match motion.validate() {
+            Ok(()) => input,
+            Err(error) => SourceState::Rejected(error),
+        };
         state.0.insert(
             entity,
             Arc::new(Snapshot {
                 ticks,
                 group: group.map_or(0, |g| g.0),
                 surface: surface.map_or_else(MeshContactSurface::default, |s| *s),
+                motion,
+                output_mesh: outputs
+                    .0
+                    .get(&entity)
+                    .filter(|owner| owner.output == mesh.0)
+                    .map(|owner| owner.output.clone()),
+                world_to_local: match preparation.as_deref() {
+                    Some(MeshColliderPreparation::Ready(prepared)) => {
+                        prepared.initial_transform.inverse()
+                    }
+                    _ => Mat4::IDENTITY,
+                },
                 state: input,
             }),
         );
@@ -151,16 +269,18 @@ struct ContactParams {
     two_sided: u32,
     thickness: f32,
     friction: f32,
+    motion_fraction: f32,
+    pad: [u32; 3],
 }
 
 fn supports_contacts(limits: &wgpu::Limits) -> bool {
     limits.max_bind_groups >= 2
-        && limits.max_storage_buffers_per_shader_stage >= 7
+        && limits.max_storage_buffers_per_shader_stage >= 8
         && limits.max_uniform_buffers_per_shader_stage >= 2
-        && limits.max_bindings_per_bind_group >= 5
+        && limits.max_bindings_per_bind_group >= 6
         && limits.max_compute_invocations_per_workgroup >= 256
         && limits.max_compute_workgroup_size_x >= 256
-        && limits.max_uniform_buffer_binding_size >= 16
+        && limits.max_uniform_buffer_binding_size >= size_of::<ContactParams>() as u64
 }
 
 #[derive(Resource)]
@@ -185,6 +305,7 @@ impl FromWorld for ContactPipeline {
                     storage_buffer_read_only_sized(false, None),
                     storage_buffer_read_only_sized(false, None),
                     storage_buffer_read_only_sized(false, None),
+                    storage_buffer_read_only_sized(false, None),
                 ),
             ),
         );
@@ -203,7 +324,7 @@ impl FromWorld for ContactPipeline {
         let supported = supports_contacts(&world.resource::<RenderDevice>().limits());
         if !supported {
             error!(
-                "device cannot support mesh contacts: seven storage buffers, two uniforms and 256 threads required"
+                "device cannot support mesh contacts: eight storage buffers, two uniforms and 256 threads required"
             );
         }
         let pipeline = supported.then(|| {
@@ -229,9 +350,11 @@ impl FromWorld for ContactPipeline {
 struct GpuGeometry {
     _uniform: Buffer,
     _nodes: Buffer,
-    _positions: Buffer,
+    positions: GpuPositions,
     _indices: Buffer,
     _refs: Buffer,
+    normal_offsets: Buffer,
+    normal_pairs: Buffer,
     group: BindGroup,
 }
 
@@ -239,9 +362,12 @@ struct GpuEntry {
     snapshot: Arc<Snapshot>,
     // None is also a cached rejection: do not retry the same geometry revision.
     geometry: Option<Arc<GpuGeometry>>,
+    last: Option<GeometryTick>,
+    reset_epoch: Option<u64>,
+    bounds_current: bool,
 }
 
-/// Render-world static colliders. A matching waiting/rejected collider blocks ticking.
+/// Render-world colliders. A matching waiting/rejected collider blocks ticking.
 #[derive(Resource, Default)]
 pub(super) struct StaticMeshContacts {
     entries: HashMap<Entity, GpuEntry>,
@@ -271,10 +397,15 @@ fn validate_array(count: usize, stride: u64, limits: &wgpu::Limits) -> Result<()
 }
 
 fn validate_geometry(g: &Geometry, limits: &wgpu::Limits) -> Result<(), String> {
-    if !supports_contacts(limits) || g.max_depth >= 127 {
+    if !g.pivot.is_finite() || !supports_contacts(limits) || g.max_depth >= 127 {
         return Err("contact device limits unsupported or BVH max_depth not below 127".into());
     }
-    if !g.indices.len().is_multiple_of(3) || g.triangle_refs.len() != g.indices.len() / 3 {
+    if !g.indices.len().is_multiple_of(3)
+        || g.triangle_refs.len() != g.indices.len() / 3
+        || g.indices
+            .iter()
+            .any(|&index| index as usize >= g.positions.len())
+    {
         return Err("contact requires indexed triangles and matching BVH references".into());
     }
     for (count, stride) in [
@@ -282,6 +413,14 @@ fn validate_geometry(g: &Geometry, limits: &wgpu::Limits) -> Result<(), String> 
         (g.positions.len(), 16),
         (g.indices.len(), 4),
         (g.triangle_refs.len(), 4),
+        (
+            g.positions
+                .len()
+                .checked_add(1)
+                .ok_or("normal offset count overflow")?,
+            4,
+        ),
+        (g.indices.len(), 8),
     ] {
         validate_array(count, stride, limits)?;
     }
@@ -327,44 +466,56 @@ fn prepare_contacts(
                     _ => false,
                 });
                 if unchanged {
-                    old.and_then(|old| old.geometry)
+                    old.as_ref().and_then(|old| old.geometry.clone())
                 } else if let Err(error) = validate_geometry(g, &device.limits()) {
                     error!(?entity, %error, "mesh contact revision rejected; matching cloth blocked");
                     None
                 } else {
-                    let uniform = upload(
-                        &device,
-                        &[QueryParams {
-                            query_count: 0,
-                            node_count: g.nodes.len() as u32,
-                            triangle_count: (g.indices.len() / 3) as u32,
-                            pad: 0,
-                        }],
-                        BufferUsages::UNIFORM,
-                    );
-                    let nodes = upload(&device, &g.nodes, BufferUsages::STORAGE);
-                    let positions = upload(&device, &g.positions, BufferUsages::STORAGE);
-                    let indices = upload(&device, &g.indices, BufferUsages::STORAGE);
-                    let refs = upload(&device, &g.triangle_refs, BufferUsages::STORAGE);
-                    let group = device.create_bind_group(
-                        "mesh contact geometry",
-                        &cache.get_bind_group_layout(&pipeline.geometry_layout),
-                        &BindGroupEntries::sequential((
-                            uniform.as_entire_binding(),
-                            nodes.as_entire_binding(),
-                            positions.as_entire_binding(),
-                            indices.as_entire_binding(),
-                            refs.as_entire_binding(),
-                        )),
-                    );
-                    Some(Arc::new(GpuGeometry {
-                        _uniform: uniform,
-                        _nodes: nodes,
-                        _positions: positions,
-                        _indices: indices,
-                        _refs: refs,
-                        group,
-                    }))
+                    (|| -> Result<Arc<GpuGeometry>, String> {
+                        let positions = GpuPositions::new(&device, &g.positions)?;
+                        let csr = build_normal_csr(g.positions.len(), &g.indices);
+                        let normal_offsets = upload(&device, &csr.offsets, BufferUsages::STORAGE);
+                        let normal_pairs = upload(&device, &csr.pairs, BufferUsages::STORAGE);
+                        let uniform = upload(
+                            &device,
+                            &[QueryParams {
+                                query_count: 0,
+                                node_count: g.nodes.len() as u32,
+                                triangle_count: (g.indices.len() / 3) as u32,
+                                pad: 0,
+                            }],
+                            BufferUsages::UNIFORM,
+                        );
+                        let nodes = upload(&device, &g.nodes, BufferUsages::STORAGE);
+                        let indices = upload(&device, &g.indices, BufferUsages::STORAGE);
+                        let refs = upload(&device, &g.triangle_refs, BufferUsages::STORAGE);
+                        let group = device.create_bind_group(
+                            "mesh contact geometry",
+                            &cache.get_bind_group_layout(&pipeline.geometry_layout),
+                            &BindGroupEntries::sequential((
+                                uniform.as_entire_binding(),
+                                nodes.as_entire_binding(),
+                                positions.current().as_entire_binding(),
+                                indices.as_entire_binding(),
+                                refs.as_entire_binding(),
+                                positions.previous().as_entire_binding(),
+                            )),
+                        );
+                        Ok(Arc::new(GpuGeometry {
+                            _uniform: uniform,
+                            _nodes: nodes,
+                            positions,
+                            _indices: indices,
+                            _refs: refs,
+                            normal_offsets,
+                            normal_pairs,
+                            group,
+                        }))
+                    })()
+                    .map_err(|error| {
+                        error!(?entity, %error, "mesh contact positions rejected; matching cloth blocked");
+                    })
+                    .ok()
                 }
             }
             SourceState::Rejected(error) => {
@@ -373,11 +524,26 @@ fn prepare_contacts(
             }
             SourceState::Waiting => None,
         };
+        let same_revision = old.as_ref().filter(|old| {
+            old.snapshot.ticks[0] == snapshot.ticks[0] && old.snapshot.ticks[5] == snapshot.ticks[5]
+        });
         contacts.entries.insert(
             entity,
             GpuEntry {
                 snapshot: snapshot.clone(),
                 geometry,
+                last: same_revision.and_then(|old| old.last),
+                reset_epoch: same_revision.and_then(|old| old.reset_epoch),
+                // New buffers are at rest; changed motion on reused buffers needs reset.
+                bounds_current: same_revision.map_or_else(
+                    || {
+                        !old.as_ref().is_some_and(|old| {
+                            matches!((&old.snapshot.state, &snapshot.state),
+                                (SourceState::Ready(a), SourceState::Ready(b)) if Arc::ptr_eq(a, b))
+                        })
+                    },
+                    |old| old.bounds_current,
+                ),
             },
         );
     }
@@ -429,6 +595,198 @@ fn validate_cloth(count: u32, buffers: [&Buffer; 3], limits: &wgpu::Limits) -> b
 }
 
 impl StaticMeshContacts {
+    /// Call after all geometry ticks, including paused/reset frames, before camera/shadow passes.
+    /// Reads the same current positions used by contacts; never advances time or reads back.
+    pub(super) fn record_outputs(
+        &self,
+        context: &mut RenderContext,
+        allocator: &MeshAllocator,
+        render_meshes: &RenderAssets<RenderMesh>,
+        cache: &PipelineCache,
+        output: &OutputPipeline,
+        queue: &RenderQueue,
+    ) {
+        let Some(pipeline) = cache.get_compute_pipeline(output.pipeline) else {
+            return;
+        };
+        for id in &self.order {
+            let entry = &self.entries[id];
+            if entry.snapshot.motion == ColliderMotion::default() {
+                continue;
+            }
+            let Some(geometry) = &entry.geometry else {
+                continue;
+            };
+            let Some(target) = &entry.snapshot.output_mesh else {
+                continue;
+            };
+            let Some(mesh) = render_meshes.get(target.id()) else {
+                continue;
+            };
+            let count = geometry.positions.count();
+            let Some(layout) = position_layout(mesh, count, true) else {
+                continue;
+            };
+            let Some(slice) = allocator.mesh_vertex_slice(&target.id()) else {
+                continue;
+            };
+            let limits = context.render_device().limits();
+            if !slice.buffer.usage().contains(BufferUsages::STORAGE)
+                || slice.buffer.size() > limits.max_buffer_size
+                || slice.buffer.size() > u64::from(limits.max_storage_buffer_binding_size)
+                || count.div_ceil(256) > limits.max_compute_workgroups_per_dimension
+                || !entry.snapshot.world_to_local.is_finite()
+            {
+                continue;
+            }
+            let Some(mut range) = OutputRange::checked(
+                slice.range.clone(),
+                0,
+                count,
+                count,
+                slice.buffer.size(),
+                layout,
+            ) else {
+                continue;
+            };
+            range.world_to_local = entry.snapshot.world_to_local.to_cols_array_2d();
+            let uniform = upload(
+                context.render_device(),
+                &[range],
+                BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            );
+            queue.write_buffer(&uniform, 0, bytemuck::bytes_of(&range));
+            let group = context.render_device().create_bind_group(
+                "collider mesh output",
+                &cache.get_bind_group_layout(&output.layout),
+                &BindGroupEntries::sequential((
+                    uniform.as_entire_binding(),
+                    geometry.positions.current().as_entire_binding(),
+                    slice.buffer.as_entire_binding(),
+                    geometry.normal_offsets.as_entire_binding(),
+                    geometry.normal_pairs.as_entire_binding(),
+                )),
+            );
+            let mut pass = context
+                .command_encoder()
+                .begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("collider mesh output"),
+                    timestamp_writes: None,
+                });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &group, &[]);
+            pass.dispatch_workgroups(count.div_ceil(256), 1, 1);
+        }
+    }
+
+    /// Call even while paused, before batching. Revisions clear the epoch marker.
+    /// Restores both buffers in place; repeated calls in one epoch do no GPU work.
+    /// False means required geometry/pipeline is unavailable; retry without ticking.
+    pub(super) fn reset_geometry(
+        &mut self,
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        cache: &PipelineCache,
+        pipeline: &PositionPipeline,
+        epoch: u64,
+    ) -> bool {
+        let mut ready = true;
+        for entry in self.entries.values_mut() {
+            if entry.reset_epoch == Some(epoch) {
+                continue;
+            }
+            let Some(geometry) = &entry.geometry else {
+                ready = false;
+                continue;
+            };
+            let needs_update = entry.snapshot.motion != ColliderMotion::default()
+                || !entry.bounds_current
+                || entry.last.is_some_and(|last| last.index != 0);
+            if needs_update
+                && !geometry.positions.update(
+                    device,
+                    queue,
+                    cache,
+                    pipeline,
+                    ColliderMotion::default(),
+                    Vec3::ZERO,
+                    0.0,
+                    0.0,
+                )
+            {
+                ready = false;
+                continue;
+            }
+            entry.last = None;
+            entry.reset_epoch = Some(epoch);
+            // Step 06 nodes are still the immutable rest BVH.
+            entry.bounds_current = true;
+        }
+        ready
+    }
+
+    /// Submit every matching moving collider before queries, independently of
+    /// prepare_batches' stale-bounds gate. Identical stamps are successful no-ops;
+    /// older indices, changed dt, and epochs not reset by reset_geometry fail.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn advance_group(
+        &mut self,
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        cache: &PipelineCache,
+        pipeline: &PositionPipeline,
+        group: u32,
+        stamp: GeometryTick,
+    ) -> bool {
+        let Some((time, previous_time)) = stamp.times() else {
+            return false;
+        };
+        if self.entries.values().any(|entry| {
+            entry.snapshot.group == group
+                && (entry.geometry.is_none()
+                    || (entry.snapshot.motion != ColliderMotion::default()
+                        && (entry.reset_epoch != Some(stamp.epoch)
+                            || entry.last.is_some_and(|last| {
+                                last != stamp
+                                    && (last.epoch != stamp.epoch
+                                        || last.index >= stamp.index
+                                        || last.dt != stamp.dt)
+                            }))))
+        }) {
+            return false;
+        }
+        for id in &self.order {
+            let entry = self.entries.get_mut(id).expect("ordered collider");
+            if entry.snapshot.group != group
+                || entry.snapshot.motion == ColliderMotion::default()
+                || entry.last == Some(stamp)
+            {
+                continue;
+            }
+            let SourceState::Ready(source) = &entry.snapshot.state else {
+                return false;
+            };
+            let Some(geometry) = &entry.geometry else {
+                return false;
+            };
+            if !geometry.positions.update(
+                device,
+                queue,
+                cache,
+                pipeline,
+                entry.snapshot.motion,
+                source.pivot,
+                time,
+                previous_time,
+            ) {
+                return false;
+            }
+            entry.last = Some(stamp);
+            entry.bounds_current = stamp.index == 0;
+        }
+        true
+    }
+
     /// None means do not consume a tick. Empty Some means no matching colliders.
     /// Buffers are vec4 predicted/current positions and scalar inverse masses.
     /// Preparation is CPU upload/binding work, not measured GPU contact time.
@@ -440,6 +798,7 @@ impl StaticMeshContacts {
         cache: &PipelineCache,
         pipeline: &ContactPipeline,
         group: u32,
+        substeps: u32,
         solver_count: u32,
         predicted: &Buffer,
         old: &Buffer,
@@ -456,7 +815,12 @@ impl StaticMeshContacts {
         if matching.is_empty() {
             return Some(Vec::new());
         }
-        if matching.iter().any(|entry| entry.geometry.is_none())
+        // Step 07 must refit before enabling moving contact queries.
+        if matching.iter().any(|entry| {
+            entry.geometry.is_none()
+                || !entry.bounds_current
+                || entry.snapshot.motion != ColliderMotion::default()
+        }) || substeps == 0
             || !thickness.is_finite()
             || thickness < 0.0
             || !friction.is_finite()
@@ -475,6 +839,8 @@ impl StaticMeshContacts {
                     two_sided: u32::from(entry.snapshot.surface.two_sided),
                     thickness,
                     friction,
+                    motion_fraction: 1.0 / substeps as f32,
+                    pad: [0; 3],
                 }],
                 BufferUsages::UNIFORM,
             );
@@ -680,6 +1046,175 @@ mod tests {
         assert!(app.world().resource::<Snapshots>().0.is_empty());
     }
 
+    #[test]
+    fn motion_revisions_validate_and_preserve_prepared_geometry() {
+        let mut app = App::new();
+        app.add_plugins(MeshContactPlugin);
+        let MeshColliderPreparation::Ready(mut prepared) = preparation() else {
+            panic!("expected ready preparation")
+        };
+        let pivot = Vec3::new(3.0, -2.0, 1.0);
+        prepared.initial_transform = Mat4::from_translation(pivot);
+        let entity = app
+            .world_mut()
+            .spawn((
+                ClothMeshCollider,
+                Mesh3d::default(),
+                MeshColliderPreparation::Ready(prepared),
+            ))
+            .id();
+        app.update();
+        let first = snapshot(&app, entity);
+        assert_eq!(first.motion, ColliderMotion::default());
+        assert_eq!(geometry(&first).pivot, pivot);
+        assert_eq!(first.world_to_local, Mat4::from_translation(-pivot));
+        let motion = ColliderMotion {
+            linear_velocity: Vec3::X,
+            ..default()
+        };
+        app.world_mut().entity_mut(entity).insert(motion);
+        app.update();
+        let moving = snapshot(&app, entity);
+        assert_eq!(moving.motion, motion);
+        assert_ne!(moving.ticks[5], first.ticks[5]);
+        assert!(Arc::ptr_eq(geometry(&first), geometry(&moving)));
+        app.update();
+        assert!(Arc::ptr_eq(&moving, &snapshot(&app, entity)));
+        app.world_mut()
+            .entity_mut(entity)
+            .remove::<ColliderMotion>();
+        app.update();
+        let stopped = snapshot(&app, entity);
+        assert_eq!(stopped.motion, ColliderMotion::default());
+        assert!(Arc::ptr_eq(geometry(&first), geometry(&stopped)));
+        app.world_mut().entity_mut(entity).insert(ColliderMotion {
+            deform_frequency: f32::NAN,
+            ..default()
+        });
+        app.update();
+        assert!(matches!(
+            snapshot(&app, entity).state,
+            SourceState::Rejected(_)
+        ));
+        app.world_mut()
+            .entity_mut(entity)
+            .remove::<ColliderMotion>();
+        app.update();
+        assert!(matches!(
+            snapshot(&app, entity).state,
+            SourceState::Ready(_)
+        ));
+    }
+
+    #[test]
+    fn collider_outputs_are_isolated_stable_and_restore_source() {
+        use bevy::{asset::RenderAssetUsages, mesh::PrimitiveTopology};
+
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .add_plugins(MeshContactPlugin);
+        let source = app.world_mut().resource_mut::<Assets<Mesh>>().add(
+            Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::default(),
+            )
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0_f32; 3]; 3])
+            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0_f32, 0.0, 1.0]; 3])
+            .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0_f32; 4]; 3]),
+        );
+        let motion = ColliderMotion {
+            linear_velocity: Vec3::X,
+            ..default()
+        };
+        let a = app
+            .world_mut()
+            .spawn((
+                ClothMeshCollider,
+                Mesh3d(source.clone()),
+                motion,
+                preparation(),
+            ))
+            .id();
+        let b = app
+            .world_mut()
+            .spawn((
+                ClothMeshCollider,
+                Mesh3d(source.clone()),
+                motion,
+                preparation(),
+                NoFrustumCulling,
+            ))
+            .id();
+        app.update();
+        let output_a = app.world().get::<Mesh3d>(a).unwrap().0.clone();
+        let output_b = app.world().get::<Mesh3d>(b).unwrap().0.clone();
+        assert_ne!(output_a, source);
+        assert_ne!(output_b, source);
+        assert_ne!(output_a, output_b);
+        assert_eq!(snapshot(&app, a).output_mesh.as_ref(), Some(&output_a));
+        {
+            let meshes = app.world().resource::<Assets<Mesh>>();
+            assert!(
+                meshes
+                    .get(&source)
+                    .unwrap()
+                    .attribute(Mesh::ATTRIBUTE_UV_0)
+                    .is_none()
+            );
+            for output in [&output_a, &output_b] {
+                let mesh = meshes.get(output).unwrap();
+                assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_some());
+                assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
+            }
+        }
+        app.world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .get_mut(&output_a)
+            .unwrap()
+            .insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[4.0_f32; 3]; 3]);
+        {
+            let meshes = app.world().resource::<Assets<Mesh>>();
+            assert_eq!(
+                meshes
+                    .get(&source)
+                    .unwrap()
+                    .attribute(Mesh::ATTRIBUTE_POSITION),
+                meshes
+                    .get(&output_b)
+                    .unwrap()
+                    .attribute(Mesh::ATTRIBUTE_POSITION)
+            );
+            assert_ne!(
+                meshes
+                    .get(&source)
+                    .unwrap()
+                    .attribute(Mesh::ATTRIBUTE_POSITION),
+                meshes
+                    .get(&output_a)
+                    .unwrap()
+                    .attribute(Mesh::ATTRIBUTE_POSITION)
+            );
+        }
+        let first = snapshot(&app, a);
+        app.update();
+        assert!(Arc::ptr_eq(&first, &snapshot(&app, a)));
+        assert_eq!(app.world().get::<Mesh3d>(a).unwrap().0, output_a);
+        app.world_mut().entity_mut(a).remove::<ColliderMotion>();
+        app.world_mut().entity_mut(b).remove::<ClothMeshCollider>();
+        app.update();
+        assert_eq!(app.world().get::<Mesh3d>(a).unwrap().0, source);
+        assert_eq!(app.world().get::<Mesh3d>(b).unwrap().0, source);
+        assert!(app.world().get::<NoFrustumCulling>(a).is_none());
+        assert!(app.world().get::<NoFrustumCulling>(b).is_some());
+        assert!(app.world().resource::<ColliderOutputs>().0.is_empty());
+        app.world_mut().entity_mut(a).insert(motion);
+        app.update();
+        app.world_mut().entity_mut(a).remove::<Mesh3d>();
+        app.update();
+        assert!(app.world().resource::<ColliderOutputs>().0.is_empty());
+        assert!(app.world().get::<NoFrustumCulling>(a).is_none());
+    }
+
     fn correction(z: f32, old: Vec3, two_sided: bool, friction: f32) -> Vec3 {
         let p = Vec3::new(0.2, 0.2, z);
         contact_correction(
@@ -807,16 +1342,18 @@ mod tests {
         );
         assert_eq!(
             (size_of::<ContactParams>(), align_of::<ContactParams>()),
-            (16, 16)
+            (32, 16)
         );
         assert_eq!(
             [
                 offset_of!(ContactParams, count),
                 offset_of!(ContactParams, two_sided),
                 offset_of!(ContactParams, thickness),
-                offset_of!(ContactParams, friction)
+                offset_of!(ContactParams, friction),
+                offset_of!(ContactParams, motion_fraction),
+                offset_of!(ContactParams, pad)
             ],
-            [0, 4, 8, 12]
+            [0, 4, 8, 12, 16, 20]
         );
         let mut app = App::new();
         app.add_plugins(MeshContactPlugin);
@@ -831,7 +1368,15 @@ mod tests {
         assert!(validate_geometry(g, &limits).is_ok());
         for changed in [
             wgpu::Limits {
-                max_storage_buffers_per_shader_stage: 6,
+                max_storage_buffers_per_shader_stage: 7,
+                ..limits.clone()
+            },
+            wgpu::Limits {
+                max_bindings_per_bind_group: 5,
+                ..limits.clone()
+            },
+            wgpu::Limits {
+                max_uniform_buffer_binding_size: 16,
                 ..limits.clone()
             },
             wgpu::Limits {
@@ -857,6 +1402,7 @@ mod tests {
             nodes: g.nodes.clone(),
             triangle_refs: g.triangle_refs.clone(),
             max_depth: 127,
+            pivot: g.pivot,
         };
         assert!(validate_geometry(&deep, &limits).is_err());
         deep.max_depth = 126;
@@ -869,7 +1415,11 @@ pub(crate) struct MeshContactPlugin;
 impl Plugin for MeshContactPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Snapshots>()
-            .add_systems(Last, collect_snapshots);
+            .init_resource::<ColliderOutputs>()
+            .add_systems(Last, (manage_outputs, collect_snapshots).chain());
+        if app.get_sub_app(RenderApp).is_some() {
+            embedded_asset!(app, "geometry.wesl");
+        }
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render.init_resource::<StaticMeshContacts>().add_systems(
                 Render,
@@ -881,7 +1431,9 @@ impl Plugin for MeshContactPlugin {
 
     fn finish(&self, app: &mut App) {
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
-            render.init_resource::<ContactPipeline>();
+            render
+                .init_resource::<ContactPipeline>()
+                .init_resource::<PositionPipeline>();
         }
     }
 }
