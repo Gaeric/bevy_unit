@@ -5,6 +5,7 @@ use bevy::{
     asset::RenderAssetUsages,
     gltf::{GltfLoaderSettings, convert_coordinates::GltfConvertCoordinates},
     prelude::*,
+    transform::TransformSystems,
     world_serialization::WorldInstanceReady,
 };
 use bevy_cloth::{
@@ -13,10 +14,16 @@ use bevy_cloth::{
 };
 use std::path::Path;
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, Debug)]
 enum AssetRole {
     Cloth,
     Sphere,
+}
+
+#[derive(Component)]
+struct PendingRoleLog {
+    root: Entity,
+    role: AssetRole,
 }
 
 fn main() {
@@ -43,6 +50,10 @@ fn main() {
         .add_observer(mark_instance_roles)
         .add_systems(Startup, setup)
         .add_systems(Update, draw_preparation)
+        .add_systems(
+            PostUpdate,
+            log_instance_roles.after(TransformSystems::Propagate),
+        )
         .run();
 }
 
@@ -63,7 +74,13 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                 });
             })
             .load(GltfAssetLabel::Scene(0).from_asset(path));
-        commands.spawn((WorldAssetRoot(handle), role));
+        for x in [0.0, 3.0] {
+            commands.spawn((
+                WorldAssetRoot(handle.clone()),
+                role,
+                Transform::from_xyz(x, 0.0, 0.0),
+            ));
+        }
     }
 
     let mut orbit = OrbitCamera::source();
@@ -80,22 +97,39 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     ));
 }
 
-/// Names are an application choice, scoped to this particular instance's descendants.
+/// Each asset root declares its role; only mesh descendants of that root are selected.
+/// Shared handles/names in the translated instance must not select another root's meshes.
+fn instance_meshes(
+    root: Entity,
+    children: &Query<&Children>,
+    meshes: &Query<&Mesh3d>,
+) -> Vec<Entity> {
+    children
+        .iter_descendants(root)
+        .filter(|&entity| meshes.contains(entity))
+        .collect()
+}
+
 fn mark_instance_roles(
     ready: On<WorldInstanceReady>,
     mut commands: Commands,
-    roots: Query<&AssetRole>,
+    roles: Query<&AssetRole>,
     children: Query<&Children>,
     meshes: Res<Assets<Mesh>>,
-    mesh_entities: Query<(Entity, &Mesh3d)>,
+    mesh_entities: Query<&Mesh3d>,
 ) {
-    let Ok(role) = roots.get(ready.entity) else {
+    let Ok(role) = roles.get(ready.entity) else {
         return;
     };
 
-    let descendants = children.iter_descendants(ready.entity);
-
-    for (entity, mesh_handle) in mesh_entities.iter_many(descendants).matched() {
+    for entity in instance_meshes(ready.entity, &children, &mesh_entities) {
+        let Ok(mesh_handle) = mesh_entities.get(entity) else {
+            continue;
+        };
+        commands.entity(entity).insert(PendingRoleLog {
+            root: ready.entity,
+            role: *role,
+        });
         match role {
             AssetRole::Cloth => {
                 let Some(mesh) = meshes.get(&mesh_handle.0) else {
@@ -121,6 +155,29 @@ fn mark_instance_roles(
     }
 }
 
+/// Run once per primitive, after its full scene hierarchy has propagated transforms.
+fn log_instance_roles(
+    mut commands: Commands,
+    meshes: Res<Assets<Mesh>>,
+    pending: Query<(Entity, &PendingRoleLog, &Mesh3d, &GlobalTransform)>,
+) {
+    for (entity, selection, handle, transform) in &pending {
+        let Some(mesh) = meshes.get(&handle.0) else {
+            continue;
+        };
+        info!(
+            root = ?selection.root,
+            ?entity,
+            role = ?selection.role,
+            vertices = mesh.count_vertices(),
+            indices = mesh.indices().map_or(0, |indices| indices.len()),
+            global_transform = ?transform,
+            "GLB role selected"
+        );
+        commands.entity(entity).remove::<PendingRoleLog>();
+    }
+}
+
 fn find_cloth_pins(mesh: &Mesh) -> Result<Vec<u32>, String> {
     let positions = mesh
         .attribute(Mesh::ATTRIBUTE_POSITION)
@@ -143,6 +200,63 @@ fn find_cloth_pins(mesh: &Mesh) -> Result<Vec<u32>, String> {
         pins.push(matches[0]);
     }
     Ok(pins)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::{ecs::system::SystemState, mesh::PrimitiveTopology};
+
+    fn cloth_mesh(positions: Vec<[f32; 3]>) -> Mesh {
+        Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD,
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    }
+
+    #[test]
+    fn pin_finder_selects_corners_in_slot_order() {
+        let mesh = cloth_mesh(vec![[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [-1.0, 0.0, 0.0]]);
+        assert_eq!(find_cloth_pins(&mesh).unwrap(), vec![2, 0]);
+    }
+
+    #[test]
+    fn pin_finder_rejects_missing_corner() {
+        let mesh = cloth_mesh(vec![[-1.0, 0.0, 0.0]]);
+        assert!(find_cloth_pins(&mesh).unwrap_err().contains("got 0"));
+    }
+
+    #[test]
+    fn pin_finder_rejects_duplicate_corner() {
+        let mesh = cloth_mesh(vec![[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]);
+        assert!(find_cloth_pins(&mesh).unwrap_err().contains("got 2"));
+    }
+
+    #[test]
+    fn role_selection_stays_within_each_root() {
+        let mut world = World::new();
+        let root_a = world.spawn(AssetRole::Cloth).id();
+        let root_b = world.spawn(AssetRole::Cloth).id();
+        let mesh = Mesh3d::default();
+        let primitive_a = world.spawn(mesh.clone()).id();
+        let primitive_b = world.spawn(mesh.clone()).id();
+        let _unrelated = world.spawn(mesh).id();
+        let intermediate = world.spawn_empty().add_child(primitive_a).id();
+        world.entity_mut(root_a).add_child(intermediate);
+        world.entity_mut(root_b).add_child(primitive_b);
+
+        let mut queries = SystemState::<(Query<&Children>, Query<&Mesh3d>)>::new(&mut world);
+        let (children, meshes) = queries.get(&world);
+        assert_eq!(
+            instance_meshes(root_a, &children, &meshes),
+            vec![primitive_a]
+        );
+        assert_eq!(
+            instance_meshes(root_b, &children, &meshes),
+            vec![primitive_b]
+        );
+    }
 }
 
 fn draw_preparation(mut gizmos: Gizmos, cloths: Query<&ClothPreparation>) {

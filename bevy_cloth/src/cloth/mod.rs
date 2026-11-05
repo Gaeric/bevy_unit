@@ -272,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn asset_edits_reprepare_only_matching_instances_and_recover_after_removal() {
+    fn in_place_asset_edits_wait_for_explicit_input_change() {
         let mut app = test_app();
         let shared = app
             .world_mut()
@@ -302,33 +302,22 @@ mod tests {
                 vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             );
         app.update();
-        for entity in [first, second] {
-            assert_eq!(prepared(&app, entity).positions[1], Vec3::X * 2.0);
-        }
-        assert_ne!(preparation_tick(&app, first), first_tick);
-        assert_eq!(preparation_tick(&app, unrelated), unrelated_tick);
-        let edited_tick = preparation_tick(&app, first);
-        app.update();
-        assert_eq!(preparation_tick(&app, first), edited_tick);
-
-        app.world_mut()
-            .resource_mut::<Assets<Mesh>>()
-            .remove(shared.id());
-        app.update();
-        for entity in [first, second] {
-            assert!(matches!(
-                app.world().get::<ClothPreparation>(entity),
-                Some(ClothPreparation::WaitingForMesh)
-            ));
-        }
-        app.world_mut()
-            .resource_mut::<Assets<Mesh>>()
-            .insert(shared.id(), triangle())
-            .unwrap();
-        app.update();
+        // Source asset events intentionally do not rebuild a running simulation.
         for entity in [first, second] {
             assert_eq!(prepared(&app, entity).positions[1], Vec3::X);
         }
+        assert_eq!(preparation_tick(&app, first), first_tick);
+        assert_eq!(preparation_tick(&app, unrelated), unrelated_tick);
+
+        // An explicit application input change opts this instance into a new initial state.
+        app.world_mut()
+            .entity_mut(first)
+            .insert(ClothSim::default());
+        app.update();
+        assert_eq!(prepared(&app, first).positions[1], Vec3::X * 2.0);
+        assert_ne!(preparation_tick(&app, first), first_tick);
+        assert_eq!(prepared(&app, second).positions[1], Vec3::X);
+        assert_eq!(preparation_tick(&app, unrelated), unrelated_tick);
     }
 
     #[test]
