@@ -1,23 +1,17 @@
-#+title: bevy_cloth — 高性能 GPU 布料模拟
+#+title: bevy_cloth
 #+startup: content
 #+author: Gaeric
 #+HTML_HEAD: <link href="./worg.css" rel="stylesheet" type="text/css">
 #+HTML_HEAD: <link href="/static/css/worg.css" rel="stylesheet" type="text/css">
 #+OPTIONS: ^:{}
-* 项目目标
-  实现基于 Bevy compute shader 的高性能 GPU 布料模拟，同时让项目所有者掌握其理论，
-  能够解释、验证和修改实现。
+* Intro
+  本项目主要目标是实现高性能bevy cloth simulation。
 
-  布料模拟是目的，XPBD 是当前的主要实现算法；本项目不以建设通用 XPBD 求解框架为目标。
-  算法、数据结构和优化围绕布料的变形、碰撞及性能需求选择，不为了通用性扩展无关功能。
+  当前采用基于compute shader实现的jaboci xpbd求解器。
 
-  GPU 求解是主线，不是完成 CPU 演示之后的可选优化。CPU 实现用于小规模参考和诊断；
-  CPU/GPU 结果接近，不等于两者都正确，还需要能独立判断对错的小实验。
-
-  Velvet 是算法和工程参考，不再要求逐项复刻。保留或改变其中的设计，都要说明它解决什么问题。
-  放弃其特殊行为之前，要先讲清原理、修改方向，并用实验验证改善。
-
-* 怎样使用这些文档
+  本项目早期参考velvet进行实现，过程中使用ai进行辅助。
+* How to Use
+* Record for AI
   - 本文件：项目入口、代码现状和运行方式。
   - [[file:plan.org][plan.org]]：协作约定、当前问题和下一步；不把所有未来功能都展开成任务。
   - [[file:m6-gpu-notes.org][m6-gpu-notes.org]]：Velvet GPU 实现的参考笔记，不是必须照搬的规格。
