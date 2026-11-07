@@ -1,6 +1,8 @@
 //! New GPU XPBD implementation, independent of the historical solvers.
 //! Currently input scaffolding only: no preparation, GPU dispatch or mesh updates.
 
+mod layout;
+
 use bevy::prelude::*;
 
 /// Entry point for the new solver. Currently only reports scaffold startup.
@@ -18,6 +20,8 @@ impl Plugin for XpbdPlugin {
 /// These inputs are not consumed by a solver yet.
 #[derive(Component, Debug)]
 pub struct StretchCloth {
+    /// Mass of each free particle
+    pub particle_mass: f32,
     /// XPBD distance-constraint compliance, in m/N; zero means inextensible.
     pub stretch_compliance: f32,
     pub attachments: Vec<Attachment>,

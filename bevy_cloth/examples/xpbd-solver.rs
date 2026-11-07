@@ -54,6 +54,7 @@ fn setup(
         })),
         Transform::IDENTITY,
         StretchCloth {
+            particle_mass: 1.0,
             stretch_compliance: 0.0,
             attachments,
         },
