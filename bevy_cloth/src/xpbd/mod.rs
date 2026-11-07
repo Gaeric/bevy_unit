@@ -2,6 +2,7 @@
 //! Currently input scaffolding only: no preparation, GPU dispatch or mesh updates.
 
 mod layout;
+mod prepare;
 
 use bevy::prelude::*;
 
