@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use super::{
     StretchCloth,
-    layout::{FixedAttachment, Particle, PreparedCloth, Stretch},
+    layout::{ConstraintGroup, FixedAttachment, Particle, PreparedCloth, Stretch},
 };
 
 /// Validate all inputs before preparing particles and constraints.
@@ -86,6 +86,63 @@ fn validate_inputs<'a>(
     Ok((positions, indices))
 }
 
+/// Color stretch constraints and arrange them into contiguous groups.
+///
+/// Constraints within one group share no particles.
+/// Particle indices must already be validated.
+fn color_stretch(
+    particle_count: usize,
+    stretch: Vec<Stretch>,
+) -> Result<(Vec<Stretch>, Vec<ConstraintGroup>), String> {
+    // Group ranges use u32 indices.
+    u32::try_from(stretch.len()).map_err(|_| "stretch count exceeds u32")?;
+
+    let constraint_count = stretch.len();
+
+    // used_colors[particle] records colors already touching this particle.
+    let mut used_colors: Vec<Vec<usize>> = vec![Vec::new(); particle_count];
+
+    // buckets[color] contains all constraints assigned to this color.
+    let mut buckets: Vec<Vec<Stretch>> = Vec::new();
+
+    for constraint in stretch {
+        let [a, b] = constraint.particles.map(|index| index as usize);
+
+        // Find the first color unused by both particles.
+        let mut color = 0;
+
+        while used_colors[a].contains(&color) || used_colors[b].contains(&color) {
+            color += 1;
+        }
+
+        // Record this color on both particles.
+        used_colors[a].push(color);
+        used_colors[b].push(color);
+
+        // Create a bucket when this is a new color.
+        if color == buckets.len() {
+            buckets.push(Vec::new());
+        }
+
+        buckets[color].push(constraint);
+    }
+
+    // Join the buckets into one array and record each group's range.
+    let mut reordered = Vec::with_capacity(constraint_count);
+    let mut groups = Vec::with_capacity(buckets.len());
+
+    for bucket in buckets {
+        let start = reordered.len() as u32;
+        let count = bucket.len() as u32;
+
+        reordered.extend(bucket);
+
+        groups.push(ConstraintGroup { start, count });
+    }
+
+    Ok((reordered, groups))
+}
+
 /// Prepare particles and stretch constraints from validated inputs.
 pub(super) fn prepare_mesh(
     mesh: &Mesh,
@@ -135,6 +192,9 @@ pub(super) fn prepare_mesh(
         })
         .collect();
 
+    // Reorder constraints by color and record each group's range.
+    let (stretch, groups) = color_stretch(particles.len(), stretch)?;
+
     // Fixed targets affect the initial state, not the rest geometry.
     let mut attachments = Vec::with_capacity(config.attachments.len());
 
@@ -156,6 +216,6 @@ pub(super) fn prepare_mesh(
         velocities,
         stretch,
         attachments,
-        groups: Vec::new(),
+        groups,
     })
 }
