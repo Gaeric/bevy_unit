@@ -1,5 +1,28 @@
-//! CPU preparation output and GPU storage-buffer layouts.
-//! No solver, coloring or rendering logic.
+//! CPU preparation output and GPU buffer data layouts.
+//!
+//! GPU storage arrays (all positions and velocities are world-space):
+//! - particles: `array<Particle>`, 16-byte stride; position is updated in place,
+//!   inverse mass remains unchanged during solving.
+//! - velocities: `array<vec4<f32>>`, 16-byte stride; xyz is velocity, w is zero.
+//! - previous_positions: `array<vec4<f32>>`, 16-byte stride; xyz is the position
+//!   saved before prediction in each substep, w is zero. Used to update velocity.
+//! - stretch: `array<Stretch>`, 16-byte stride; read-only, reordered by color.
+//! - stretch_lambdas: `array<f32>`, 4-byte stride; one accumulated XPBD lambda per
+//!   reordered stretch constraint. Clear at each substep start, accumulate across
+//!   constraint iterations within that substep. No cross-substep warm starting.
+//! - attachments: `array<FixedAttachment>`, 16-byte stride; read-only fixed targets.
+//!
+//! Particle, velocity and previous-position arrays share particle indices.
+//! Stretch and lambda arrays share reordered constraint indices.
+//! Previous positions and lambdas are GPU runtime state, not CPU mesh inputs.
+//! Initialize previous positions from the prepared particle positions and lambdas
+//! to zero when creating an instance. Fixed particles keep their target positions
+//! and zero velocities; no per-iteration attachment pass is required.
+//!
+//! `StepParams` and `GroupParams` are uniform-buffer payloads. Their byte sizes do
+//! not specify dynamic-offset alignment; parameter-block offsets must satisfy the
+//! device's minimum uniform-buffer offset alignment. Give distinct queued parameter
+//! values separate ranges instead of repeatedly overwriting the same range.
 
 use bytemuck::{Pod, Zeroable};
 
@@ -53,9 +76,52 @@ pub(super) struct FixedAttachment {
     pub particle: u32,
 }
 
+/// Parameters for one simulation substep. Uniform payload size: 32 bytes.
+///
+/// WGSL equivalent:
+/// struct StepParams {
+///     gravity: vec4<f32>,
+///     dt: f32,
+///     particle_count: u32,
+///     stretch_count: u32,
+///     attachment_count: u32,
+/// }
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub(super) struct StepParams {
+    /// World-space acceleration in xyz; w is reserved and set to zero.
+    pub gravity: [f32; 4],
+    /// Positive, finite substep duration in seconds, not the full tick duration.
+    pub dt: f32,
+    pub particle_count: u32,
+    pub stretch_count: u32,
+    pub attachment_count: u32,
+}
+
+/// Constraint range for one color dispatch. Uniform payload size: 16 bytes.
+///
+/// WGSL equivalent:
+/// struct GroupParams {
+///     start: u32,
+///     count: u32,
+///     padding: vec2<u32>,
+/// }
+///
+/// A thread with local constraint index i handles stretch[start + i], only if
+/// i < count. The same index selects its accumulated stretch lambda.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub(super) struct GroupParams {
+    pub start: u32,
+    pub count: u32,
+    /// Explicit padding, initialized to zero.
+    pub padding: [u32; 2],
+}
+
 /// A color group's contiguous range in the reordered stretch array.
 ///
 /// Used only by the CPU to record dispatches; not uploaded as GPU storage data.
+/// Each dispatch passes its range through a separate `GroupParams` payload.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ConstraintGroup {
     pub start: u32,
@@ -66,6 +132,9 @@ pub(super) struct ConstraintGroup {
 ///
 /// Particle indices map one-to-one to source Mesh vertex indices; no welding.
 /// All positions are world-space.
+/// This struct owns CPU vectors; it is not a GPU buffer payload. Upload each
+/// array's element bytes separately and retain `groups` on the CPU for dispatch.
+/// GPU previous-position and lambda buffers are initialized separately.
 #[derive(Debug)]
 pub(super) struct PreparedCloth {
     /// Initial positions and inverse masses.
@@ -105,6 +174,24 @@ mod tests {
         assert_eq!(offset_of!(FixedAttachment, target), 0);
         assert_eq!(offset_of!(FixedAttachment, particle), 12);
 
+        // Velocity and previous-position array elements.
         assert_eq!(size_of::<[f32; 4]>(), 16);
+        // Accumulated stretch lambda array elements.
+        assert_eq!(size_of::<f32>(), 4);
+    }
+
+    #[test]
+    fn uniform_layout_matches_wgsl() {
+        assert_eq!(size_of::<StepParams>(), 32);
+        assert_eq!(offset_of!(StepParams, gravity), 0);
+        assert_eq!(offset_of!(StepParams, dt), 16);
+        assert_eq!(offset_of!(StepParams, particle_count), 20);
+        assert_eq!(offset_of!(StepParams, stretch_count), 24);
+        assert_eq!(offset_of!(StepParams, attachment_count), 28);
+
+        assert_eq!(size_of::<GroupParams>(), 16);
+        assert_eq!(offset_of!(GroupParams, start), 0);
+        assert_eq!(offset_of!(GroupParams, count), 4);
+        assert_eq!(offset_of!(GroupParams, padding), 8);
     }
 }
