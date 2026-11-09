@@ -8,18 +8,27 @@ mod prepare;
 mod tick;
 
 use bevy::{
-    prelude::*, render::extract_resource::ExtractResourcePlugin, transform::TransformSystems,
+    prelude::*,
+    render::{extract_component::ExtractComponentPlugin, extract_resource::ExtractResourcePlugin},
+    transform::TransformSystems,
 };
 
-use crate::xpbd::tick::ClothTicks;
+use self::{
+    layout::{PreparedCloth, StepParams},
+    tick::ClothTicks,
+};
 
 /// Prepares newly added cloths; GPU execution and mesh output are not connected yet.
 pub struct XpbdPlugin;
 
 impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<tick::ClothTicks>()
-            .add_plugins(ExtractResourcePlugin::<ClothTicks>::default())
+        app.init_resource::<ClothTicks>()
+            .add_plugins((
+                ExtractResourcePlugin::<ClothTicks>::default(),
+                ExtractComponentPlugin::<PreparedCloth>::default(),
+                ExtractComponentPlugin::<StepParams>::default(),
+            ))
             .add_systems(FixedUpdate, tick::request_tick)
             .add_systems(
                 PostUpdate,

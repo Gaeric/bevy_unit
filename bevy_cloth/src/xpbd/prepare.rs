@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use super::{
     StretchCloth,
-    layout::{ConstraintGroup, FixedAttachment, Particle, PreparedCloth, Stretch},
+    layout::{ConstraintGroup, FixedAttachment, Particle, PreparedCloth, StepParams, Stretch},
 };
 
 /// Prepare newly added cloths once, after world transforms have propagated.
@@ -13,6 +13,7 @@ use super::{
 pub(super) fn prepare_added_cloths(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
+    time: Res<Time<Fixed>>,
     cloths: Query<(Entity, &Mesh3d, &GlobalTransform, &StretchCloth), Added<StretchCloth>>,
 ) {
     for (entity, mesh_handle, transform, config) in &cloths {
@@ -20,6 +21,13 @@ pub(super) fn prepare_added_cloths(
             .get(&mesh_handle.0)
             .expect("adding StretchCloth requires a loaded Mesh");
         let prepared = prepare_mesh(mesh, transform, config).expect("cloth preparation failed");
+        let step = StepParams {
+            gravity: [0.0, -9.8, 0.0, 0.0],
+            dt: time.timestep().as_secs_f32(),
+            particle_count: prepared.particles.len() as u32,
+            stretch_count: prepared.stretch.len() as u32,
+            attachment_count: prepared.attachments.len() as u32,
+        };
 
         info!(
             ?entity,
@@ -29,7 +37,7 @@ pub(super) fn prepare_added_cloths(
             "XPBD cloth prepared"
         );
 
-        commands.entity(entity).insert(prepared);
+        commands.entity(entity).insert((prepared, step));
     }
 }
 

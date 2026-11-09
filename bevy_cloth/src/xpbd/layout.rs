@@ -24,7 +24,10 @@
 //! device's minimum uniform-buffer offset alignment. Give distinct queued parameter
 //! values separate ranges instead of repeatedly overwriting the same range.
 
-use bevy::prelude::Component;
+use bevy::{
+    prelude::*,
+    render::{RenderApp, extract_component::ExtractComponent},
+};
 use bytemuck::{Pod, Zeroable};
 
 /// A particle's current position and inverse mass.
@@ -88,7 +91,9 @@ pub(super) struct FixedAttachment {
 ///     attachment_count: u32,
 /// }
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+#[derive(Component, Clone, Copy, Debug, Pod, Zeroable, ExtractComponent)]
+#[extract_app(RenderApp)]
+#[extract_component_filter(Added<StepParams>)]
 pub(super) struct StepParams {
     /// World-space acceleration in xyz; w is reserved and set to zero.
     pub gravity: [f32; 4],
@@ -136,7 +141,10 @@ pub(super) struct ConstraintGroup {
 /// This struct owns CPU vectors; it is not a GPU buffer payload. Upload each
 /// array's element bytes separately and retain `groups` on the CPU for dispatch.
 /// GPU previous-position and lambda buffers are initialized separately.
-#[derive(Component, Debug)]
+/// Cloned into Render World only when added, not on subsequent frames.
+#[derive(Component, Clone, Debug, ExtractComponent)]
+#[extract_app(RenderApp)]
+#[extract_component_filter(Added<PreparedCloth>)]
 pub(super) struct PreparedCloth {
     /// Initial positions and inverse masses.
     pub particles: Vec<Particle>,
