@@ -1,14 +1,17 @@
 //! Shared solver layout and binding creation, separate from GPU data ownership.
 
-use bevy::render::{
-    render_resource::{
-        BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
-        BindingResource, BufferBinding, PipelineCache, ShaderStages,
-        binding_types::{
-            storage_buffer_read_only_sized, storage_buffer_sized, uniform_buffer_sized,
+use bevy::{
+    prelude::{Component, Resource},
+    render::{
+        render_resource::{
+            BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
+            BindingResource, BufferBinding, PipelineCache, ShaderStages,
+            binding_types::{
+                storage_buffer_read_only_sized, storage_buffer_sized, uniform_buffer_sized,
+            },
         },
+        renderer::RenderDevice,
     },
-    renderer::RenderDevice,
 };
 use std::{mem::size_of, num::NonZeroU64};
 
@@ -17,7 +20,12 @@ use super::{
     layout::{GroupParams, Particle, StepParams, Stretch},
 };
 
+/// One Mesh instance's binding, kept separate from its GPU data buffers.
+#[derive(Component)]
+pub(super) struct ClothBindGroup(pub BindGroup);
+
 /// One interface shared by prediction, stretch solving and velocity update.
+#[derive(Resource)]
 pub(super) struct XpbdLayout {
     pub layout: BindGroupLayoutDescriptor,
 }

@@ -1,14 +1,18 @@
 //! GPU data buffers for one cloth instance; no binding or dispatch management.
 
-use bevy::render::{
-    render_resource::{Buffer, BufferInitDescriptor, BufferUsages},
-    renderer::RenderDevice,
+use bevy::{
+    prelude::Component,
+    render::{
+        render_resource::{Buffer, BufferInitDescriptor, BufferUsages},
+        renderer::RenderDevice,
+    },
 };
 use std::mem::size_of;
 
 use super::layout::{GroupParams, PreparedCloth, StepParams};
 
 /// Owns only the data buffers uploaded to the GPU.
+#[derive(Component)]
 pub(super) struct GpuCloth {
     pub particles: Buffer,
     pub velocities: Buffer,

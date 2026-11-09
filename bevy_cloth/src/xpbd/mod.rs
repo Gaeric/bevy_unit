@@ -6,10 +6,14 @@ mod gpu;
 mod layout;
 mod prepare;
 mod tick;
+mod upload;
 
 use bevy::{
     prelude::*,
-    render::{extract_component::ExtractComponentPlugin, extract_resource::ExtractResourcePlugin},
+    render::{
+        Render, RenderApp, RenderSystems, extract_component::ExtractComponentPlugin,
+        extract_resource::ExtractResourcePlugin,
+    },
     transform::TransformSystems,
 };
 
@@ -33,6 +37,13 @@ impl Plugin for XpbdPlugin {
             .add_systems(
                 PostUpdate,
                 prepare::prepare_added_cloths.after(TransformSystems::Propagate),
+            );
+
+        app.sub_app_mut(RenderApp)
+            .insert_resource(bindings::XpbdLayout::new())
+            .add_systems(
+                Render,
+                upload::upload_cloths.in_set(RenderSystems::PrepareBindGroups),
             );
     }
 }
