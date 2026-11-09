@@ -8,6 +8,31 @@ use super::{
     layout::{ConstraintGroup, FixedAttachment, Particle, PreparedCloth, Stretch},
 };
 
+/// Prepare newly added cloths once, after world transforms have propagated.
+/// Source meshes must already be loaded and CPU-readable.
+pub(super) fn prepare_added_cloths(
+    mut commands: Commands,
+    meshes: Res<Assets<Mesh>>,
+    cloths: Query<(Entity, &Mesh3d, &GlobalTransform, &StretchCloth), Added<StretchCloth>>,
+) {
+    for (entity, mesh_handle, transform, config) in &cloths {
+        let mesh = meshes
+            .get(&mesh_handle.0)
+            .expect("adding StretchCloth requires a loaded Mesh");
+        let prepared = prepare_mesh(mesh, transform, config).expect("cloth preparation failed");
+
+        info!(
+            ?entity,
+            particles = prepared.particles.len(),
+            stretch = prepared.stretch.len(),
+            colors = prepared.groups.len(),
+            "XPBD cloth prepared"
+        );
+
+        commands.entity(entity).insert(prepared);
+    }
+}
+
 /// Validate all inputs before preparing particles and constraints.
 ///
 /// Returns readable positions and a validated triangle-index array.

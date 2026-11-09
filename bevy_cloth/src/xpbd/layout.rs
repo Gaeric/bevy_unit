@@ -24,6 +24,7 @@
 //! device's minimum uniform-buffer offset alignment. Give distinct queued parameter
 //! values separate ranges instead of repeatedly overwriting the same range.
 
+use bevy::prelude::Component;
 use bytemuck::{Pod, Zeroable};
 
 /// A particle's current position and inverse mass.
@@ -135,7 +136,7 @@ pub(super) struct ConstraintGroup {
 /// This struct owns CPU vectors; it is not a GPU buffer payload. Upload each
 /// array's element bytes separately and retain `groups` on the CPU for dispatch.
 /// GPU previous-position and lambda buffers are initialized separately.
-#[derive(Debug)]
+#[derive(Component, Debug)]
 pub(super) struct PreparedCloth {
     /// Initial positions and inverse masses.
     pub particles: Vec<Particle>,
