@@ -1,6 +1,8 @@
 //! New GPU XPBD implementation, independent of the historical solvers.
-//! Currently input scaffolding only: no preparation, GPU dispatch or mesh updates.
+//! CPU preparation and GPU data/binding.
 
+mod bindings;
+mod gpu;
 mod layout;
 mod prepare;
 
