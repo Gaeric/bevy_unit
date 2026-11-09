@@ -5,18 +5,26 @@ mod bindings;
 mod gpu;
 mod layout;
 mod prepare;
+mod tick;
 
-use bevy::{prelude::*, transform::TransformSystems};
+use bevy::{
+    prelude::*, render::extract_resource::ExtractResourcePlugin, transform::TransformSystems,
+};
+
+use crate::xpbd::tick::ClothTicks;
 
 /// Prepares newly added cloths; GPU execution and mesh output are not connected yet.
 pub struct XpbdPlugin;
 
 impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            PostUpdate,
-            prepare::prepare_added_cloths.after(TransformSystems::Propagate),
-        );
+        app.init_resource::<tick::ClothTicks>()
+            .add_plugins(ExtractResourcePlugin::<ClothTicks>::default())
+            .add_systems(FixedUpdate, tick::request_tick)
+            .add_systems(
+                PostUpdate,
+                prepare::prepare_added_cloths.after(TransformSystems::Propagate),
+            );
     }
 }
 
