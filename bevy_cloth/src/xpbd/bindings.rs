@@ -26,14 +26,14 @@ pub(super) struct ClothBindGroup(pub BindGroup);
 
 /// One interface shared by prediction, stretch solving and velocity update.
 #[derive(Resource)]
-pub(super) struct XpbdLayout {
-    pub layout: BindGroupLayoutDescriptor,
+pub(super) struct ClothBindGroupLayout {
+    pub descriptor: BindGroupLayoutDescriptor,
 }
 
-impl XpbdLayout {
+impl ClothBindGroupLayout {
     pub fn new() -> Self {
         Self {
-            layout: BindGroupLayoutDescriptor::new(
+            descriptor: BindGroupLayoutDescriptor::new(
                 "xpbd solver layout",
                 &BindGroupLayoutEntries::with_indices(
                     ShaderStages::COMPUTE,
@@ -85,7 +85,7 @@ impl XpbdLayout {
     ) -> BindGroup {
         device.create_bind_group(
             "xpbd solver bind group",
-            &cache.get_bind_group_layout(&self.layout),
+            &cache.get_bind_group_layout(&self.descriptor),
             &BindGroupEntries::with_indices((
                 (0, cloth.step_params.as_entire_binding()),
                 (1, cloth.particles.as_entire_binding()),

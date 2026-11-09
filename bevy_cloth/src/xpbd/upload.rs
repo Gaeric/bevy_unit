@@ -6,7 +6,7 @@ use bevy::{
 };
 
 use super::{
-    bindings::{ClothBindGroup, XpbdLayout},
+    bindings::{ClothBindGroup, ClothBindGroupLayout},
     gpu::GpuCloth,
     layout::{PreparedCloth, StepParams},
 };
@@ -15,7 +15,7 @@ pub(super) fn upload_cloths(
     mut commands: Commands,
     device: Res<RenderDevice>,
     cache: Res<PipelineCache>,
-    layout: Res<XpbdLayout>,
+    layout: Res<ClothBindGroupLayout>,
     cloths: Query<(Entity, &PreparedCloth, &StepParams), Added<PreparedCloth>>,
 ) {
     for (entity, prepared, step) in &cloths {

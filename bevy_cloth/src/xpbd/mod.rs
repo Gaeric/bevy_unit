@@ -40,7 +40,7 @@ impl Plugin for XpbdPlugin {
             );
 
         app.sub_app_mut(RenderApp)
-            .insert_resource(bindings::XpbdLayout::new())
+            .insert_resource(bindings::ClothBindGroupLayout::new())
             .add_systems(
                 Render,
                 upload::upload_cloths.in_set(RenderSystems::PrepareBindGroups),
