@@ -9,6 +9,7 @@ use super::{
     bindings::{ClothBindGroup, ClothBindGroupLayout},
     gpu::GpuCloth,
     layout::{PreparedCloth, StepParams},
+    tick::ClothSimulation,
 };
 
 pub(super) fn upload_cloths(
@@ -22,9 +23,11 @@ pub(super) fn upload_cloths(
         let gpu = GpuCloth::new(&device, prepared, step);
         let bind_group = layout.create_bind_group(&device, &cache, &gpu);
 
-        commands
-            .entity(entity)
-            .insert((gpu, ClothBindGroup(bind_group)));
+        commands.entity(entity).insert((
+            gpu,
+            ClothBindGroup(bind_group),
+            ClothSimulation::default(),
+        ));
 
         info!(
             ?entity,

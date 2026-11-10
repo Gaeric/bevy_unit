@@ -80,7 +80,7 @@ pub(super) struct FixedAttachment {
     pub particle: u32,
 }
 
-/// Parameters for one simulation substep. Uniform payload size: 32 bytes.
+/// Simulation parameters; dt is one substep's duration. Uniform payload: 32 bytes.
 ///
 /// WGSL equivalent:
 /// struct StepParams {

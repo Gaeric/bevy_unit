@@ -4,6 +4,7 @@
 mod bindings;
 mod gpu;
 mod layout;
+mod pipeline;
 mod prepare;
 mod tick;
 mod upload;
@@ -19,7 +20,7 @@ use bevy::{
 
 use self::{
     layout::{PreparedCloth, StepParams},
-    tick::ClothTicks,
+    tick::{ClothStepSettings, ClothTicks},
 };
 
 /// Prepares newly added cloths; GPU execution and mesh output are not connected yet.
@@ -32,6 +33,7 @@ impl Plugin for XpbdPlugin {
                 ExtractResourcePlugin::<ClothTicks>::default(),
                 ExtractComponentPlugin::<PreparedCloth>::default(),
                 ExtractComponentPlugin::<StepParams>::default(),
+                ExtractComponentPlugin::<ClothStepSettings>::default(),
             ))
             .add_systems(FixedUpdate, tick::request_tick)
             .add_systems(
