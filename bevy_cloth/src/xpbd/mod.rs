@@ -34,6 +34,7 @@ pub struct XpbdPlugin;
 impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "layout.wesl");
+        embedded_asset!(app, "output.wesl");
 
         app.init_resource::<ClothTicks>()
             .add_plugins((
@@ -50,8 +51,12 @@ impl Plugin for XpbdPlugin {
 
         app.sub_app_mut(RenderApp)
             .insert_resource(bindings::ClothBindGroupLayout::new())
+            .insert_resource(bindings::ClothOutputBindGroupLayout::new())
             .add_systems(ExtractSchedule, output::extract_output_inputs)
-            .add_systems(RenderStartup, pipeline::init_pipelines)
+            .add_systems(
+                RenderStartup,
+                (pipeline::init_pipelines, pipeline::init_output_pipeline),
+            )
             .add_systems(
                 Render,
                 upload::upload_cloths.in_set(RenderSystems::PrepareBindGroups),
