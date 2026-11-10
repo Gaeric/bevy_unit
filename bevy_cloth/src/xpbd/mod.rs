@@ -4,6 +4,7 @@
 mod bindings;
 mod gpu;
 mod layout;
+mod output;
 mod pipeline;
 mod prepare;
 mod tick;
@@ -14,7 +15,7 @@ use bevy::{
     core_pipeline::schedule::camera_driver,
     prelude::*,
     render::{
-        Render, RenderApp, RenderStartup, RenderSystems,
+        ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems,
         extract_component::ExtractComponentPlugin,
         extract_resource::ExtractResourcePlugin,
         renderer::{RenderGraph, RenderGraphSystems},
@@ -49,6 +50,7 @@ impl Plugin for XpbdPlugin {
 
         app.sub_app_mut(RenderApp)
             .insert_resource(bindings::ClothBindGroupLayout::new())
+            .add_systems(ExtractSchedule, output::extract_output_transforms)
             .add_systems(RenderStartup, pipeline::init_pipelines)
             .add_systems(
                 Render,
