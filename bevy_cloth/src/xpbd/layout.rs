@@ -161,6 +161,12 @@ pub(super) struct PreparedCloth {
 
     /// Color groups in execution order.
     pub groups: Vec<ConstraintGroup>,
+
+    /// CSR boundaries: vertex i uses normal_pairs[normal_offsets[i]..normal_offsets[i + 1]].
+    pub normal_offsets: Vec<u32>,
+
+    /// Oriented neighbor pairs [a, b] for gathering cross(p[a] - p[i], p[b] - p[i]).
+    pub normal_pairs: Vec<[u32; 2]>,
 }
 
 #[cfg(test)]

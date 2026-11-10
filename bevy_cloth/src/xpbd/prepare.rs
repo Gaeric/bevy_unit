@@ -178,6 +178,39 @@ fn color_stretch(
     Ok((reordered, groups))
 }
 
+/// Build CSR normal adjacency from validated triangle indices.
+/// Vertex i's oriented neighbor pairs occupy offsets[i]..offsets[i + 1].
+fn build_normal_adjacency(particle_count: usize, indices: &[u32]) -> (Vec<u32>, Vec<[u32; 2]>) {
+    // Count triangle incidences one slot to the right for the prefix sum.
+    let mut offsets = vec![0_u32; particle_count + 1];
+
+    for &vertex in indices {
+        offsets[vertex as usize + 1] += 1;
+    }
+
+    // Convert counts into each vertex's range boundaries.
+    for vertex in 0..particle_count {
+        offsets[vertex + 1] += offsets[vertex];
+    }
+
+    // Temporary cursors track the next free slot; offsets remain unchanged.
+    let mut cursors = offsets[..particle_count].to_vec();
+    let mut pairs = vec![[0_u32; 2]; indices.len()];
+
+    for triangle in indices.chunks_exact(3) {
+        let [a, b, c] = [triangle[0], triangle[1], triangle[2]];
+
+        // Cyclic ordering preserves the triangle winding for every vertex.
+        for (vertex, pair) in [(a, [b, c]), (b, [c, a]), (c, [a, b])] {
+            let cursor = &mut cursors[vertex as usize];
+            pairs[*cursor as usize] = pair;
+            *cursor += 1;
+        }
+    }
+
+    (offsets, pairs)
+}
+
 /// Prepare particles and stretch constraints from validated inputs.
 pub(super) fn prepare_mesh(
     mesh: &Mesh,
@@ -246,11 +279,29 @@ pub(super) fn prepare_mesh(
         });
     }
 
+    let (normal_offsets, normal_pairs) = build_normal_adjacency(particles.len(), &indices);
+
     Ok(PreparedCloth {
         particles,
         velocities,
         stretch,
         attachments,
         groups,
+        normal_offsets,
+        normal_pairs,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_normal_adjacency;
+
+    #[test]
+    fn normal_adjacency_groups_oriented_pairs_by_vertex() {
+        // Vertex 4 is isolated; its CSR range must be empty.
+        let (offsets, pairs) = build_normal_adjacency(5, &[0, 1, 2, 0, 2, 3]);
+
+        assert_eq!(offsets, vec![0, 2, 3, 5, 6, 6]);
+        assert_eq!(pairs, vec![[1, 2], [2, 3], [2, 0], [0, 1], [3, 0], [0, 2]]);
+    }
 }
