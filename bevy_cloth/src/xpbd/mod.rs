@@ -50,11 +50,17 @@ impl Plugin for XpbdPlugin {
 
         app.sub_app_mut(RenderApp)
             .insert_resource(bindings::ClothBindGroupLayout::new())
-            .add_systems(ExtractSchedule, output::extract_output_transforms)
+            .add_systems(ExtractSchedule, output::extract_output_inputs)
             .add_systems(RenderStartup, pipeline::init_pipelines)
             .add_systems(
                 Render,
                 upload::upload_cloths.in_set(RenderSystems::PrepareBindGroups),
+            )
+            .add_systems(
+                Render,
+                (output::prepare_output_data, output::update_output_params)
+                    .chain()
+                    .in_set(RenderSystems::PrepareBindGroups),
             )
             .add_systems(
                 RenderGraph,
