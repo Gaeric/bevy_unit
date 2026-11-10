@@ -10,10 +10,14 @@ mod tick;
 mod upload;
 
 use bevy::{
+    asset::embedded_asset,
+    core_pipeline::schedule::camera_driver,
     prelude::*,
     render::{
-        Render, RenderApp, RenderSystems, extract_component::ExtractComponentPlugin,
+        Render, RenderApp, RenderStartup, RenderSystems,
+        extract_component::ExtractComponentPlugin,
         extract_resource::ExtractResourcePlugin,
+        renderer::{RenderGraph, RenderGraphSystems},
     },
     transform::TransformSystems,
 };
@@ -23,11 +27,13 @@ use self::{
     tick::{ClothStepSettings, ClothTicks},
 };
 
-/// Prepares newly added cloths; GPU execution and mesh output are not connected yet.
+/// Prepares and simulates newly added cloths on GPU; mesh output is not connected yet.
 pub struct XpbdPlugin;
 
 impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
+        embedded_asset!(app, "layout.wesl");
+
         app.init_resource::<ClothTicks>()
             .add_plugins((
                 ExtractResourcePlugin::<ClothTicks>::default(),
@@ -43,9 +49,16 @@ impl Plugin for XpbdPlugin {
 
         app.sub_app_mut(RenderApp)
             .insert_resource(bindings::ClothBindGroupLayout::new())
+            .add_systems(RenderStartup, pipeline::init_pipelines)
             .add_systems(
                 Render,
                 upload::upload_cloths.in_set(RenderSystems::PrepareBindGroups),
+            )
+            .add_systems(
+                RenderGraph,
+                tick::simulate_cloths
+                    .in_set(RenderGraphSystems::Render)
+                    .before(camera_driver),
             );
     }
 }
