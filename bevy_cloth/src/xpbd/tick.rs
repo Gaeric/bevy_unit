@@ -30,18 +30,24 @@ pub(super) fn request_tick(mut ticks: ResMut<ClothTicks>) {
     ticks.requested += 1;
 }
 
-/// CPU-only scheduling settings, extracted once and never uploaded to GPU.
-#[derive(Component, Clone, Copy, ExtractComponent)]
+/// Per-cloth simulation settings, read at initialization; runtime edits are not applied.
+/// Gravity is copied into GPU StepParams; substeps and iterations control dispatches.
+#[derive(Component, Clone, Copy, Debug, ExtractComponent)]
 #[extract_app(RenderApp)]
 #[extract_component_filter(Added<ClothStepSettings>)]
-pub(super) struct ClothStepSettings {
+pub struct ClothStepSettings {
+    /// World-space acceleration, in m/s².
+    pub gravity: Vec3,
+    /// Number of time subdivisions per fixed tick; must be nonzero.
     pub substeps: u32,
+    /// Complete constraint sweeps per substep; must be nonzero.
     pub iterations: u32,
 }
 
 impl Default for ClothStepSettings {
     fn default() -> Self {
         Self {
+            gravity: Vec3::new(0.0, -9.8, 0.0),
             substeps: 6,
             iterations: 2,
         }

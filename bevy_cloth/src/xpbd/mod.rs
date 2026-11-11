@@ -25,9 +25,11 @@ use bevy::{
     transform::TransformSystems,
 };
 
+pub use self::tick::ClothStepSettings;
+
 use self::{
     layout::{PreparedCloth, StepParams},
-    tick::{ClothStepSettings, ClothTicks},
+    tick::ClothTicks,
 };
 
 /// Prepares, simulates and writes newly added cloth meshes on GPU.
@@ -94,6 +96,7 @@ impl Plugin for XpbdPlugin {
 /// CPU-readable. Each mesh vertex corresponds to one particle; no welding is
 /// implied. Initial data is prepared once; later input changes do not rebuild it.
 #[derive(Component, Debug)]
+#[require(ClothStepSettings)]
 pub struct StretchCloth {
     /// Mass of each free particle
     pub particle_mass: f32,

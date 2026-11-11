@@ -15,16 +15,32 @@ pub(super) fn prepare_added_cloths(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
     time: Res<Time<Fixed>>,
-    cloths: Query<(Entity, &Mesh3d, &GlobalTransform, &StretchCloth), Added<StretchCloth>>,
+    cloths: Query<
+        (
+            Entity,
+            &Mesh3d,
+            &GlobalTransform,
+            &StretchCloth,
+            &ClothStepSettings,
+        ),
+        Added<StretchCloth>,
+    >,
 ) {
-    for (entity, mesh_handle, transform, config) in &cloths {
+    for (entity, mesh_handle, transform, config, settings) in &cloths {
+        if !settings.gravity.is_finite() || settings.substeps == 0 || settings.iterations == 0 {
+            warn!(
+                ?entity,
+                "Cloth settings require finite gravity and nonzero substeps/iterations"
+            );
+            continue;
+        }
+
         let mesh = meshes
             .get(&mesh_handle.0)
             .expect("adding StretchCloth requires a loaded Mesh");
         let prepared = prepare_mesh(mesh, transform, config).expect("cloth preparation failed");
-        let settings = ClothStepSettings::default();
         let step = StepParams {
-            gravity: [0.0, -9.8, 0.0, 0.0],
+            gravity: settings.gravity.extend(0.0).to_array(),
             dt: time.timestep().as_secs_f32() / settings.substeps as f32,
             particle_count: prepared.particles.len() as u32,
             stretch_count: prepared.stretch.len() as u32,
@@ -36,13 +52,15 @@ pub(super) fn prepare_added_cloths(
             particles = prepared.particles.len(),
             stretch = prepared.stretch.len(),
             colors = prepared.groups.len(),
+            substeps = settings.substeps,
+            iterations = settings.iterations,
             "XPBD cloth prepared"
         );
 
         // GPU deformation does not update the mesh's CPU-side bounds.
         commands
             .entity(entity)
-            .insert((prepared, step, settings, NoFrustumCulling));
+            .insert((prepared, step, NoFrustumCulling));
     }
 }
 
