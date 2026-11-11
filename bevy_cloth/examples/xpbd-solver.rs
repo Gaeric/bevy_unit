@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cloth::xpbd::{Attachment, StretchCloth, XpbdPlugin};
+use bevy_cloth::xpbd::{Attachment, ClothStepSettings, StretchCloth, XpbdPlugin};
 
 const SEGMENTS: u32 = 16;
 
@@ -55,8 +55,13 @@ fn setup(
         Transform::IDENTITY,
         StretchCloth {
             particle_mass: 1.0,
-            stretch_compliance: 0.0,
+            stretch_compliance: 0.0001,
             attachments,
+        },
+        ClothStepSettings {
+            gravity: Vec3::new(0.0, -9.8, 0.0),
+            substeps: 6,
+            iterations: 10,
         },
     ));
     commands.spawn((
