@@ -18,6 +18,8 @@ use bevy::{
         ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems,
         extract_component::ExtractComponentPlugin,
         extract_resource::ExtractResourcePlugin,
+        mesh::allocator::MeshAllocatorSettings,
+        render_resource::BufferUsages,
         renderer::{RenderGraph, RenderGraphSystems},
     },
     transform::TransformSystems,
@@ -28,7 +30,7 @@ use self::{
     tick::{ClothStepSettings, ClothTicks},
 };
 
-/// Prepares and simulates newly added cloths on GPU; mesh output is not connected yet.
+/// Prepares, simulates and writes newly added cloth meshes on GPU.
 pub struct XpbdPlugin;
 
 impl Plugin for XpbdPlugin {
@@ -49,7 +51,15 @@ impl Plugin for XpbdPlugin {
                 prepare::prepare_added_cloths.after(TransformSystems::Propagate),
             );
 
-        app.sub_app_mut(RenderApp)
+        let render_app = app.sub_app_mut(RenderApp);
+        // This applies globally to allocator buffers, including non-cloth meshes.
+        // Set before the allocator creates its GPU buffers.
+        render_app
+            .world_mut()
+            .resource_mut::<MeshAllocatorSettings>()
+            .extra_buffer_usages |= BufferUsages::STORAGE;
+
+        render_app
             .insert_resource(bindings::ClothBindGroupLayout::new())
             .insert_resource(bindings::ClothOutputBindGroupLayout::new())
             .add_systems(ExtractSchedule, output::extract_output_inputs)
@@ -59,17 +69,19 @@ impl Plugin for XpbdPlugin {
             )
             .add_systems(
                 Render,
-                upload::upload_cloths.in_set(RenderSystems::PrepareBindGroups),
-            )
-            .add_systems(
-                Render,
-                (output::prepare_output_data, output::update_output_params)
+                (
+                    upload::upload_cloths,
+                    output::prepare_output_data,
+                    output::update_output_params,
+                    output::prepare_output_bind_groups,
+                )
                     .chain()
                     .in_set(RenderSystems::PrepareBindGroups),
             )
             .add_systems(
                 RenderGraph,
-                tick::simulate_cloths
+                (tick::simulate_cloths, output::output_cloths)
+                    .chain()
                     .in_set(RenderGraphSystems::Render)
                     .before(camera_driver),
             );

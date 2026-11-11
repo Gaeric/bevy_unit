@@ -1,4 +1,4 @@
-//! Render output inputs, GPU buffers and vertex addressing parameters.
+//! Render output data, binding preparation and mesh output command recording.
 
 use bevy::{
     asset::AssetId,
@@ -7,14 +7,22 @@ use bevy::{
         Extract,
         mesh::{RenderMesh, allocator::MeshAllocator},
         render_asset::RenderAssets,
-        render_resource::{Buffer, BufferInitDescriptor, BufferUsages, VertexFormat},
-        renderer::{RenderDevice, RenderQueue},
+        render_resource::{
+            Buffer, BufferInitDescriptor, BufferUsages, ComputePassDescriptor, PipelineCache,
+            VertexFormat,
+        },
+        renderer::{RenderContext, RenderDevice, RenderQueue},
         sync_world::RenderEntity,
     },
 };
 use bytemuck::{Pod, Zeroable};
 
-use super::layout::PreparedCloth;
+use super::{
+    bindings::{ClothOutputBindGroup, ClothOutputBindGroupLayout},
+    gpu::GpuCloth,
+    layout::{PreparedCloth, StepParams},
+    pipeline::{ClothOutputPipeline, WORKGROUP_SIZE},
+};
 
 /// Mesh output addressing; offsets and stride are in four-byte words.
 #[repr(C)]
@@ -46,6 +54,10 @@ impl OutputVertexParams {
         assert_eq!(layout.array_stride % 4, 0);
         assert_eq!(position.offset % 4, 0);
         assert_eq!(normal.offset % 4, 0);
+        assert!(layout.array_stride >= 12);
+        assert!(position.offset <= layout.array_stride - 12);
+        assert!(normal.offset <= layout.array_stride - 12);
+        assert!(position.offset.abs_diff(normal.offset) >= 12);
 
         Self {
             vertex_start,
@@ -131,7 +143,17 @@ pub(super) fn prepare_output_data(
             continue;
         };
 
-        assert_eq!(mesh.vertex_count as usize, prepared.particles.len());
+        let particle_count = prepared.particles.len();
+
+        if mesh.vertex_count as usize != particle_count
+            || (slice.range.end - slice.range.start) as usize != particle_count
+        {
+            warn!(
+                ?entity,
+                "XPBD output allocation does not match the particle count"
+            );
+            continue;
+        }
 
         let params = OutputVertexParams::new(mesh, slice.range.start);
         let output = GpuClothOutput::new(&device, prepared, input, &params);
@@ -161,5 +183,80 @@ pub(super) fn update_output_params(
 
             queue.write_buffer(&output.vertex_params, 0, bytemuck::bytes_of(&*params));
         }
+    }
+}
+
+/// Create output bindings once and rebuild them when the allocator replaces a buffer.
+pub(super) fn prepare_output_bind_groups(
+    mut commands: Commands,
+    device: Res<RenderDevice>,
+    cache: Res<PipelineCache>,
+    layout: Res<ClothOutputBindGroupLayout>,
+    allocator: Res<MeshAllocator>,
+    cloths: Query<(
+        Entity,
+        &ClothOutputInput,
+        &GpuCloth,
+        &GpuClothOutput,
+        Option<&ClothOutputBindGroup>,
+    )>,
+) {
+    for (entity, input, gpu, output, binding) in &cloths {
+        let Some(slice) = allocator.mesh_vertex_slice(&input.mesh) else {
+            if binding.is_some() {
+                commands.entity(entity).remove::<ClothOutputBindGroup>();
+            }
+            continue;
+        };
+
+        if binding.is_some_and(|binding| binding.vertex_buffer == slice.buffer.id()) {
+            continue;
+        }
+
+        if slice.buffer.size() > u64::from(device.limits().max_storage_buffer_binding_size) {
+            warn!(
+                ?entity,
+                "XPBD output vertex buffer exceeds the storage binding size limit"
+            );
+            commands.entity(entity).remove::<ClothOutputBindGroup>();
+            continue;
+        }
+
+        let binding = layout.create_bind_group(&device, &cache, gpu, output, slice.buffer);
+        commands.entity(entity).insert(binding);
+    }
+}
+
+/// Write the final particle state into the current mesh allocation once per frame.
+pub(super) fn output_cloths(
+    mut context: RenderContext,
+    cache: Res<PipelineCache>,
+    pipeline: Res<ClothOutputPipeline>,
+    allocator: Res<MeshAllocator>,
+    cloths: Query<(&ClothOutputInput, &ClothOutputBindGroup, &StepParams)>,
+) {
+    let Some(output_pipeline) = cache.get_compute_pipeline(pipeline.output_mesh) else {
+        return;
+    };
+
+    for (input, binding, step) in &cloths {
+        let Some(slice) = allocator.mesh_vertex_slice(&input.mesh) else {
+            continue;
+        };
+        if binding.vertex_buffer != slice.buffer.id() || step.particle_count == 0 {
+            continue;
+        }
+
+        // Separate passes avoid overlapping writable slab bindings between cloths.
+        let mut pass = context
+            .command_encoder()
+            .begin_compute_pass(&ComputePassDescriptor {
+                label: Some("xpbd cloth mesh output"),
+                timestamp_writes: None,
+            });
+
+        pass.set_pipeline(output_pipeline);
+        pass.set_bind_group(0, &binding.bind_group, &[]);
+        pass.dispatch_workgroups(step.particle_count.div_ceil(WORKGROUP_SIZE), 1, 1);
     }
 }
