@@ -1,6 +1,6 @@
 //! Validate mesh inputs and prepare initial cloth data.
 
-use bevy::{mesh::PrimitiveTopology, prelude::*};
+use bevy::{camera::visibility::NoFrustumCulling, mesh::PrimitiveTopology, prelude::*};
 use std::collections::BTreeSet;
 
 use super::{
@@ -39,7 +39,10 @@ pub(super) fn prepare_added_cloths(
             "XPBD cloth prepared"
         );
 
-        commands.entity(entity).insert((prepared, step, settings));
+        // GPU deformation does not update the mesh's CPU-side bounds.
+        commands
+            .entity(entity)
+            .insert((prepared, step, settings, NoFrustumCulling));
     }
 }
 
