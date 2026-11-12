@@ -3,6 +3,7 @@
 
 mod bindings;
 mod bvh;
+mod collider;
 mod gpu;
 mod layout;
 mod output;
@@ -26,6 +27,7 @@ use bevy::{
     transform::TransformSystems,
 };
 
+pub use self::collider::{CollisionGroup, MeshCollider};
 pub use self::tick::ClothStepSettings;
 
 use self::{
@@ -52,6 +54,15 @@ impl Plugin for XpbdPlugin {
             .add_systems(
                 PostUpdate,
                 prepare::prepare_added_cloths.after(TransformSystems::Propagate),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    collider::clear_removed_colliders,
+                    collider::prepare_colliders,
+                )
+                    .chain()
+                    .after(TransformSystems::Propagate),
             );
 
         let render_app = app.sub_app_mut(RenderApp);
