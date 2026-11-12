@@ -2,6 +2,7 @@
 //! CPU preparation and GPU data/binding.
 
 mod bindings;
+mod bvh;
 mod gpu;
 mod layout;
 mod output;
