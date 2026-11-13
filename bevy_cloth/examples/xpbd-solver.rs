@@ -1,7 +1,13 @@
-use bevy::prelude::*;
+use bevy::{
+    camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
+    prelude::*,
+};
 use bevy_cloth::xpbd::{Attachment, ClothStepSettings, MeshCollider, StretchCloth, XpbdPlugin};
 
 const SEGMENTS: u32 = 16;
+
+#[derive(Component)]
+struct MovingSphere;
 
 fn main() {
     App::new()
@@ -12,8 +18,9 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(XpbdPlugin)
+        .add_plugins((XpbdPlugin, FreeCameraPlugin))
         .add_systems(Startup, setup)
+        .add_systems(FixedUpdate, move_sphere)
         .run();
 }
 
@@ -77,9 +84,11 @@ fn setup(
         })),
         Transform::from_xyz(0.0, 1.4, -0.35),
         MeshCollider,
+        MovingSphere,
     ));
     commands.spawn((
         Camera3d::default(),
+        FreeCamera::default(),
         Transform::from_xyz(0.6, 2.0, 5.0).looking_at(Vec3::new(0.0, 1.5, 0.0), Vec3::Y),
     ));
     commands.spawn((
@@ -89,6 +98,13 @@ fn setup(
         },
         Transform::from_xyz(3.0, 5.0, 4.0).looking_at(Vec3::new(0.0, 1.5, 0.0), Vec3::Y),
     ));
+}
+
+fn move_sphere(time: Res<Time<Fixed>>, mut spheres: Query<&mut Transform, With<MovingSphere>>) {
+    let z = -0.35 + 0.6 * (0.8 * time.elapsed_secs()).sin();
+    for mut transform in &mut spheres {
+        transform.translation.z = z;
+    }
 }
 
 /// Example geometry only; it does not generate solver constraints or GPU buffers.
