@@ -26,6 +26,7 @@ fn main() {
 
 fn setup(
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -53,10 +54,12 @@ fn setup(
         Name::new("Stretch cloth"),
         Mesh3d(meshes.add(mesh)),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.15, 0.55, 0.8),
+            base_color: Color::srgb(0.0, 0.5, 1.0),
+            base_color_texture: Some(asset_server.load("velvet/fabric2.jpg")),
             cull_mode: None,
             double_sided: true,
-            perceptual_roughness: 0.9,
+            perceptual_roughness: 1.0,
+            reflectance: 0.01,
             ..default()
         })),
         Transform::IDENTITY,
@@ -78,8 +81,8 @@ fn setup(
         Name::new("Mesh collider sphere"),
         Mesh3d(meshes.add(Sphere::new(0.5).mesh().uv(32, 18))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.9, 0.55, 0.15),
-            perceptual_roughness: 0.7,
+            base_color: Color::WHITE,
+            perceptual_roughness: 1.0,
             ..default()
         })),
         Transform::from_xyz(0.0, 1.4, -0.35),
