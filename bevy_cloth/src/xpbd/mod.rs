@@ -5,6 +5,7 @@ mod bindings;
 mod bvh;
 mod collider;
 mod collider_gpu;
+mod collider_transform;
 mod gpu;
 mod layout;
 mod output;
@@ -45,6 +46,7 @@ impl Plugin for XpbdPlugin {
         embedded_asset!(app, "layout.wesl");
         embedded_asset!(app, "output.wesl");
         embedded_asset!(app, "bvh_query.wesl");
+        embedded_asset!(app, "collider_transform.wesl");
 
         app.init_resource::<ClothTicks>()
             .add_plugins((
@@ -80,16 +82,27 @@ impl Plugin for XpbdPlugin {
         render_app
             .insert_resource(bindings::ClothBindGroupLayout::new())
             .insert_resource(bindings::ClothOutputBindGroupLayout::new())
-            .add_systems(ExtractSchedule, output::extract_output_inputs)
+            .add_systems(
+                ExtractSchedule,
+                (
+                    output::extract_output_inputs,
+                    collider_transform::extract_collider_transforms,
+                ),
+            )
             .add_systems(
                 RenderStartup,
-                (pipeline::init_pipelines, pipeline::init_output_pipeline),
+                (
+                    pipeline::init_pipelines,
+                    pipeline::init_output_pipeline,
+                    collider_transform::init_transform_pipeline,
+                ),
             )
             .add_systems(
                 Render,
                 (
                     upload::upload_cloths,
                     collider_gpu::upload_colliders,
+                    collider_transform::prepare_transform_bind_groups,
                     output::prepare_output_data,
                     output::update_output_params,
                     output::prepare_output_bind_groups,
@@ -99,7 +112,11 @@ impl Plugin for XpbdPlugin {
             )
             .add_systems(
                 RenderGraph,
-                (tick::simulate_cloths, output::output_cloths)
+                (
+                    collider_transform::transform_collider_vertices,
+                    tick::simulate_cloths,
+                    output::output_cloths,
+                )
                     .chain()
                     .in_set(RenderGraphSystems::Render)
                     .before(camera_driver),

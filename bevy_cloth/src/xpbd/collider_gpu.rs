@@ -1,19 +1,22 @@
-//! Per-entity collider GPU buffers and upload; no transform update or refit yet.
+//! Per-entity collider GPU buffers and upload; BVH refit is not connected yet.
 
 use bevy::{
     prelude::*,
     render::{
-        render_resource::{Buffer, BufferInitDescriptor, BufferUsages},
+        render_resource::{Buffer, BufferDescriptor, BufferInitDescriptor, BufferUsages},
         renderer::RenderDevice,
     },
 };
 
-use super::collider::PreparedCollider;
+use super::{collider::PreparedCollider, collider_transform::ColliderTransformBindGroup};
 
 /// Buffers owned by one collider entity. Bounds are local-space until refit.
 #[derive(Component)]
 pub(super) struct GpuCollider {
     pub local_positions: Buffer,
+    /// World-space points, valid after the transform dispatch has been recorded.
+    pub positions: Buffer,
+    pub world_from_local: Buffer,
     pub indices: Buffer,
     pub nodes: Buffer,
     pub triangle_refs: Buffer,
@@ -30,6 +33,18 @@ impl GpuCollider {
                 label: Some("xpbd collider local positions"),
                 contents: bytemuck::cast_slice(&prepared.positions),
                 usage: BufferUsages::STORAGE,
+            }),
+            positions: device.create_buffer(&BufferDescriptor {
+                label: Some("xpbd collider world positions"),
+                size: (prepared.positions.len() * size_of::<[f32; 4]>()) as u64,
+                usage: BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            }),
+            world_from_local: device.create_buffer(&BufferDescriptor {
+                label: Some("xpbd collider world from local"),
+                size: size_of::<[[f32; 4]; 4]>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             }),
             indices: device.create_buffer_with_data(&BufferInitDescriptor {
                 label: Some("xpbd collider indices"),
@@ -68,6 +83,9 @@ pub(super) fn upload_colliders(
             nodes = gpu.node_count,
             "XPBD collider GPU buffers prepared"
         );
-        commands.entity(entity).insert(gpu);
+        commands
+            .entity(entity)
+            .remove::<ColliderTransformBindGroup>()
+            .insert(gpu);
     }
 }
