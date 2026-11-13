@@ -4,6 +4,7 @@
 mod bindings;
 mod bvh;
 mod collider;
+mod collider_gpu;
 mod gpu;
 mod layout;
 mod output;
@@ -21,6 +22,7 @@ use bevy::{
         extract_component::ExtractComponentPlugin,
         extract_resource::ExtractResourcePlugin,
         mesh::allocator::MeshAllocatorSettings,
+        render_asset::RenderAssetPlugin,
         render_resource::BufferUsages,
         renderer::{RenderGraph, RenderGraphSystems},
     },
@@ -31,6 +33,8 @@ pub use self::collider::{CollisionGroup, MeshCollider};
 pub use self::tick::ClothStepSettings;
 
 use self::{
+    collider::{ColliderGeometry, PreparedCollider},
+    collider_gpu::GpuCollider,
     layout::{PreparedCloth, StepParams},
     tick::ClothTicks,
 };
@@ -44,7 +48,11 @@ impl Plugin for XpbdPlugin {
         embedded_asset!(app, "output.wesl");
 
         app.init_resource::<ClothTicks>()
+            .init_asset::<ColliderGeometry>()
             .add_plugins((
+                RenderAssetPlugin::<GpuCollider>::default(),
+                ExtractComponentPlugin::<PreparedCollider>::default(),
+                ExtractComponentPlugin::<CollisionGroup>::default(),
                 ExtractResourcePlugin::<ClothTicks>::default(),
                 ExtractComponentPlugin::<PreparedCloth>::default(),
                 ExtractComponentPlugin::<StepParams>::default(),

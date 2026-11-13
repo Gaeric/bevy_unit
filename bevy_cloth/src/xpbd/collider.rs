@@ -1,7 +1,11 @@
-//! Prepare initial world-space collision geometry and its CPU BVH.
-//! No asset waiting, GPU upload or contact response.
+//! Prepare initial world-space collision geometry and its CPU BVH as an asset.
+//! No asset waiting or contact response; GPU preparation is in collider_gpu.
 
-use bevy::{mesh::PrimitiveTopology, prelude::*};
+use bevy::{
+    mesh::PrimitiveTopology,
+    prelude::*,
+    render::{RenderApp, extract_component::ExtractComponent},
+};
 
 use super::bvh::{TriangleBvh, build_triangle_bvh};
 
@@ -18,12 +22,14 @@ pub struct MeshCollider;
 ///
 /// Absence of this component means group 0. Matching will be consumed when
 /// contact solving is connected; changing groups does not rebuild geometry.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, ExtractComponent)]
+#[extract_app(RenderApp)]
+#[extract_component_filter(Changed<CollisionGroup>)]
 pub struct CollisionGroup(pub u32);
 
-/// Initial collider geometry and tree; a CPU container, not a GPU payload.
-#[derive(Component, Debug)]
-pub(super) struct PreparedCollider {
+/// Initial world-space collision geometry and CPU-built BVH.
+#[derive(Asset, TypePath, Clone, Debug)]
+pub(super) struct ColliderGeometry {
     /// Initial world-space positions; w is reserved and set to zero.
     pub positions: Vec<[f32; 4]>,
     /// Original triangle indices, three entries per triangle.
@@ -32,8 +38,14 @@ pub(super) struct PreparedCollider {
     pub bvh: TriangleBvh,
 }
 
+/// Reference to this collider instance's prepared geometry.
+#[derive(Component, Clone, Debug, ExtractComponent)]
+#[extract_app(RenderApp)]
+#[extract_component_filter(Changed<PreparedCollider>)]
+pub(super) struct PreparedCollider(pub Handle<ColliderGeometry>);
+
 /// Prepare initial geometry without modifying the source Mesh.
-fn prepare_collider(mesh: &Mesh, transform: &GlobalTransform) -> Result<PreparedCollider, String> {
+fn prepare_collider(mesh: &Mesh, transform: &GlobalTransform) -> Result<ColliderGeometry, String> {
     if mesh.primitive_topology() != PrimitiveTopology::TriangleList {
         return Err("collider mesh must use TriangleList topology".into());
     }
@@ -74,7 +86,7 @@ fn prepare_collider(mesh: &Mesh, transform: &GlobalTransform) -> Result<Prepared
         .map(|position| position.extend(0.0).to_array())
         .collect();
 
-    Ok(PreparedCollider {
+    Ok(ColliderGeometry {
         positions,
         indices,
         bvh,
@@ -85,6 +97,7 @@ fn prepare_collider(mesh: &Mesh, transform: &GlobalTransform) -> Result<Prepared
 pub(super) fn prepare_colliders(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
+    mut geometries: ResMut<Assets<ColliderGeometry>>,
     colliders: Query<
         (Entity, &Mesh3d, &GlobalTransform),
         (
@@ -105,8 +118,8 @@ pub(super) fn prepare_colliders(
             continue;
         };
 
-        let prepared = match prepare_collider(mesh, transform) {
-            Ok(prepared) => prepared,
+        let geometry = match prepare_collider(mesh, transform) {
+            Ok(geometry) => geometry,
             Err(error) => {
                 warn!(?entity, %error, "XPBD collider preparation failed");
                 continue;
@@ -115,15 +128,16 @@ pub(super) fn prepare_colliders(
 
         info!(
             ?entity,
-            vertices = prepared.positions.len(),
-            triangles = prepared.indices.len() / 3,
-            nodes = prepared.bvh.nodes.len(),
-            leaves = prepared.bvh.leaf_nodes.len(),
-            max_depth = prepared.bvh.max_depth,
-            "XPBD mesh collider prepared (CPU only)"
+            vertices = geometry.positions.len(),
+            triangles = geometry.indices.len() / 3,
+            nodes = geometry.bvh.nodes.len(),
+            leaves = geometry.bvh.leaf_nodes.len(),
+            max_depth = geometry.bvh.max_depth,
+            "XPBD mesh collider CPU geometry prepared"
         );
 
-        commands.entity(entity).insert(prepared);
+        let handle = geometries.add(geometry);
+        commands.entity(entity).insert(PreparedCollider(handle));
     }
 }
 
@@ -163,8 +177,9 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, TransformPlugin))
-            .init_resource::<Assets<Mesh>>()
+        app.add_plugins((MinimalPlugins, AssetPlugin::default(), TransformPlugin))
+            .init_asset::<Mesh>()
+            .init_asset::<ColliderGeometry>()
             .add_systems(
                 PostUpdate,
                 (clear_removed_colliders, prepare_colliders)
@@ -178,6 +193,14 @@ mod tests {
         app.world_mut()
             .spawn((Mesh3d(handle), Transform::IDENTITY, MeshCollider))
             .id()
+    }
+
+    fn geometry(app: &App, entity: Entity) -> &ColliderGeometry {
+        let prepared = app.world().get::<PreparedCollider>(entity).unwrap();
+        app.world()
+            .resource::<Assets<ColliderGeometry>>()
+            .get(&prepared.0)
+            .unwrap()
     }
 
     #[test]
@@ -247,13 +270,8 @@ mod tests {
             .entity_mut(entity)
             .insert((Transform::from_xyz(0.0, 2.0, 0.0), ChildOf(parent)));
         app.update();
-        assert_eq!(
-            app.world()
-                .get::<PreparedCollider>(entity)
-                .unwrap()
-                .positions[1],
-            [4.0, 2.0, 0.0, 0.0]
-        );
+        assert_eq!(geometry(&app, entity).positions[1], [4.0, 2.0, 0.0, 0.0]);
+        let original_id = app.world().get::<PreparedCollider>(entity).unwrap().0.id();
         // Track changes without assuming a fixed change-tick number.
         app.world_mut().clear_trackers();
         app.world_mut().entity_mut(entity).insert(CollisionGroup(7));
@@ -267,13 +285,12 @@ mod tests {
             .world_mut()
             .query_filtered::<Entity, Changed<PreparedCollider>>();
         assert_eq!(changed.iter(app.world()).count(), 0);
+        assert_eq!(geometry(&app, entity).positions[1], [4.0, 2.0, 0.0, 0.0]);
         assert_eq!(
-            app.world()
-                .get::<PreparedCollider>(entity)
-                .unwrap()
-                .positions[1],
-            [4.0, 2.0, 0.0, 0.0]
+            app.world().get::<PreparedCollider>(entity).unwrap().0.id(),
+            original_id
         );
+        assert_eq!(app.world().resource::<Assets<ColliderGeometry>>().len(), 1);
     }
 
     #[test]
@@ -308,6 +325,7 @@ mod tests {
         let entity = spawn_collider(&mut app, first);
         app.update();
 
+        let first_id = app.world().get::<PreparedCollider>(entity).unwrap().0.id();
         let replacement = triangle().transformed_by(Transform::from_xyz(2.0, 0.0, 0.0));
         let second = app
             .world_mut()
@@ -315,12 +333,10 @@ mod tests {
             .add(replacement);
         app.world_mut().entity_mut(entity).insert(Mesh3d(second));
         app.update();
-        assert_eq!(
-            app.world()
-                .get::<PreparedCollider>(entity)
-                .unwrap()
-                .positions[0],
-            [2.0, 0.0, 0.0, 0.0]
+        assert_eq!(geometry(&app, entity).positions[0], [2.0, 0.0, 0.0, 0.0]);
+        assert_ne!(
+            app.world().get::<PreparedCollider>(entity).unwrap().0.id(),
+            first_id
         );
 
         let invalid = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::MAIN_WORLD);
@@ -341,9 +357,16 @@ mod tests {
         let second = spawn_collider(&mut app, handle.clone());
         let third = spawn_collider(&mut app, handle);
         app.update();
-        for entity in [first, second, third] {
-            assert!(app.world().get::<PreparedCollider>(entity).is_some());
-        }
+        let handles = [first, second, third].map(|entity| {
+            app.world()
+                .get::<PreparedCollider>(entity)
+                .unwrap()
+                .0
+                .clone()
+        });
+        assert_ne!(handles[0].id(), handles[1].id());
+        assert_ne!(handles[0].id(), handles[2].id());
+        assert_ne!(handles[1].id(), handles[2].id());
         app.world_mut().entity_mut(first).remove::<MeshCollider>();
         app.world_mut().entity_mut(second).remove::<Mesh3d>();
         app.world_mut().entity_mut(third).despawn();
@@ -351,5 +374,21 @@ mod tests {
         for entity in [first, second, third] {
             assert!(app.world().get::<PreparedCollider>(entity).is_none());
         }
+        // External strong handles keep assets alive, but do not activate colliders.
+        for handle in &handles {
+            assert!(
+                app.world()
+                    .resource::<Assets<ColliderGeometry>>()
+                    .get(handle)
+                    .is_some()
+            );
+        }
+        drop(handles);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Assets<ColliderGeometry>>()
+                .is_empty()
+        );
     }
 }

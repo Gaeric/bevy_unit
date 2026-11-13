@@ -52,27 +52,32 @@
    - 若声称性能改善：测量条件、前后数据和代价是否齐全？
 
 * next steps
-  更新：2026-11-12。当前工作对象是 =src/xpbd/= 新求解器，不是历史 =src/gpu/= Jacobi 路径。
+  Updated: 2026-11-13. Current work targets =src/xpbd/=, not the historical =src/gpu/= Jacobi path.
   目标：CPU 建 BVH，GPU 查询三角网格接触并 refit；SDF 留作后期候选。
   以下十步按逻辑变化逐批审阅、实现和验证，不要求一次完成，也不自动执行 Git commit。
 
-** 当前停点：第 2 步已有代码，第 3 步仅展示了方案
-   - 新 XPBD 已有 GPU 预测、着色原地拉伸求解、速度更新和 Mesh 位置/法线输出。
-   - 第 1 步 =bvh.rs=：obvhs 0.4.0 建 BVH2，转换自有 GPU ABI，生成 refit 调度表。
-   - 第 2 步 =collider.rs=：准备世界空间顶点、索引和 CPU BVH，处理 Mesh 替换与移除。
-     应用提供已加载、CPU 可读 Mesh；不加等待状态、重试队列或自动资产重试。
-     当前不跟随 Transform 或原 Mesh 原地编辑更新；修改组号不重建几何。
-   - 既有验证记录：第 1 步直接引用实际 bvh.rs 的独立测试 5 项通过；
-     第 2 步 all-targets 检查通过，6 项 collider 测试已编译但未执行。
-     完整 Cargo 测试此前受容器 Wayland/ALSA 链接库缺失阻塞；这些不是 GPU 运行证据。
-   - 第 3 步展示过功能代码，但尚未写入、编译或验收；下一次先确认下面的设计，再定向编辑。
+** Current stop: step 3 implemented for review, not yet validated on GPU
+   - XPBD already has prediction, colored in-place stretch solving, velocity updates and Mesh position/normal output.
+   - Step 1: =bvh.rs= builds BVH2 with obvhs 0.4.0, converts the GPU ABI and creates refit schedules.
+   - Step 2: =collider.rs= prepares world-space geometry and handles Mesh replacement and input removal.
+     Inputs must be loaded and CPU-readable. No waiting, retry queue, transform tracking or in-place Mesh edit tracking.
+   - Step 3: geometry is now a =ColliderGeometry= asset referenced by =PreparedCollider=.
+     =GpuCollider= implements =RenderAsset=; entity references and collision groups use changed-component extraction.
+     Existing cloth upload and solver paths are unchanged. Queries and contact response remain step 4 and later.
+   - Historical evidence: 5 standalone BVH tests passed; step 2 all-targets check passed and 6 collider tests compiled.
+     Those collider tests were not executed; full test linking was blocked by missing Wayland/ALSA libraries.
+   - Current batch: CPU tests adapted for asset lookup, identity and strong-handle lifetime; execution pending.
+     =rustfmt --check= on changed Rust modules and =git diff --check= passed.
+     Workspace offline check is blocked before compilation by missing =avian3d= for =bevy_waltz=.
+     The edit tool cannot access the existing isolated manifest under =/tmp/= to update its dependencies.
+     No compilation, GPU upload, visual or performance validation is claimed for step 3.
 
 ** 十步顺序与验收目标
    | 步骤 | 状态 | 逻辑目标 | 主要验证目标 |
    |------+------+----------+--------------|
    | 1 | 已有代码 | CPU BVH2 构建、自有节点 ABI 和结构测试 | 索引覆盖、包围盒、节点布局、深度与 refit 层次 |
    | 2 | 已有代码 | Mesh 输入、世界空间 CPU 准备、替换与移除 | 输入格式、完整世界变换、失败清旧数据、移除生命周期 |
-   | 3 | 下一批 | Render World 提取、GPU 上传及几何版本/资源生命周期 | 不重复上传；替换一致；失败、移除、销毁不残留旧 GPU 几何 |
+   | 3 | Implemented; validation pending | Asset extraction, GPU preparation and reference lifetime | No redundant upload; replacement consistency; removed references stop participation before resource reclamation |
    | 4 | 待做 | BVH 最近点查询 kernel、异步诊断探针 | 与独立 CPU 暴力三角查询比较；检查距离、重建点、状态与访问量 |
    | 5 | 待做 | 无摩擦静态三角网格接触，接入 XPBD 子步 | 新路径的场景 2：静态三角网格球与布料接触；观察穿透与残差 |
    | 6 | 待做 | 静态表面摩擦 | 零摩擦对照、切向位移和摩擦上限；不靠阻尼冒充摩擦 |
@@ -84,25 +89,31 @@
    场景 2 可复用现有场景参数和呈现，但不能把旧解析球/SDF 碰撞入口的效果算成新 BVH 路径通过。
    每一步都保持现有布料运行路径；GPU 功能与性能由目标设备实测，不凭编译通过宣称完成。
 
-** 第 3 步待确认的实现方案
-   目标只到“GPU 拥有可查询的碰撞几何”，不包含查询 dispatch 或接触响应。
-   - 文件范围：修改 =collider.rs=、=mod.rs=，新增 =collider_gpu.rs=；不改现有拉伸 solver binding。
-   - CPU 几何：拟将 positions、indices、TriangleBvh 放进不可变 =ColliderGeometry=，
-     由 =PreparedCollider= 持有 =Arc<ColliderGeometry>=；每次准备成功创建新快照。
-     Render World 提取只克隆 Arc，不深复制整份网格；只在准备结果变化时提取。
-   - GPU：每个碰撞体拥有一套 =GpuCollider=，包含 positions、indices、nodes、triangle_refs 四个 Buffer
-     以及有效数量和来源快照；多件布料共享同一碰撞体，不各自上传人体副本。
-   - 本阶段拟用快照身份识别几何版本，不额外维护递增计数器；这是待确认方案。
-     未来异步任务需要跨任务版本标识时再讨论，不提前增加重建框架。
-   - 上传前检查四个 Buffer 的非空和设备容量限制，再整体创建/替换组件；不混用新旧数组。
-     当前只需 STORAGE 用途，后续有实际复制需求时再增加 COPY_SRC/COPY_DST。
-   - Main World 移除 PreparedCollider 时，同步清理 Render World 的准备结果和 GpuCollider。
-     新版 CPU 准备失败或 GPU 容量检查失败时，旧 GPU 碰撞体不得继续生效；不自动重试。
-   - CollisionGroup 单独按变化提取，缺失视为 0；改组号不重新上传几何。
-   - leaf_nodes/internal_nodes 到第 8 步再上传；refit_layers 留 CPU 调度。
-     历史顶点到第 7 步引入；查询 binding、pipeline、探针及回读到第 4 步实现。
-   - 测试重点：首次上传一次、不变不上传、同实体替换、失败清旧结果、移除/销毁、改组不上传。
-     生命周期测试与实际 GPU Buffer 上传验证分别记录。
+** Step 3 implementation and review boundary
+   Goal: prepare GPU collision geometry only; no query dispatch or contact response.
+   - Files: =bvh.rs= adds Clone; =collider.rs= owns CPU assets and extracted references;
+     =collider_gpu.rs= prepares buffers; =mod.rs= registers the plugins. Existing solver bindings are unchanged.
+   - Each successful preparation creates a new =ColliderGeometry= asset. =PreparedCollider= holds its strong Handle.
+     Default render-asset extraction clones CPU data on asset addition/modification, not every frame.
+     There is no Arc snapshot, custom upload queue, version counter or unavailable-state enum.
+   - =GpuCollider= contains positions, indices, nodes and triangle_refs buffers, plus valid counts.
+     Buffer usage is STORAGE only. CPU preparation validates geometry; GPU preparation does not duplicate it.
+     Device validation/OOM/loss follows Bevy's renderer error handling, not a local warn-and-skip guarantee.
+   - =RenderAssetPlugin= manages preparation, storage and unused-asset cleanup.
+     Active queries must start from collider entities and resolve their Handles, not iterate all stored GPU assets.
+     Removing a reference stops participation; physical resource reclamation can happen later.
+     Failed CPU replacement removes the old reference. No automatic CPU preparation retry is introduced.
+   - CollisionGroup is extracted independently on change; absence means 0. Group changes do not upload geometry.
+   - Independently moving collider instances need separate world-space geometry assets, even with the same source Mesh.
+     Multiple cloths can query one collider without uploading separate copies of that collider.
+   - leaf_nodes/internal_nodes upload remains step 8; refit_layers remains CPU scheduling metadata.
+     History remains step 7; query bindings, pipelines and diagnostic probes remain step 4.
+   - CPU test review: asset lookup, stable identity on group changes, new identity on Mesh replacement,
+     failed replacement, input removal/despawn, separate instance assets and strong-handle lifetime.
+     GPU review still requires first upload, unchanged frames, replacement/removal and group-only changes.
+   - Host validation: =cargo test -j 2 -p bevy_cloth xpbd::collider::tests -- --nocapture=;
+     then run a GPU fixture with MeshCollider inputs and inspect CPU/GPU preparation logs.
+     =xpbd-solver= currently has no collider fixture, so running it alone does not validate collider upload.
 
 ** 后续接触与动态更新的既有约定
    - 外部网格单向作用于布料；碰撞组按值精确相等，缺失为 0。

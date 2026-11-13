@@ -57,7 +57,7 @@ pub(super) struct BvhRefitLayer {
 ///
 /// The tree does not own positions or triangle indices. Keep the matching
 /// geometry separately; original vertex and triangle numbering is preserved.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct TriangleBvh {
     /// All nodes; the root is nodes[0]. Upload as array<BvhNode>.
     pub nodes: Vec<BvhNode>,
