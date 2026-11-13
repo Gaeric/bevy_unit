@@ -1,7 +1,7 @@
 //! GPU-facing BVH2 node layout and CPU-owned tree data.
 //!
-//! Geometry is stored separately: world-space positions and original triangle
-//! indices. A triangle ID selects indices[id * 3..id * 3 + 3].
+//! Geometry is stored separately: positions and original triangle indices.
+//! Bounds use the input positions' space; a triangle ID selects indices[id * 3..id * 3 + 3].
 //! CPU construction only; no GPU allocation, traversal or refit execution.
 
 use bytemuck::{Pod, Zeroable};
@@ -83,7 +83,7 @@ pub(super) struct TriangleBvh {
 }
 
 /// Validate geometry before calling the BVH builder.
-fn validate_geometry(positions: &[Vec3], indices: &[u32]) -> Result<(), String> {
+fn validate_geometry(positions: &[[f32; 3]], indices: &[u32]) -> Result<(), String> {
     if positions.is_empty() || indices.is_empty() {
         return Err("collider geometry must not be empty".into());
     }
@@ -99,7 +99,7 @@ fn validate_geometry(positions: &[Vec3], indices: &[u32]) -> Result<(), String> 
         return Err("collider geometry exceeds u32 index capacity".into());
     }
 
-    if positions.iter().any(|position| !position.is_finite()) {
+    if positions.iter().flatten().any(|value| !value.is_finite()) {
         return Err("collider positions must be finite".into());
     }
 
@@ -111,6 +111,7 @@ fn validate_geometry(positions: &[Vec3], indices: &[u32]) -> Result<(), String> 
             return Err("triangle index is out of range".into());
         };
 
+        let position = Vec3::from_array(position);
         lower = lower.min(position);
         upper = upper.max(position);
     }
@@ -128,11 +129,12 @@ fn validate_geometry(positions: &[Vec3], indices: &[u32]) -> Result<(), String> 
 
 /// Build BVH2 without spatial splitting and prepare future GPU refit ranges.
 ///
-/// Positions are world-space. Finite degenerate and duplicate triangles retain
-/// their original IDs; deciding contact normals belongs to the query stage.
+/// All positions must use the same coordinate space; bounds use that space.
+/// Finite degenerate and duplicate triangles retain their original IDs;
+/// deciding contact normals belongs to the query stage.
 /// No geometry is reordered or retained in the returned tree.
 pub(super) fn build_triangle_bvh(
-    positions: &[Vec3],
+    positions: &[[f32; 3]],
     indices: &[u32],
 ) -> Result<TriangleBvh, String> {
     validate_geometry(positions, indices)?;
@@ -237,7 +239,7 @@ mod tests {
     }
 
     /// Walk the exported tree independently, then check the refit schedule.
-    fn assert_tree(tree: &TriangleBvh, positions: &[Vec3], indices: &[u32]) {
+    fn assert_tree(tree: &TriangleBvh, positions: &[[f32; 3]], indices: &[u32]) {
         let mut visited = vec![false; tree.nodes.len()];
         let mut depths = vec![0_u32; tree.nodes.len()];
         let mut references = Vec::new();
@@ -270,7 +272,7 @@ mod tests {
 
                     let base = triangle as usize * 3;
                     for &vertex in &indices[base..base + 3] {
-                        assert!(contains(node, positions[vertex as usize]));
+                        assert!(contains(node, Vec3::from_array(positions[vertex as usize])));
                     }
                 }
             } else {
@@ -353,7 +355,7 @@ mod tests {
 
     #[test]
     fn single_triangle_is_a_root_leaf() {
-        let positions = [Vec3::ZERO, Vec3::X, Vec3::Y];
+        let positions = [Vec3::ZERO, Vec3::X, Vec3::Y].map(|position| position.to_array());
         let indices = [0, 1, 2];
 
         let tree = build_triangle_bvh(&positions, &indices).unwrap();
@@ -378,7 +380,10 @@ mod tests {
             let base = positions.len() as u32;
             let origin = Vec3::new(x * x, (i % 5) as f32, 0.0);
 
-            positions.extend([origin, origin + Vec3::X * 0.2, origin + Vec3::Y * 0.3]);
+            positions.extend(
+                [origin, origin + Vec3::X * 0.2, origin + Vec3::Y * 0.3]
+                    .map(|position| position.to_array()),
+            );
             indices.extend([base, base + 1, base + 2]);
         }
 
@@ -392,9 +397,9 @@ mod tests {
     #[test]
     fn degenerate_and_duplicate_triangles_keep_their_ids() {
         for positions in [
-            vec![Vec3::ZERO; 3],
-            vec![Vec3::splat(7.0); 3],
-            vec![Vec3::ZERO, Vec3::X, Vec3::X * 2.0],
+            [[0.0; 3]; 3],
+            [[7.0; 3]; 3],
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
         ] {
             let indices = [0, 1, 2].repeat(8);
             let tree = build_triangle_bvh(&positions, &indices).unwrap();
@@ -402,7 +407,7 @@ mod tests {
             assert_tree(&tree, &positions, &indices);
         }
 
-        let positions = [Vec3::ZERO];
+        let positions = [[0.0; 3]];
         let indices = [0, 0, 0];
         let tree = build_triangle_bvh(&positions, &indices).unwrap();
 
@@ -411,7 +416,7 @@ mod tests {
 
     #[test]
     fn invalid_geometry_is_rejected() {
-        let positions = [Vec3::ZERO, Vec3::X, Vec3::Y];
+        let positions = [Vec3::ZERO, Vec3::X, Vec3::Y].map(|position| position.to_array());
 
         assert!(build_triangle_bvh(&[], &[0, 1, 2]).is_err());
         assert!(build_triangle_bvh(&positions, &[]).is_err());
@@ -421,12 +426,12 @@ mod tests {
 
         for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
             let mut invalid = positions.to_vec();
-            invalid.push(Vec3::splat(bad)); // Check unused vertices too.
+            invalid.push([bad; 3]); // Check unused vertices too.
             assert!(build_triangle_bvh(&invalid, &[0, 1, 2]).is_err());
         }
 
-        let overflow = [Vec3::splat(-1e30), Vec3::splat(1e30), Vec3::ZERO];
+        let overflow = [[-1e30; 3], [1e30; 3], [0.0; 3]];
         assert!(build_triangle_bvh(&overflow, &[0, 1, 2]).is_err());
-        assert!(build_triangle_bvh(&[Vec3::splat(f32::MAX)], &[0, 0, 0]).is_err());
+        assert!(build_triangle_bvh(&[[f32::MAX; 3]], &[0, 0, 0]).is_err());
     }
 }

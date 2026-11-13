@@ -22,7 +22,6 @@ use bevy::{
         extract_component::ExtractComponentPlugin,
         extract_resource::ExtractResourcePlugin,
         mesh::allocator::MeshAllocatorSettings,
-        render_asset::RenderAssetPlugin,
         render_resource::BufferUsages,
         renderer::{RenderGraph, RenderGraphSystems},
     },
@@ -33,8 +32,7 @@ pub use self::collider::{CollisionGroup, MeshCollider};
 pub use self::tick::ClothStepSettings;
 
 use self::{
-    collider::{ColliderGeometry, PreparedCollider},
-    collider_gpu::GpuCollider,
+    collider::PreparedCollider,
     layout::{PreparedCloth, StepParams},
     tick::ClothTicks,
 };
@@ -49,9 +47,7 @@ impl Plugin for XpbdPlugin {
         embedded_asset!(app, "bvh_query.wesl");
 
         app.init_resource::<ClothTicks>()
-            .init_asset::<ColliderGeometry>()
             .add_plugins((
-                RenderAssetPlugin::<GpuCollider>::default(),
                 ExtractComponentPlugin::<PreparedCollider>::default(),
                 ExtractComponentPlugin::<CollisionGroup>::default(),
                 ExtractResourcePlugin::<ClothTicks>::default(),
@@ -70,8 +66,7 @@ impl Plugin for XpbdPlugin {
                     collider::clear_removed_colliders,
                     collider::prepare_colliders,
                 )
-                    .chain()
-                    .after(TransformSystems::Propagate),
+                    .chain(),
             );
 
         let render_app = app.sub_app_mut(RenderApp);
@@ -94,6 +89,7 @@ impl Plugin for XpbdPlugin {
                 Render,
                 (
                     upload::upload_cloths,
+                    collider_gpu::upload_colliders,
                     output::prepare_output_data,
                     output::update_output_params,
                     output::prepare_output_bind_groups,

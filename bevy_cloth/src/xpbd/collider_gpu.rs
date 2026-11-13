@@ -1,22 +1,19 @@
-//! GPU preparation for CPU-built collider geometry.
-//! No query bindings, traversal dispatch or refit yet.
+//! Per-entity collider GPU buffers and upload; no transform update or refit yet.
 
 use bevy::{
-    asset::AssetId,
-    ecs::system::{SystemParamItem, lifetimeless::SRes},
     prelude::*,
     render::{
-        render_asset::{PrepareAssetError, RenderAsset},
         render_resource::{Buffer, BufferInitDescriptor, BufferUsages},
         renderer::RenderDevice,
     },
 };
 
-use super::collider::ColliderGeometry;
+use super::collider::PreparedCollider;
 
-/// GPU geometry for one collider asset.
+/// Buffers owned by one collider entity. Bounds are local-space until refit.
+#[derive(Component)]
 pub(super) struct GpuCollider {
-    pub positions: Buffer,
+    pub local_positions: Buffer,
     pub indices: Buffer,
     pub nodes: Buffer,
     pub triangle_refs: Buffer,
@@ -26,61 +23,51 @@ pub(super) struct GpuCollider {
     pub node_count: u32,
 }
 
-impl RenderAsset for GpuCollider {
-    type SourceAsset = ColliderGeometry;
-    type Param = SRes<RenderDevice>;
-
-    fn prepare_asset(
-        geometry: Self::SourceAsset,
-        asset_id: AssetId<Self::SourceAsset>,
-        device: &mut SystemParamItem<Self::Param>,
-        _previous_asset: Option<&Self>,
-    ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
-        // Geometry sizes were validated during CPU preparation.
-        let vertex_count = geometry.positions.len() as u32;
-        let triangle_count = (geometry.indices.len() / 3) as u32;
-        let node_count = geometry.bvh.nodes.len() as u32;
-
-        let data: [(&str, &[u8]); 4] = [
-            (
-                "xpbd collider positions",
-                bytemuck::cast_slice(&geometry.positions),
-            ),
-            (
-                "xpbd collider indices",
-                bytemuck::cast_slice(&geometry.indices),
-            ),
-            (
-                "xpbd collider nodes",
-                bytemuck::cast_slice(&geometry.bvh.nodes),
-            ),
-            (
-                "xpbd collider triangle refs",
-                bytemuck::cast_slice(&geometry.bvh.triangle_refs),
-            ),
-        ];
-
-        let [positions, indices, nodes, triangle_refs] = data.map(|(label, contents)| {
-            device.create_buffer_with_data(&BufferInitDescriptor {
-                label: Some(label),
-                contents,
+impl GpuCollider {
+    fn new(device: &RenderDevice, prepared: &PreparedCollider) -> Self {
+        Self {
+            local_positions: device.create_buffer_with_data(&BufferInitDescriptor {
+                label: Some("xpbd collider local positions"),
+                contents: bytemuck::cast_slice(&prepared.positions),
                 usage: BufferUsages::STORAGE,
-            })
-        });
+            }),
+            indices: device.create_buffer_with_data(&BufferInitDescriptor {
+                label: Some("xpbd collider indices"),
+                contents: bytemuck::cast_slice(&prepared.indices),
+                usage: BufferUsages::STORAGE,
+            }),
+            nodes: device.create_buffer_with_data(&BufferInitDescriptor {
+                label: Some("xpbd collider nodes"),
+                contents: bytemuck::cast_slice(&prepared.bvh.nodes),
+                usage: BufferUsages::STORAGE,
+            }),
+            triangle_refs: device.create_buffer_with_data(&BufferInitDescriptor {
+                label: Some("xpbd collider triangle refs"),
+                contents: bytemuck::cast_slice(&prepared.bvh.triangle_refs),
+                usage: BufferUsages::STORAGE,
+            }),
+            vertex_count: prepared.positions.len() as u32,
+            triangle_count: (prepared.indices.len() / 3) as u32,
+            node_count: prepared.bvh.nodes.len() as u32,
+        }
+    }
+}
 
+/// Upload only on preparation/replacement, not on transform or group changes.
+pub(super) fn upload_colliders(
+    mut commands: Commands,
+    device: Res<RenderDevice>,
+    colliders: Query<(Entity, &PreparedCollider), Changed<PreparedCollider>>,
+) {
+    for (entity, prepared) in &colliders {
+        let gpu = GpuCollider::new(&device, prepared);
         info!(
-            ?asset_id,
-            vertex_count, triangle_count, node_count, "XPBD collider GPU buffers prepared"
+            ?entity,
+            vertices = gpu.vertex_count,
+            triangles = gpu.triangle_count,
+            nodes = gpu.node_count,
+            "XPBD collider GPU buffers prepared"
         );
-
-        Ok(Self {
-            positions,
-            indices,
-            nodes,
-            triangle_refs,
-            vertex_count,
-            triangle_count,
-            node_count,
-        })
+        commands.entity(entity).insert(gpu);
     }
 }
