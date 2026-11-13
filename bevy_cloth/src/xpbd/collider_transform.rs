@@ -1,4 +1,4 @@
-//! Extract collider poses and transform local points on the GPU; no BVH refit.
+//! Extract collider poses and transform local points before BVH refit.
 
 use bevy::{
     asset::load_embedded_asset,
@@ -89,7 +89,7 @@ pub(super) fn init_transform_pipeline(
 #[derive(Component)]
 pub(super) struct ColliderTransformBindGroup {
     bind_group: BindGroup,
-    submitted: Option<Mat4>,
+    pub(super) submitted: Option<Mat4>,
 }
 
 pub(super) fn prepare_transform_bind_groups(

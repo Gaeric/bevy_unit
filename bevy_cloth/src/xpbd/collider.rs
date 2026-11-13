@@ -9,6 +9,7 @@ use bevy::{
 use super::{
     bvh::{TriangleBvh, build_triangle_bvh},
     collider_gpu::GpuCollider,
+    collider_refit::ColliderRefit,
     collider_transform::{ColliderTransform, ColliderTransformBindGroup},
 };
 
@@ -34,7 +35,13 @@ pub struct CollisionGroup(pub u32);
 #[derive(Component, Clone, Debug, ExtractComponent)]
 #[extract_app(RenderApp)]
 #[extract_component_filter(Changed<PreparedCollider>)]
-#[extract_component_sync_target((Self, GpuCollider, ColliderTransform, ColliderTransformBindGroup))]
+#[extract_component_sync_target((
+    Self,
+    GpuCollider,
+    ColliderTransform,
+    ColliderTransformBindGroup,
+    ColliderRefit
+))]
 pub(super) struct PreparedCollider {
     /// Local-space points in homogeneous coordinates; w is always one.
     pub positions: Vec<[f32; 4]>,

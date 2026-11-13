@@ -1,4 +1,4 @@
-//! Per-entity collider GPU buffers and upload; BVH refit is not connected yet.
+//! Per-entity collider geometry buffers and upload.
 
 use bevy::{
     prelude::*,
@@ -8,9 +8,12 @@ use bevy::{
     },
 };
 
-use super::{collider::PreparedCollider, collider_transform::ColliderTransformBindGroup};
+use super::{
+    collider::PreparedCollider, collider_refit::ColliderRefit,
+    collider_transform::ColliderTransformBindGroup,
+};
 
-/// Buffers owned by one collider entity. Bounds are local-space until refit.
+/// Buffers owned by one collider entity. Initial local bounds are refitted in place.
 #[derive(Component)]
 pub(super) struct GpuCollider {
     pub local_positions: Buffer,
@@ -85,7 +88,7 @@ pub(super) fn upload_colliders(
         );
         commands
             .entity(entity)
-            .remove::<ColliderTransformBindGroup>()
+            .remove::<(ColliderTransformBindGroup, ColliderRefit)>()
             .insert(gpu);
     }
 }

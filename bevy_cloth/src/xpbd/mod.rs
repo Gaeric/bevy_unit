@@ -5,6 +5,7 @@ mod bindings;
 mod bvh;
 mod collider;
 mod collider_gpu;
+mod collider_refit;
 mod collider_transform;
 mod gpu;
 mod layout;
@@ -47,6 +48,7 @@ impl Plugin for XpbdPlugin {
         embedded_asset!(app, "output.wesl");
         embedded_asset!(app, "bvh_query.wesl");
         embedded_asset!(app, "collider_transform.wesl");
+        embedded_asset!(app, "collider_refit.wesl");
 
         app.init_resource::<ClothTicks>()
             .add_plugins((
@@ -95,6 +97,7 @@ impl Plugin for XpbdPlugin {
                     pipeline::init_pipelines,
                     pipeline::init_output_pipeline,
                     collider_transform::init_transform_pipeline,
+                    collider_refit::init_refit_pipeline,
                 ),
             )
             .add_systems(
@@ -103,6 +106,7 @@ impl Plugin for XpbdPlugin {
                     upload::upload_cloths,
                     collider_gpu::upload_colliders,
                     collider_transform::prepare_transform_bind_groups,
+                    collider_refit::prepare_refits,
                     output::prepare_output_data,
                     output::update_output_params,
                     output::prepare_output_bind_groups,
@@ -114,6 +118,7 @@ impl Plugin for XpbdPlugin {
                 RenderGraph,
                 (
                     collider_transform::transform_collider_vertices,
+                    collider_refit::refit_colliders,
                     tick::simulate_cloths,
                     output::output_cloths,
                 )
