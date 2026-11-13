@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cloth::xpbd::{Attachment, ClothStepSettings, StretchCloth, XpbdPlugin};
+use bevy_cloth::xpbd::{Attachment, ClothStepSettings, MeshCollider, StretchCloth, XpbdPlugin};
 
 const SEGMENTS: u32 = 16;
 
@@ -63,6 +63,18 @@ fn setup(
             substeps: 6,
             iterations: 10,
         },
+    ));
+    // Static input for BVH preparation/upload; motion and contact follow later.
+    commands.spawn((
+        Name::new("Mesh collider sphere"),
+        Mesh3d(meshes.add(Sphere::new(0.5).mesh().uv(32, 18))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.9, 0.55, 0.15),
+            perceptual_roughness: 0.7,
+            ..default()
+        })),
+        Transform::from_xyz(0.8, 1.4, -0.6),
+        MeshCollider,
     ));
     commands.spawn((
         Camera3d::default(),
