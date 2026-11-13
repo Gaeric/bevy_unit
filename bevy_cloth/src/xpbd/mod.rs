@@ -46,6 +46,7 @@ impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "layout.wesl");
         embedded_asset!(app, "output.wesl");
+        embedded_asset!(app, "bvh_query.wesl");
 
         app.init_resource::<ClothTicks>()
             .init_asset::<ColliderGeometry>()

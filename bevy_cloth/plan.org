@@ -56,14 +56,14 @@
   目标：CPU 建 BVH，GPU 查询三角网格接触并 refit；SDF 留作后期候选。
   以下十步按逻辑变化逐批审阅、实现和验证，不要求一次完成，也不自动执行 Git commit。
 
-** Current stop: step 3 implemented for review, not yet validated on GPU
+** Current stop: step 4 GPU query functions retained; diagnostic infrastructure removed
    - XPBD already has prediction, colored in-place stretch solving, velocity updates and Mesh position/normal output.
    - Step 1: =bvh.rs= builds BVH2 with obvhs 0.4.0, converts the GPU ABI and creates refit schedules.
    - Step 2: =collider.rs= prepares world-space geometry and handles Mesh replacement and input removal.
      Inputs must be loaded and CPU-readable. No waiting, retry queue, transform tracking or in-place Mesh edit tracking.
    - Step 3: geometry is now a =ColliderGeometry= asset referenced by =PreparedCollider=.
      =GpuCollider= implements =RenderAsset=; entity references and collision groups use changed-component extraction.
-     Existing cloth upload and solver paths are unchanged. Queries and contact response remain step 4 and later.
+     Existing cloth upload and solver paths are unchanged. Step 4 provides shader query functions; contact response remains step 5.
    - Historical evidence: 5 standalone BVH tests passed; step 2 all-targets check passed and 6 collider tests compiled.
      Those collider tests were not executed; full test linking was blocked by missing Wayland/ALSA libraries.
    - Current batch: CPU tests adapted for asset lookup, identity and strong-handle lifetime; execution pending.
@@ -78,7 +78,7 @@
    | 1 | 已有代码 | CPU BVH2 构建、自有节点 ABI 和结构测试 | 索引覆盖、包围盒、节点布局、深度与 refit 层次 |
    | 2 | 已有代码 | Mesh 输入、世界空间 CPU 准备、替换与移除 | 输入格式、完整世界变换、失败清旧数据、移除生命周期 |
    | 3 | Implemented; validation pending | Asset extraction, GPU preparation and reference lifetime | No redundant upload; replacement consistency; removed references stop participation before resource reclamation |
-   | 4 | 待做 | BVH 最近点查询 kernel、异步诊断探针 | 与独立 CPU 暴力三角查询比较；检查距离、重建点、状态与访问量 |
+   | 4 | Shader functions written; review pending | GPU BVH closest-point query for later contact integration | No library probe API, readback or CPU comparison framework; runtime integration remains pending |
    | 5 | 待做 | 无摩擦静态三角网格接触，接入 XPBD 子步 | 新路径的场景 2：静态三角网格球与布料接触；观察穿透与残差 |
    | 6 | 待做 | 静态表面摩擦 | 零摩擦对照、切向位移和摩擦上限；不靠阻尼冒充摩擦 |
    | 7 | 待做 | 共享几何 tick 边界、当前/历史几何管理 | 同一碰撞体每 tick 只推进一次；多布料共享；零 tick 不推进；重置清历史 |
@@ -107,13 +107,32 @@
    - Independently moving collider instances need separate world-space geometry assets, even with the same source Mesh.
      Multiple cloths can query one collider without uploading separate copies of that collider.
    - leaf_nodes/internal_nodes upload remains step 8; refit_layers remains CPU scheduling metadata.
-     History remains step 7; query bindings, pipelines and diagnostic probes remain step 4.
+     History remains step 7; runtime query bindings and dispatch will be connected with contact integration.
    - CPU test review: asset lookup, stable identity on group changes, new identity on Mesh replacement,
      failed replacement, input removal/despawn, separate instance assets and strong-handle lifetime.
      GPU review still requires first upload, unchanged frames, replacement/removal and group-only changes.
    - Host validation: =cargo test -j 2 -p bevy_cloth xpbd::collider::tests -- --nocapture=;
      then run a GPU fixture with MeshCollider inputs and inspect CPU/GPU preparation logs.
      =xpbd-solver= currently has no collider fixture, so running it alone does not validate collider upload.
+
+** Step 4 current review batch: GPU query functions only
+   - =bvh_query.wesl=: segment fallback, seven-region closest point, AABB pruning,
+     near-child-first stack traversal and final winding face normal.
+     The geometry routine follows [[https://github.com/NVIDIA/warp/blob/82dab030eeb6088e180922bc60aa167a2038e457/warp/native/intersect.h#L44-L109][NVIDIA Warp's CUDA implementation]]. Changes: relative-vector inputs, three weights and zero-area segment fallback.
+   - Removed =collider_query.rs=: probe components, request collection/versioning, result resources,
+     channels, readback buffers, diagnostic pipeline and dispatch. No replacement diagnostic framework or example.
+     Removed their plugin registration and the probe compute entry; four read-only geometry bindings remain.
+   - =closest_hit(p)= returns the original triangle ID, closest point/distance squared, barycentrics,
+     winding normal and completion status directly within the shader. No CPU result ABI or exported visit statistics.
+     The local traversal counter only bounds traversal; stack/numeric failure status prevents using a partial answer.
+   - The shader is embedded but has no compute entry or active caller yet. Contact integration must provide
+     the runtime binding layout and particle entry point. No existing simulation behavior changes in this batch.
+   - Stack capacity remains 64; overflow returns failure. Direct f32 arithmetic retains scale/skinny-triangle risks.
+     Query distance is unsigned; a winding face normal is not a global inside/outside classifier.
+   - Cleaned shader passed actual-source Naga parsing/module validation: closest_hit retained,
+     four read-only bindings, no compute entry. Rust formatting and git diff --check passed.
+     Workspace offline Cargo remains blocked before compilation by missing avian3d for bevy_waltz.
+     No numerical execution, GPU run or performance result is claimed.
 
 ** 后续接触与动态更新的既有约定
    - 外部网格单向作用于布料；碰撞组按值精确相等，缺失为 0。
