@@ -84,6 +84,7 @@ impl Plugin for XpbdPlugin {
         render_app
             .insert_resource(bindings::ClothBindGroupLayout::new())
             .insert_resource(bindings::ClothOutputBindGroupLayout::new())
+            .insert_resource(bindings::ContactBindGroupLayout::new())
             .add_systems(
                 ExtractSchedule,
                 (
@@ -96,6 +97,7 @@ impl Plugin for XpbdPlugin {
                 (
                     pipeline::init_pipelines,
                     pipeline::init_output_pipeline,
+                    pipeline::init_contact_pipeline,
                     collider_transform::init_transform_pipeline,
                     collider_refit::init_refit_pipeline,
                 ),
@@ -142,6 +144,10 @@ pub struct StretchCloth {
     /// XPBD distance-constraint compliance, in m/N; zero means inextensible.
     pub stretch_compliance: f32,
     pub attachments: Vec<Attachment>,
+    /// World-space contact thickness, in meters.
+    pub collision_margin: f32,
+    /// Resolve contact on both sides of the triangle surface.
+    pub double_sided: bool,
 }
 
 /// A particle constrained to a fixed world-space position, not a distance limit.

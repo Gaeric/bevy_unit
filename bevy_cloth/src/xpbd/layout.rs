@@ -80,7 +80,7 @@ pub(super) struct FixedAttachment {
     pub particle: u32,
 }
 
-/// Simulation parameters; dt is one substep's duration. Uniform payload: 32 bytes.
+/// Simulation parameters; dt is one substep's duration. Uniform payload: 48 bytes.
 ///
 /// WGSL equivalent:
 /// struct StepParams {
@@ -89,6 +89,9 @@ pub(super) struct FixedAttachment {
 ///     particle_count: u32,
 ///     stretch_count: u32,
 ///     attachment_count: u32,
+///     collision_margin: f32,
+///     double_sided: u32,
+///     padding: vec2<u32>,
 /// }
 #[repr(C)]
 #[derive(Component, Clone, Copy, Debug, Pod, Zeroable, ExtractComponent)]
@@ -102,6 +105,11 @@ pub(super) struct StepParams {
     pub particle_count: u32,
     pub stretch_count: u32,
     pub attachment_count: u32,
+    /// World-space contact thickness, in meters.
+    pub collision_margin: f32,
+    /// Zero for an outward-wound solid shell, one for a two-sided surface.
+    pub double_sided: u32,
+    pub padding: [u32; 2],
 }
 
 /// Constraint range for one color dispatch. Uniform payload size: 16 bytes.
@@ -197,12 +205,15 @@ mod tests {
 
     #[test]
     fn uniform_layout_matches_wgsl() {
-        assert_eq!(size_of::<StepParams>(), 32);
+        assert_eq!(size_of::<StepParams>(), 48);
         assert_eq!(offset_of!(StepParams, gravity), 0);
         assert_eq!(offset_of!(StepParams, dt), 16);
         assert_eq!(offset_of!(StepParams, particle_count), 20);
         assert_eq!(offset_of!(StepParams, stretch_count), 24);
         assert_eq!(offset_of!(StepParams, attachment_count), 28);
+        assert_eq!(offset_of!(StepParams, collision_margin), 32);
+        assert_eq!(offset_of!(StepParams, double_sided), 36);
+        assert_eq!(offset_of!(StepParams, padding), 40);
 
         assert_eq!(size_of::<GroupParams>(), 16);
         assert_eq!(offset_of!(GroupParams, start), 0);

@@ -153,10 +153,10 @@ const QUERY_NUMERIC_ERROR: u32 = 2u;
 const QUERY_INVALID_TREE: u32 = 3u;
 const STACK_CAPACITY: u32 = 64u;
 
-@group(0) @binding(0) var<storage, read> positions: array<vec4<f32>>;
-@group(0) @binding(1) var<storage, read> indices: array<u32>;
-@group(0) @binding(2) var<storage, read> nodes: array<BvhNode>;
-@group(0) @binding(3) var<storage, read> triangle_refs: array<u32>;
+@group(1) @binding(0) var<storage, read> positions: array<vec4<f32>>;
+@group(1) @binding(1) var<storage, read> indices: array<u32>;
+@group(1) @binding(2) var<storage, read> nodes: array<BvhNode>;
+@group(1) @binding(3) var<storage, read> triangle_refs: array<u32>;
 
 fn bounds_distance_squared(p: vec3<f32>, node: BvhNode) -> f32 {
     let delta = max(max(node.min - p, p - node.max), vec3<f32>(0.0));

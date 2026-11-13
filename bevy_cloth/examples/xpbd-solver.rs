@@ -57,6 +57,8 @@ fn setup(
             particle_mass: 1.0,
             stretch_compliance: 0.0001,
             attachments,
+            collision_margin: 0.02,
+            double_sided: false,
         },
         ClothStepSettings {
             gravity: Vec3::new(0.0, -9.8, 0.0),

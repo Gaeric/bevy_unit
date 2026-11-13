@@ -6,7 +6,7 @@ use bevy::{
 };
 
 use super::{
-    bindings::{ClothBindGroup, ClothBindGroupLayout},
+    bindings::{ClothBindGroup, ClothBindGroupLayout, ContactBindGroupLayout},
     gpu::GpuCloth,
     layout::{PreparedCloth, StepParams},
     tick::ClothSimulation,
@@ -17,15 +17,18 @@ pub(super) fn upload_cloths(
     device: Res<RenderDevice>,
     cache: Res<PipelineCache>,
     layout: Res<ClothBindGroupLayout>,
+    contact_layout: Res<ContactBindGroupLayout>,
     cloths: Query<(Entity, &PreparedCloth, &StepParams), Added<PreparedCloth>>,
 ) {
     for (entity, prepared, step) in &cloths {
         let gpu = GpuCloth::new(&device, prepared, step);
         let bind_group = layout.create_bind_group(&device, &cache, &gpu);
+        let contact_bind_group = contact_layout.create_cloth_bind_group(&device, &cache, &gpu);
 
         commands.entity(entity).insert((
             gpu,
             ClothBindGroup(bind_group),
+            contact_bind_group,
             ClothSimulation::default(),
         ));
 

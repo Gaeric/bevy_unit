@@ -7,6 +7,7 @@ use bevy::{
 };
 
 use super::{
+    bindings::ColliderContactBindGroup,
     bvh::{TriangleBvh, build_triangle_bvh},
     collider_gpu::GpuCollider,
     collider_refit::ColliderRefit,
@@ -40,7 +41,8 @@ pub struct CollisionGroup(pub u32);
     GpuCollider,
     ColliderTransform,
     ColliderTransformBindGroup,
-    ColliderRefit
+    ColliderRefit,
+    ColliderContactBindGroup
 ))]
 pub(super) struct PreparedCollider {
     /// Local-space points in homogeneous coordinates; w is always one.

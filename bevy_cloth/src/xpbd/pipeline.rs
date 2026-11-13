@@ -6,7 +6,7 @@ use bevy::{
     render::render_resource::{CachedComputePipelineId, ComputePipelineDescriptor, PipelineCache},
 };
 
-use super::bindings::{ClothBindGroupLayout, ClothOutputBindGroupLayout};
+use super::bindings::{ClothBindGroupLayout, ClothOutputBindGroupLayout, ContactBindGroupLayout};
 
 /// Must match the workgroup size of the simulation and output entry points.
 pub(super) const WORKGROUP_SIZE: u32 = 64;
@@ -33,6 +33,35 @@ pub(super) fn init_output_pipeline(
     });
 
     commands.insert_resource(ClothOutputPipeline { output_mesh });
+}
+
+/// Contact readiness is separate until contact dispatch is connected.
+#[derive(Resource)]
+pub(super) struct ClothContactPipeline {
+    pub solve_contact: CachedComputePipelineId,
+    /// Embedded WESL custom imports must be loaded explicitly and kept alive.
+    _query_shader: Handle<Shader>,
+}
+
+pub(super) fn init_contact_pipeline(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    cache: Res<PipelineCache>,
+    layout: Res<ContactBindGroupLayout>,
+) {
+    let query_shader = load_embedded_asset!(asset_server.as_ref(), "bvh_query.wesl");
+    let solve_contact = cache.queue_compute_pipeline(ComputePipelineDescriptor {
+        label: Some("xpbd solve_contact".into()),
+        layout: vec![layout.cloth.clone(), layout.collider.clone()],
+        shader: load_embedded_asset!(asset_server.as_ref(), "layout.wesl"),
+        entry_point: Some("solve_contact".into()),
+        ..default()
+    });
+
+    commands.insert_resource(ClothContactPipeline {
+        solve_contact,
+        _query_shader: query_shader,
+    });
 }
 
 #[derive(Resource)]

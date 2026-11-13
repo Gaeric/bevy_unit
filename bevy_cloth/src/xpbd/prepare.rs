@@ -45,6 +45,9 @@ pub(super) fn prepare_added_cloths(
             particle_count: prepared.particles.len() as u32,
             stretch_count: prepared.stretch.len() as u32,
             attachment_count: prepared.attachments.len() as u32,
+            collision_margin: config.collision_margin,
+            double_sided: u32::from(config.double_sided),
+            padding: [0; 2],
         };
 
         info!(
@@ -79,6 +82,10 @@ fn validate_inputs<'a>(
 
     if !config.stretch_compliance.is_finite() || config.stretch_compliance < 0.0 {
         return Err("stretch_compliance must be nonnegative and finite".into());
+    }
+
+    if !config.collision_margin.is_finite() || config.collision_margin < 0.0 {
+        return Err("collision_margin must be nonnegative and finite".into());
     }
 
     // Validate mesh topology, position format and source values.
