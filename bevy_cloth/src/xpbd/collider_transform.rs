@@ -53,7 +53,7 @@ pub(super) fn extract_collider_transforms(
 #[derive(Resource)]
 pub(super) struct ColliderTransformPipeline {
     layout: BindGroupLayoutDescriptor,
-    transform_vertices: CachedComputePipelineId,
+    pub(super) transform_vertices: CachedComputePipelineId,
 }
 
 pub(super) fn init_transform_pipeline(

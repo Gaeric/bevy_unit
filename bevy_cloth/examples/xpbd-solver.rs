@@ -66,7 +66,7 @@ fn setup(
             iterations: 10,
         },
     ));
-    // Static input for BVH preparation/upload; motion and contact follow later.
+    // Initial overlap exercises tick-start stabilization and substep mesh contact.
     commands.spawn((
         Name::new("Mesh collider sphere"),
         Mesh3d(meshes.add(Sphere::new(0.5).mesh().uv(32, 18))),
@@ -75,7 +75,7 @@ fn setup(
             perceptual_roughness: 0.7,
             ..default()
         })),
-        Transform::from_xyz(0.8, 1.4, -0.6),
+        Transform::from_xyz(0.0, 1.4, -0.35),
         MeshCollider,
     ));
     commands.spawn((

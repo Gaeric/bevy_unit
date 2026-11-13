@@ -43,8 +43,8 @@ fn refit_param_stride(device: &RenderDevice) -> u32 {
 #[derive(Resource)]
 pub(super) struct ColliderRefitPipeline {
     layout: BindGroupLayoutDescriptor,
-    leaves: CachedComputePipelineId,
-    internal: CachedComputePipelineId,
+    pub(super) leaves: CachedComputePipelineId,
+    pub(super) internal: CachedComputePipelineId,
 }
 
 pub(super) fn init_refit_pipeline(
