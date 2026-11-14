@@ -9,37 +9,37 @@ use bevy::{
 };
 use std::mem::size_of;
 
-use crate::prepare::{ConstraintGroup, PreparedCloth};
+use crate::prepare::{ConstraintColorRange, PreparedCloth};
 
-use super::layout::{GroupParams, StepParams};
+use super::layout::{ConstraintRangeParams, StepParams};
 
 /// Present only when the prepared cloth has dihedral constraints.
 /// Lambda indices follow the color-reordered bend array, not the source edges.
 /// Cleared at each substep start, accumulated across colored bend iterations.
-pub(crate) struct GpuBending {
+pub(crate) struct BendConstraintBuffers {
     pub constraints: Buffer,
     pub lambdas: Buffer,
-    pub group_params: Buffer,
+    pub range_params: Buffer,
 }
 
 /// Owns only the data buffers uploaded to the GPU.
 #[derive(Component)]
-pub(crate) struct GpuCloth {
+pub(crate) struct ClothBuffers {
     pub particles: Buffer,
     pub velocities: Buffer,
     pub previous_positions: Buffer,
-    pub stretch: Buffer,
+    pub stretch_constraints: Buffer,
     pub stretch_lambdas: Buffer,
-    pub bending: Option<GpuBending>,
+    pub bending: Option<BendConstraintBuffers>,
     pub step_params: Buffer,
-    pub group_params: Buffer,
+    pub stretch_range_params: Buffer,
 }
 
-impl GpuCloth {
+impl ClothBuffers {
     /// Upload prepared data and externally prepared substep parameters.
     ///
-    /// The caller retains the CPU color groups for dispatch recording.
-    pub fn new(device: &RenderDevice, prepared: &PreparedCloth, step: &StepParams) -> Self {
+    /// The caller retains the CPU color ranges for dispatch recording.
+    pub fn new(device: &RenderDevice, prepared: &PreparedCloth, step_params: &StepParams) -> Self {
         let previous_positions: Vec<[f32; 4]> = prepared
             .particles
             .iter()
@@ -48,21 +48,21 @@ impl GpuCloth {
                 [x, y, z, 0.0]
             })
             .collect();
-        let stretch_lambdas = vec![0.0_f32; prepared.stretch.len()];
+        let stretch_lambdas = vec![0.0_f32; prepared.stretch_constraints.len()];
 
         // Separate color arrays share the same dynamic-uniform slot format.
-        let stride = group_param_stride(device) as usize;
-        let group_bytes = pack_group_params(&prepared.groups, stride);
+        let stride = constraint_range_param_stride(device) as usize;
+        let range_bytes = pack_constraint_range_params(&prepared.stretch_colors, stride);
 
         let storage = BufferUsages::STORAGE | BufferUsages::COPY_DST;
         let uniform = BufferUsages::UNIFORM | BufferUsages::COPY_DST;
-        let bending = (!prepared.bend.is_empty()).then(|| {
-            let lambdas = vec![0.0_f32; prepared.bend.len()];
-            let groups = pack_group_params(&prepared.bend_groups, stride);
-            GpuBending {
+        let bending = (!prepared.bend_constraints.is_empty()).then(|| {
+            let lambdas = vec![0.0_f32; prepared.bend_constraints.len()];
+            let ranges = pack_constraint_range_params(&prepared.bend_colors, stride);
+            BendConstraintBuffers {
                 constraints: device.create_buffer_with_data(&BufferInitDescriptor {
                     label: Some("xpbd bend constraints"),
-                    contents: bytemuck::cast_slice(&prepared.bend),
+                    contents: bytemuck::cast_slice(&prepared.bend_constraints),
                     usage: BufferUsages::STORAGE,
                 }),
                 lambdas: device.create_buffer_with_data(&BufferInitDescriptor {
@@ -70,9 +70,9 @@ impl GpuCloth {
                     contents: bytemuck::cast_slice(&lambdas),
                     usage: storage,
                 }),
-                group_params: device.create_buffer_with_data(&BufferInitDescriptor {
+                range_params: device.create_buffer_with_data(&BufferInitDescriptor {
                     label: Some("xpbd bend group params"),
-                    contents: &groups,
+                    contents: &ranges,
                     usage: BufferUsages::UNIFORM,
                 }),
             }
@@ -94,9 +94,9 @@ impl GpuCloth {
                 contents: bytemuck::cast_slice(&previous_positions),
                 usage: storage,
             }),
-            stretch: device.create_buffer_with_data(&BufferInitDescriptor {
+            stretch_constraints: device.create_buffer_with_data(&BufferInitDescriptor {
                 label: Some("xpbd stretch"),
-                contents: bytemuck::cast_slice(&prepared.stretch),
+                contents: bytemuck::cast_slice(&prepared.stretch_constraints),
                 usage: storage,
             }),
             stretch_lambdas: device.create_buffer_with_data(&BufferInitDescriptor {
@@ -107,12 +107,12 @@ impl GpuCloth {
             bending,
             step_params: device.create_buffer_with_data(&BufferInitDescriptor {
                 label: Some("xpbd step params"),
-                contents: bytemuck::bytes_of(step),
+                contents: bytemuck::bytes_of(step_params),
                 usage: uniform,
             }),
-            group_params: device.create_buffer_with_data(&BufferInitDescriptor {
+            stretch_range_params: device.create_buffer_with_data(&BufferInitDescriptor {
                 label: Some("xpbd group params"),
-                contents: &group_bytes,
+                contents: &range_bytes,
                 usage: uniform,
             }),
         }
@@ -120,24 +120,24 @@ impl GpuCloth {
 }
 
 /// One immutable, device-aligned uniform slot per constraint color.
-fn pack_group_params(groups: &[ConstraintGroup], stride: usize) -> Vec<u8> {
-    let mut bytes = vec![0_u8; groups.len() * stride];
-    for (index, group) in groups.iter().enumerate() {
-        let params = GroupParams {
-            start: group.start,
-            count: group.count,
+fn pack_constraint_range_params(ranges: &[ConstraintColorRange], stride: usize) -> Vec<u8> {
+    let mut bytes = vec![0_u8; ranges.len() * stride];
+    for (index, range) in ranges.iter().enumerate() {
+        let params = ConstraintRangeParams {
+            start: range.start,
+            count: range.count,
             padding: [0; 2],
         };
         let offset = index * stride;
-        bytes[offset..offset + size_of::<GroupParams>()]
+        bytes[offset..offset + size_of::<ConstraintRangeParams>()]
             .copy_from_slice(bytemuck::bytes_of(&params));
     }
     bytes
 }
 
 /// Byte distance between color slots; a color's dynamic offset is index * stride.
-pub(crate) fn group_param_stride(device: &RenderDevice) -> u32 {
+pub(crate) fn constraint_range_param_stride(device: &RenderDevice) -> u32 {
     let alignment = device.limits().min_uniform_buffer_offset_alignment;
-    let payload_size = size_of::<GroupParams>() as u32;
+    let payload_size = size_of::<ConstraintRangeParams>() as u32;
     payload_size.div_ceil(alignment) * alignment
 }

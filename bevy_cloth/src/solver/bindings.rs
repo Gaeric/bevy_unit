@@ -18,8 +18,8 @@ use std::{mem::size_of, num::NonZeroU64};
 use crate::collision::gpu::GpuCollider;
 
 use super::{
-    gpu::{GpuBending, GpuCloth},
-    layout::{Bend, GroupParams, Particle, StepParams, Stretch},
+    gpu::{BendConstraintBuffers, ClothBuffers},
+    layout::{BendConstraint, ConstraintRangeParams, Particle, StepParams, StretchConstraint},
 };
 
 /// Group 0 for contact: one cloth's parameters and writable particles.
@@ -80,14 +80,14 @@ impl ContactBindGroupLayout {
         &self,
         device: &RenderDevice,
         cache: &PipelineCache,
-        cloth: &GpuCloth,
+        cloth_buffers: &ClothBuffers,
     ) -> ClothContactBindGroup {
         ClothContactBindGroup(device.create_bind_group(
             "xpbd contact cloth bind group",
             &cache.get_bind_group_layout(&self.cloth),
             &BindGroupEntries::with_indices((
-                (0, cloth.step_params.as_entire_binding()),
-                (1, cloth.particles.as_entire_binding()),
+                (0, cloth_buffers.step_params.as_entire_binding()),
+                (1, cloth_buffers.particles.as_entire_binding()),
             )),
         ))
     }
@@ -102,7 +102,7 @@ impl ContactBindGroupLayout {
             "xpbd contact collider bind group",
             &cache.get_bind_group_layout(&self.collider),
             &BindGroupEntries::sequential((
-                collider.positions.as_entire_binding(),
+                collider.world_positions.as_entire_binding(),
                 collider.indices.as_entire_binding(),
                 collider.nodes.as_entire_binding(),
                 collider.triangle_refs.as_entire_binding(),
@@ -135,11 +135,11 @@ impl ClothBendBindGroupLayout {
                         storage_buffer_sized(false, NonZeroU64::new(size_of::<Particle>() as u64)),
                         uniform_buffer_sized(
                             true,
-                            NonZeroU64::new(size_of::<GroupParams>() as u64),
+                            NonZeroU64::new(size_of::<ConstraintRangeParams>() as u64),
                         ),
                         storage_buffer_read_only_sized(
                             false,
-                            NonZeroU64::new(size_of::<Bend>() as u64),
+                            NonZeroU64::new(size_of::<BendConstraint>() as u64),
                         ),
                         storage_buffer_sized(false, NonZeroU64::new(size_of::<f32>() as u64)),
                     ),
@@ -152,38 +152,38 @@ impl ClothBendBindGroupLayout {
         &self,
         device: &RenderDevice,
         cache: &PipelineCache,
-        cloth: &GpuCloth,
-        bending: &GpuBending,
+        cloth_buffers: &ClothBuffers,
+        bend_buffers: &BendConstraintBuffers,
     ) -> ClothBendBindGroup {
         ClothBendBindGroup(device.create_bind_group(
             "xpbd bend bind group",
             &cache.get_bind_group_layout(&self.descriptor),
             &BindGroupEntries::sequential((
-                cloth.step_params.as_entire_binding(),
-                cloth.particles.as_entire_binding(),
+                cloth_buffers.step_params.as_entire_binding(),
+                cloth_buffers.particles.as_entire_binding(),
                 BindingResource::Buffer(BufferBinding {
-                    buffer: &bending.group_params,
+                    buffer: &bend_buffers.range_params,
                     offset: 0,
-                    size: NonZeroU64::new(size_of::<GroupParams>() as u64),
+                    size: NonZeroU64::new(size_of::<ConstraintRangeParams>() as u64),
                 }),
-                bending.constraints.as_entire_binding(),
-                bending.lambdas.as_entire_binding(),
+                bend_buffers.constraints.as_entire_binding(),
+                bend_buffers.lambdas.as_entire_binding(),
             )),
         ))
     }
 }
 
-/// One Mesh instance's binding, kept separate from its GPU data buffers.
+/// One Mesh instance's binding for prediction, stretch solving and velocity update.
 #[derive(Component)]
-pub(crate) struct ClothBindGroup(pub BindGroup);
+pub(crate) struct ClothStretchBindGroup(pub BindGroup);
 
 /// One interface shared by prediction, stretch solving and velocity update.
 #[derive(Resource)]
-pub(crate) struct ClothBindGroupLayout {
+pub(crate) struct ClothStretchBindGroupLayout {
     pub descriptor: BindGroupLayoutDescriptor,
 }
 
-impl ClothBindGroupLayout {
+impl ClothStretchBindGroupLayout {
     pub fn new() -> Self {
         Self {
             descriptor: BindGroupLayoutDescriptor::new(
@@ -211,14 +211,14 @@ impl ClothBindGroupLayout {
                             4,
                             uniform_buffer_sized(
                                 true,
-                                NonZeroU64::new(size_of::<GroupParams>() as u64),
+                                NonZeroU64::new(size_of::<ConstraintRangeParams>() as u64),
                             ),
                         ),
                         (
                             5,
                             storage_buffer_read_only_sized(
                                 false,
-                                NonZeroU64::new(size_of::<Stretch>() as u64),
+                                NonZeroU64::new(size_of::<StretchConstraint>() as u64),
                             ),
                         ),
                         (6, storage_buffer_sized(false, NonZeroU64::new(4))),
@@ -229,31 +229,31 @@ impl ClothBindGroupLayout {
     }
 
     /// All stages use this group. Supply dynamic offset 0 for particle stages,
-    /// or color_index * group_param_stride(device) for stretch solving.
+    /// or color_index * constraint_range_param_stride(device) for stretch solving.
     pub fn create_bind_group(
         &self,
         device: &RenderDevice,
         cache: &PipelineCache,
-        cloth: &GpuCloth,
+        cloth_buffers: &ClothBuffers,
     ) -> BindGroup {
         device.create_bind_group(
             "xpbd solver bind group",
             &cache.get_bind_group_layout(&self.descriptor),
             &BindGroupEntries::with_indices((
-                (0, cloth.step_params.as_entire_binding()),
-                (1, cloth.particles.as_entire_binding()),
-                (2, cloth.velocities.as_entire_binding()),
-                (3, cloth.previous_positions.as_entire_binding()),
+                (0, cloth_buffers.step_params.as_entire_binding()),
+                (1, cloth_buffers.particles.as_entire_binding()),
+                (2, cloth_buffers.velocities.as_entire_binding()),
+                (3, cloth_buffers.previous_positions.as_entire_binding()),
                 (
                     4,
                     BindingResource::Buffer(BufferBinding {
-                        buffer: &cloth.group_params,
+                        buffer: &cloth_buffers.stretch_range_params,
                         offset: 0,
-                        size: NonZeroU64::new(size_of::<GroupParams>() as u64),
+                        size: NonZeroU64::new(size_of::<ConstraintRangeParams>() as u64),
                     }),
                 ),
-                (5, cloth.stretch.as_entire_binding()),
-                (6, cloth.stretch_lambdas.as_entire_binding()),
+                (5, cloth_buffers.stretch_constraints.as_entire_binding()),
+                (6, cloth_buffers.stretch_lambdas.as_entire_binding()),
             )),
         )
     }

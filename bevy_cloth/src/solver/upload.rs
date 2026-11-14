@@ -9,9 +9,10 @@ use crate::prepare::PreparedCloth;
 
 use super::{
     bindings::{
-        ClothBendBindGroupLayout, ClothBindGroup, ClothBindGroupLayout, ContactBindGroupLayout,
+        ClothBendBindGroupLayout, ClothStretchBindGroup, ClothStretchBindGroupLayout,
+        ContactBindGroupLayout,
     },
-    gpu::GpuCloth,
+    gpu::ClothBuffers,
     layout::StepParams,
     tick::ClothSimulation,
 };
@@ -20,23 +21,25 @@ pub(crate) fn upload_cloths(
     mut commands: Commands,
     device: Res<RenderDevice>,
     cache: Res<PipelineCache>,
-    layout: Res<ClothBindGroupLayout>,
+    layout: Res<ClothStretchBindGroupLayout>,
     contact_layout: Res<ContactBindGroupLayout>,
     bend_layout: Res<ClothBendBindGroupLayout>,
     cloths: Query<(Entity, &PreparedCloth, &StepParams), Added<PreparedCloth>>,
 ) {
-    for (entity, prepared, step) in &cloths {
-        let gpu = GpuCloth::new(&device, prepared, step);
-        let bind_group = layout.create_bind_group(&device, &cache, &gpu);
-        let contact_bind_group = contact_layout.create_cloth_bind_group(&device, &cache, &gpu);
-        if let Some(bending) = &gpu.bending {
-            let bend_bind_group = bend_layout.create_bind_group(&device, &cache, &gpu, bending);
+    for (entity, prepared, step_params) in &cloths {
+        let cloth_buffers = ClothBuffers::new(&device, prepared, step_params);
+        let bind_group = layout.create_bind_group(&device, &cache, &cloth_buffers);
+        let contact_bind_group =
+            contact_layout.create_cloth_bind_group(&device, &cache, &cloth_buffers);
+        if let Some(bend_buffers) = &cloth_buffers.bending {
+            let bend_bind_group =
+                bend_layout.create_bind_group(&device, &cache, &cloth_buffers, bend_buffers);
             commands.entity(entity).insert(bend_bind_group);
         }
 
         commands.entity(entity).insert((
-            gpu,
-            ClothBindGroup(bind_group),
+            cloth_buffers,
+            ClothStretchBindGroup(bind_group),
             contact_bind_group,
             ClothSimulation::default(),
         ));
@@ -44,10 +47,10 @@ pub(crate) fn upload_cloths(
         info!(
             ?entity,
             particles = prepared.particles.len(),
-            stretch = prepared.stretch.len(),
-            colors = prepared.groups.len(),
-            bend = prepared.bend.len(),
-            bend_colors = prepared.bend_groups.len(),
+            stretch = prepared.stretch_constraints.len(),
+            colors = prepared.stretch_colors.len(),
+            bend = prepared.bend_constraints.len(),
+            bend_colors = prepared.bend_colors.len(),
             "XPBD cloth GPU data and binding initialized"
         );
     }

@@ -2,7 +2,7 @@ use bevy::{
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     prelude::*,
 };
-use bevy_cloth::{Attachment, ClothStepSettings, MeshCollider, StretchCloth, XpbdPlugin};
+use bevy_cloth::{Cloth, ClothPlugin, ClothStepSettings, FixedAttachment, MeshCollider};
 
 const SEGMENTS: u32 = 16;
 
@@ -18,7 +18,7 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins((XpbdPlugin, FreeCameraPlugin))
+        .add_plugins((ClothPlugin, FreeCameraPlugin))
         .add_systems(Startup, setup)
         .add_systems(FixedUpdate, move_sphere)
         .run();
@@ -63,7 +63,7 @@ fn setup(
             ..default()
         })),
         Transform::IDENTITY,
-        StretchCloth {
+        Cloth {
             particle_mass: 1.0,
             stretch_compliance: 0.0001,
             bend_compliance: 0.0001,
@@ -112,7 +112,7 @@ fn move_sphere(time: Res<Time<Fixed>>, mut spheres: Query<&mut Transform, With<M
 }
 
 /// Example geometry only; it does not generate solver constraints or GPU buffers.
-fn cloth_input() -> (Mesh, Vec<Attachment>) {
+fn cloth_input() -> (Mesh, Vec<FixedAttachment>) {
     let mesh = Plane3d::default()
         .mesh()
         .size(2.0, 2.0)
@@ -135,7 +135,7 @@ fn cloth_input() -> (Mesh, Vec<Attachment>) {
                 .position(|vertex| Vec3::from(*vertex).distance(position) < 1e-5)
                 .expect("generated plane must contain the top corner")
                 as u32;
-            Attachment { particle, position }
+            FixedAttachment { particle, position }
         })
         .to_vec();
     (mesh, attachments)

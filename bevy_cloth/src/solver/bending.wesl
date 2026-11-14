@@ -1,9 +1,9 @@
 // Colored in-place XPBD dihedral solve; one accumulated lambda per hinge.
 
-import super::layout::{Particle, StepParams, GroupParams};
+import super::layout::{Particle, StepParams, ConstraintRangeParams};
 
-// Matches the 32-byte Bend ABI in layout.rs.
-struct Bend {
+// Matches the 32-byte BendConstraint ABI in layout.rs.
+struct BendConstraint {
     particles: vec4<u32>,
     rest_angle: f32,
     compliance: f32,
@@ -17,10 +17,10 @@ var<uniform> step_params: StepParams;
 var<storage, read_write> particles: array<Particle>;
 
 @group(0) @binding(2)
-var<uniform> group_params: GroupParams;
+var<uniform> range_params: ConstraintRangeParams;
 
 @group(0) @binding(3)
-var<storage, read> bend: array<Bend>;
+var<storage, read> bend_constraints: array<BendConstraint>;
 
 @group(0) @binding(4)
 var<storage, read_write> bend_lambdas: array<f32>;
@@ -28,12 +28,12 @@ var<storage, read_write> bend_lambdas: array<f32>;
 @compute @workgroup_size(64)
 fn solve_bending(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let local_index = invocation.x;
-    if local_index >= group_params.count {
+    if local_index >= range_params.count {
         return;
     }
 
-    let index = group_params.start + local_index;
-    let constraint = bend[index];
+    let index = range_params.start + local_index;
+    let constraint = bend_constraints[index];
     let ids = constraint.particles;
     let a = particles[ids.x];
     let b = particles[ids.y];
@@ -94,7 +94,7 @@ fn solve_bending(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let g3 = -(dot(c.position - a.position, edge) * scaled0
         + dot(c.position - b.position, edge) * scaled1) / edge_length;
 
-    let alpha = constraint.compliance / (step_params.dt * step_params.dt);
+    let alpha = constraint.compliance / (step_params.substep_dt * step_params.substep_dt);
     let denominator = a.inv_mass * dot(g0, g0)
         + b.inv_mass * dot(g1, g1)
         + c.inv_mass * dot(g2, g2)

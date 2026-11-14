@@ -33,9 +33,9 @@ use crate::{
 };
 
 /// Prepares, simulates and writes newly added cloth meshes on GPU.
-pub struct XpbdPlugin;
+pub struct ClothPlugin;
 
-impl Plugin for XpbdPlugin {
+impl Plugin for ClothPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "solver/layout.wesl");
         embedded_asset!(app, "solver/integration.wesl");
@@ -79,7 +79,7 @@ impl Plugin for XpbdPlugin {
             .extra_buffer_usages |= BufferUsages::STORAGE;
 
         render_app
-            .insert_resource(bindings::ClothBindGroupLayout::new())
+            .insert_resource(bindings::ClothStretchBindGroupLayout::new())
             .insert_resource(bindings::ClothBendBindGroupLayout::new())
             .insert_resource(ClothOutputBindGroupLayout::new())
             .insert_resource(bindings::ContactBindGroupLayout::new())

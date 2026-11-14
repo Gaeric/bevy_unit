@@ -11,12 +11,14 @@
 
   本项目早期参考velvet进行实现，过程中使用ai进行辅助。
 * How to Use
-  当前 XPBD 公共入口从 crate 根导入；完整场景接入见 =examples/xpbd-solver.rs=。
+  当前布料公共入口从 crate 根导入；完整场景接入见 =examples/xpbd-solver.rs=。
   #+begin_src rust
     use bevy_cloth::{
-        Attachment, ClothStepSettings, CollisionGroup, MeshCollider, StretchCloth, XpbdPlugin,
+        Cloth, ClothPlugin, ClothStepSettings, CollisionGroup, FixedAttachment, MeshCollider,
     };
   #+end_src
+  =ClothPlugin= 安装插件，=Cloth= 声明布料，=FixedAttachment= 声明固定世界坐标挂点。
+  =ClothStepSettings= 仍是初始化时读取的 per-cloth Component，运行时修改尚不生效。
 
   从 workspace 根目录启动现有入口（仅说明入口，不代表本批已运行或验证）：
   #+begin_src bash

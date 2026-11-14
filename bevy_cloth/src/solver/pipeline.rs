@@ -6,7 +6,9 @@ use bevy::{
     render::render_resource::{CachedComputePipelineId, ComputePipelineDescriptor, PipelineCache},
 };
 
-use super::bindings::{ClothBendBindGroupLayout, ClothBindGroupLayout, ContactBindGroupLayout};
+use super::bindings::{
+    ClothBendBindGroupLayout, ClothStretchBindGroupLayout, ContactBindGroupLayout,
+};
 
 /// Must match the workgroup size of the simulation and output entry points.
 pub(crate) const WORKGROUP_SIZE: u32 = 64;
@@ -62,8 +64,9 @@ pub(crate) fn init_bend_pipeline(
     commands.insert_resource(ClothBendPipeline { solve_bending });
 }
 
+/// Prediction, stretch solving and velocity update sharing one binding interface.
 #[derive(Resource)]
-pub(crate) struct ClothPipelines {
+pub(crate) struct ClothStretchPipelines {
     pub predict: CachedComputePipelineId,
     pub solve_stretch: CachedComputePipelineId,
     pub update_velocity: CachedComputePipelineId,
@@ -75,7 +78,7 @@ pub(crate) fn init_pipelines(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     cache: Res<PipelineCache>,
-    layout: Res<ClothBindGroupLayout>,
+    layout: Res<ClothStretchBindGroupLayout>,
 ) {
     let layout_shader = load_embedded_asset!(asset_server.as_ref(), "layout.wesl");
     let integration_shader = load_embedded_asset!(asset_server.as_ref(), "integration.wesl");
@@ -96,7 +99,7 @@ pub(crate) fn init_pipelines(
         })
     });
 
-    commands.insert_resource(ClothPipelines {
+    commands.insert_resource(ClothStretchPipelines {
         predict,
         solve_stretch,
         update_velocity,

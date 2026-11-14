@@ -20,7 +20,7 @@ var<storage, read> normal_offsets: array<u32>;
 var<storage, read> normal_pairs: array<vec2<u32>>;
 
 @group(0) @binding(3)
-var<uniform> world_to_local: mat4x4<f32>;
+var<uniform> local_from_world: mat4x4<f32>;
 
 @group(0) @binding(4)
 var<uniform> vertex_params: OutputVertexParams;
@@ -53,9 +53,9 @@ fn output_mesh(@builtin(global_invocation_id) invocation: vec3<u32>) {
 
     // cross(A * e1, A * e2) = cofactor(A) * cross(e1, e2).
     // Transform the sum once, preserving nonuniform scale and reflection.
-    let a = world_to_local[0].xyz;
-    let b = world_to_local[1].xyz;
-    let c = world_to_local[2].xyz;
+    let a = local_from_world[0].xyz;
+    let b = local_from_world[1].xyz;
+    let c = local_from_world[2].xyz;
     let area_transform = mat3x3<f32>(
         cross(b, c),
         cross(c, a),
@@ -76,7 +76,7 @@ fn output_mesh(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let normal_base = vertex_base + vertex_params.normal_offset_words;
 
     let local_position =
-        (world_to_local * vec4<f32>(world_position, 1.0)).xyz;
+        (local_from_world * vec4<f32>(world_position, 1.0)).xyz;
 
     output_vertices[position_base] = local_position.x;
     output_vertices[position_base + 1u] = local_position.y;

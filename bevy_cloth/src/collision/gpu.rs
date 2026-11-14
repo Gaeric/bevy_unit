@@ -19,7 +19,7 @@ use super::{PreparedCollider, refit::ColliderRefit, transform::ColliderTransform
 pub(crate) struct GpuCollider {
     pub local_positions: Buffer,
     /// World-space points, valid after the transform dispatch has been recorded.
-    pub positions: Buffer,
+    pub world_positions: Buffer,
     pub world_from_local: Buffer,
     pub indices: Buffer,
     pub nodes: Buffer,
@@ -35,12 +35,12 @@ impl GpuCollider {
         Self {
             local_positions: device.create_buffer_with_data(&BufferInitDescriptor {
                 label: Some("xpbd collider local positions"),
-                contents: bytemuck::cast_slice(&prepared.positions),
+                contents: bytemuck::cast_slice(&prepared.local_positions),
                 usage: BufferUsages::STORAGE,
             }),
-            positions: device.create_buffer(&BufferDescriptor {
+            world_positions: device.create_buffer(&BufferDescriptor {
                 label: Some("xpbd collider world positions"),
-                size: (prepared.positions.len() * size_of::<[f32; 4]>()) as u64,
+                size: (prepared.local_positions.len() * size_of::<[f32; 4]>()) as u64,
                 usage: BufferUsages::STORAGE,
                 mapped_at_creation: false,
             }),
@@ -65,7 +65,7 @@ impl GpuCollider {
                 contents: bytemuck::cast_slice(&prepared.bvh.triangle_refs),
                 usage: BufferUsages::STORAGE,
             }),
-            vertex_count: prepared.positions.len() as u32,
+            vertex_count: prepared.local_positions.len() as u32,
             triangle_count: (prepared.indices.len() / 3) as u32,
             node_count: prepared.bvh.nodes.len() as u32,
         }

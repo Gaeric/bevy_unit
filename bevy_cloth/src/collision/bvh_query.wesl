@@ -153,7 +153,7 @@ const QUERY_NUMERIC_ERROR: u32 = 2u;
 const QUERY_INVALID_TREE: u32 = 3u;
 const STACK_CAPACITY: u32 = 64u;
 
-@group(1) @binding(0) var<storage, read> positions: array<vec4<f32>>;
+@group(1) @binding(0) var<storage, read> world_positions: array<vec4<f32>>;
 @group(1) @binding(1) var<storage, read> indices: array<u32>;
 @group(1) @binding(2) var<storage, read> nodes: array<BvhNode>;
 @group(1) @binding(3) var<storage, read> triangle_refs: array<u32>;
@@ -226,9 +226,9 @@ fn closest_hit(p: vec3<f32>) -> QueryHit {
             for (var offset = 0u; offset < node.primitive_count; offset += 1u) {
                 let triangle_id = triangle_refs[node.first_index + offset];
                 let base = triangle_id * 3u;
-                let a = positions[indices[base]].xyz;
-                let b = positions[indices[base + 1u]].xyz;
-                let c = positions[indices[base + 2u]].xyz;
+                let a = world_positions[indices[base]].xyz;
+                let b = world_positions[indices[base + 1u]].xyz;
+                let c = world_positions[indices[base + 2u]].xyz;
                 let ab = b - a;
                 let ac = c - a;
                 let ap = p - a;
@@ -296,9 +296,9 @@ fn closest_hit(p: vec3<f32>) -> QueryHit {
     // Normalize only the final winning face. Degenerate faces retain zero normal.
     if hit.triangle_id != INVALID_TRIANGLE {
         let base = hit.triangle_id * 3u;
-        let a = positions[indices[base]].xyz;
-        let b = positions[indices[base + 1u]].xyz;
-        let c = positions[indices[base + 2u]].xyz;
+        let a = world_positions[indices[base]].xyz;
+        let b = world_positions[indices[base + 1u]].xyz;
+        let c = world_positions[indices[base + 2u]].xyz;
         let area = cross(b - a, c - a);
         let area_squared = dot(area, area);
         if !finite_vector(area) || !finite_scalar(area_squared) {

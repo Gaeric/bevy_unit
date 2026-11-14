@@ -3,14 +3,14 @@ use bevy::{
     render::{RenderApp, extract_component::ExtractComponent},
 };
 
-use crate::solver::layout::{Bend, FixedAttachment, Particle, Stretch};
+use crate::solver::layout::{BendConstraint, FixedAttachment, Particle, StretchConstraint};
 
-/// A color group's contiguous range in a reordered constraint array.
+/// A color's contiguous range in a reordered constraint array.
 ///
 /// Used only by the CPU to record dispatches; not uploaded as GPU storage data.
-/// Each dispatch passes its range through a separate `GroupParams` payload.
+/// Each dispatch passes its range through a separate `ConstraintRangeParams` payload.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ConstraintGroup {
+pub(crate) struct ConstraintColorRange {
     pub start: u32,
     pub count: u32,
 }
@@ -20,7 +20,7 @@ pub(crate) struct ConstraintGroup {
 /// Particle indices map one-to-one to source Mesh vertex indices; no welding.
 /// All positions are world-space.
 /// This struct owns CPU vectors; it is not a GPU buffer payload. Upload each
-/// array's element bytes separately and retain `groups` on the CPU for dispatch.
+/// array's element bytes separately and retain colors on the CPU for dispatch.
 /// GPU previous-position and lambda buffers are initialized separately.
 /// Cloned into Render World only when added, not on subsequent frames.
 #[derive(Component, Clone, Debug, ExtractComponent)]
@@ -35,19 +35,19 @@ pub(crate) struct PreparedCloth {
     pub velocities: Vec<[f32; 4]>,
 
     /// Complete stretch constraints, arranged contiguously by color.
-    pub stretch: Vec<Stretch>,
+    pub stretch_constraints: Vec<StretchConstraint>,
 
     /// Initial dihedral constraints, arranged contiguously by their own colors.
-    pub bend: Vec<Bend>,
+    pub bend_constraints: Vec<BendConstraint>,
 
-    /// Bend color groups; dispatched after stretch colors in each iteration.
-    pub bend_groups: Vec<ConstraintGroup>,
+    /// Bend colors; dispatched after stretch colors in each iteration.
+    pub bend_colors: Vec<ConstraintColorRange>,
 
     /// Fixed particles and their world-space targets.
     pub attachments: Vec<FixedAttachment>,
 
-    /// Color groups in execution order.
-    pub groups: Vec<ConstraintGroup>,
+    /// Stretch colors in execution order.
+    pub stretch_colors: Vec<ConstraintColorRange>,
 
     /// CSR boundaries: vertex i uses normal_pairs[normal_offsets[i]..normal_offsets[i + 1]].
     pub normal_offsets: Vec<u32>,

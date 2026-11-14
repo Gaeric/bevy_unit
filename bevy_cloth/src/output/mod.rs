@@ -22,7 +22,7 @@ pub(crate) mod pipeline;
 
 use crate::{
     prepare::PreparedCloth,
-    solver::{gpu::GpuCloth, layout::StepParams, pipeline::WORKGROUP_SIZE},
+    solver::{gpu::ClothBuffers, layout::StepParams, pipeline::WORKGROUP_SIZE},
 };
 
 use self::{
@@ -76,14 +76,14 @@ impl OutputVertexParams {
 
 /// Output data buffers only; bindings and pipelines are managed separately.
 #[derive(Component)]
-pub(crate) struct GpuClothOutput {
+pub(crate) struct ClothOutputBuffers {
     pub normal_offsets: Buffer,
     pub normal_pairs: Buffer,
-    pub world_to_local: Buffer,
+    pub local_from_world: Buffer,
     pub vertex_params: Buffer,
 }
 
-impl GpuClothOutput {
+impl ClothOutputBuffers {
     fn new(
         device: &RenderDevice,
         prepared: &PreparedCloth,
@@ -101,9 +101,9 @@ impl GpuClothOutput {
                 contents: bytemuck::cast_slice(&prepared.normal_pairs),
                 usage: BufferUsages::STORAGE,
             }),
-            world_to_local: device.create_buffer_with_data(&BufferInitDescriptor {
+            local_from_world: device.create_buffer_with_data(&BufferInitDescriptor {
                 label: Some("xpbd output world to local"),
-                contents: bytemuck::bytes_of(&input.world_to_local.to_cols_array_2d()),
+                contents: bytemuck::bytes_of(&input.local_from_world.to_cols_array_2d()),
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             }),
             vertex_params: device.create_buffer_with_data(&BufferInitDescriptor {
@@ -119,7 +119,7 @@ impl GpuClothOutput {
 #[derive(Component)]
 pub(crate) struct ClothOutputInput {
     pub mesh: AssetId<Mesh>,
-    pub world_to_local: Mat4,
+    pub local_from_world: Mat4,
 }
 
 pub(crate) fn extract_output_inputs(
@@ -129,7 +129,7 @@ pub(crate) fn extract_output_inputs(
     for (entity, mesh, transform) in &cloths {
         commands.entity(entity).insert(ClothOutputInput {
             mesh: mesh.0.id(),
-            world_to_local: transform.to_matrix().inverse(),
+            local_from_world: transform.to_matrix().inverse(),
         });
     }
 }
@@ -139,7 +139,7 @@ pub(crate) fn prepare_output_data(
     device: Res<RenderDevice>,
     allocator: Res<MeshAllocator>,
     meshes: Res<RenderAssets<RenderMesh>>,
-    cloths: Query<(Entity, &ClothOutputInput, &PreparedCloth), Without<GpuClothOutput>>,
+    cloths: Query<(Entity, &ClothOutputInput, &PreparedCloth), Without<ClothOutputBuffers>>,
 ) {
     for (entity, input, prepared) in &cloths {
         let Some(mesh) = meshes.get(input.mesh) else {
@@ -162,22 +162,26 @@ pub(crate) fn prepare_output_data(
         }
 
         let params = OutputVertexParams::new(mesh, slice.range.start);
-        let output = GpuClothOutput::new(&device, prepared, input, &params);
+        let output_buffers = ClothOutputBuffers::new(&device, prepared, input, &params);
 
-        commands.entity(entity).insert((output, params));
+        commands.entity(entity).insert((output_buffers, params));
     }
 }
 
 pub(crate) fn update_output_params(
     queue: Res<RenderQueue>,
     allocator: Res<MeshAllocator>,
-    mut cloths: Query<(&ClothOutputInput, &GpuClothOutput, &mut OutputVertexParams)>,
+    mut cloths: Query<(
+        &ClothOutputInput,
+        &ClothOutputBuffers,
+        &mut OutputVertexParams,
+    )>,
 ) {
-    for (input, output, mut params) in &mut cloths {
+    for (input, output_buffers, mut params) in &mut cloths {
         queue.write_buffer(
-            &output.world_to_local,
+            &output_buffers.local_from_world,
             0,
-            bytemuck::bytes_of(&input.world_to_local.to_cols_array_2d()),
+            bytemuck::bytes_of(&input.local_from_world.to_cols_array_2d()),
         );
 
         let Some(slice) = allocator.mesh_vertex_slice(&input.mesh) else {
@@ -187,7 +191,11 @@ pub(crate) fn update_output_params(
         if params.vertex_start != slice.range.start {
             params.vertex_start = slice.range.start;
 
-            queue.write_buffer(&output.vertex_params, 0, bytemuck::bytes_of(&*params));
+            queue.write_buffer(
+                &output_buffers.vertex_params,
+                0,
+                bytemuck::bytes_of(&*params),
+            );
         }
     }
 }
@@ -202,12 +210,12 @@ pub(crate) fn prepare_output_bind_groups(
     cloths: Query<(
         Entity,
         &ClothOutputInput,
-        &GpuCloth,
-        &GpuClothOutput,
+        &ClothBuffers,
+        &ClothOutputBuffers,
         Option<&ClothOutputBindGroup>,
     )>,
 ) {
-    for (entity, input, gpu, output, binding) in &cloths {
+    for (entity, input, cloth_buffers, output_buffers, binding) in &cloths {
         let Some(slice) = allocator.mesh_vertex_slice(&input.mesh) else {
             if binding.is_some() {
                 commands.entity(entity).remove::<ClothOutputBindGroup>();
@@ -228,7 +236,8 @@ pub(crate) fn prepare_output_bind_groups(
             continue;
         }
 
-        let binding = layout.create_bind_group(&device, &cache, gpu, output, slice.buffer);
+        let binding =
+            layout.create_bind_group(&device, &cache, cloth_buffers, output_buffers, slice.buffer);
         commands.entity(entity).insert(binding);
     }
 }

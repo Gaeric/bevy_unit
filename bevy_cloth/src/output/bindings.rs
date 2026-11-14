@@ -15,9 +15,9 @@ use bevy::{
 };
 use std::{mem::size_of, num::NonZeroU64};
 
-use crate::solver::{gpu::GpuCloth, layout::Particle};
+use crate::solver::{gpu::ClothBuffers, layout::Particle};
 
-use super::{GpuClothOutput, OutputVertexParams};
+use super::{ClothOutputBuffers, OutputVertexParams};
 
 /// One instance's output binding; recreate when the allocator replaces its buffer.
 #[derive(Component)]
@@ -70,19 +70,19 @@ impl ClothOutputBindGroupLayout {
         &self,
         device: &RenderDevice,
         cache: &PipelineCache,
-        cloth: &GpuCloth,
-        output: &GpuClothOutput,
+        cloth_buffers: &ClothBuffers,
+        output_buffers: &ClothOutputBuffers,
         vertices: &Buffer,
     ) -> ClothOutputBindGroup {
         let bind_group = device.create_bind_group(
             "xpbd output bind group",
             &cache.get_bind_group_layout(&self.descriptor),
             &BindGroupEntries::with_indices((
-                (0, cloth.particles.as_entire_binding()),
-                (1, output.normal_offsets.as_entire_binding()),
-                (2, output.normal_pairs.as_entire_binding()),
-                (3, output.world_to_local.as_entire_binding()),
-                (4, output.vertex_params.as_entire_binding()),
+                (0, cloth_buffers.particles.as_entire_binding()),
+                (1, output_buffers.normal_offsets.as_entire_binding()),
+                (2, output_buffers.normal_pairs.as_entire_binding()),
+                (3, output_buffers.local_from_world.as_entire_binding()),
+                (4, output_buffers.vertex_params.as_entire_binding()),
                 (5, vertices.as_entire_binding()),
             )),
         );

@@ -6,11 +6,11 @@
 //! - velocities: `array<vec4<f32>>`, 16-byte stride; xyz is velocity, w is zero.
 //! - previous_positions: `array<vec4<f32>>`, 16-byte stride; xyz is the position
 //!   saved before prediction in each substep, w is zero. Used to update velocity.
-//! - stretch: `array<Stretch>`, 16-byte stride; read-only, reordered by color.
+//! - stretch_constraints: `array<StretchConstraint>`, 16-byte stride; read-only, reordered by color.
 //! - stretch_lambdas: `array<f32>`, 4-byte stride; one accumulated XPBD lambda per
 //!   reordered stretch constraint. Clear at each substep start, accumulate across
 //!   constraint iterations within that substep. No cross-substep warm starting.
-//! - bend: `array<Bend>`, 32-byte stride; read-only, independently color-reordered.
+//! - bend_constraints: `array<BendConstraint>`, 32-byte stride; read-only, independently color-reordered.
 //! - bend_lambdas: `array<f32>`, reset per substep, accumulated across bend iterations.
 //! - attachments: `array<FixedAttachment>`, 16-byte stride; read-only fixed targets.
 //!
@@ -21,7 +21,7 @@
 //! to zero when creating an instance. Fixed particles keep their target positions
 //! and zero velocities; no per-iteration attachment pass is required.
 //!
-//! `StepParams` and `GroupParams` are uniform-buffer payloads. Their byte sizes do
+//! `StepParams` and `ConstraintRangeParams` are uniform-buffer payloads. Their byte sizes do
 //! not specify dynamic-offset alignment; parameter-block offsets must satisfy the
 //! device's minimum uniform-buffer offset alignment. Give distinct queued parameter
 //! values separate ranges instead of repeatedly overwriting the same range.
@@ -51,7 +51,7 @@ pub(crate) struct Particle {
 /// One complete physical stretch constraint.
 ///
 /// WGSL equivalent:
-/// struct Stretch {
+/// struct StretchConstraint {
 ///     particles: vec2<u32>,
 ///     rest_length: f32,
 ///     compliance: f32,
@@ -60,7 +60,7 @@ pub(crate) struct Particle {
 /// Array element stride: 16 bytes.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub(crate) struct Stretch {
+pub(crate) struct StretchConstraint {
     pub particles: [u32; 2],
     pub rest_length: f32,
     pub compliance: f32,
@@ -71,7 +71,7 @@ pub(crate) struct Stretch {
 /// Array element stride: 32 bytes. Angle is signed around edge_start -> edge_end.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub(crate) struct Bend {
+pub(crate) struct BendConstraint {
     pub particles: [u32; 4],
     pub rest_angle: f32,
     pub compliance: f32,
@@ -94,12 +94,12 @@ pub(crate) struct FixedAttachment {
     pub particle: u32,
 }
 
-/// Simulation parameters; dt is one substep's duration. Uniform payload: 48 bytes.
+/// Simulation parameters; substep_dt is one substep's duration. Uniform payload: 48 bytes.
 ///
 /// WGSL equivalent:
 /// struct StepParams {
 ///     gravity: vec4<f32>,
-///     dt: f32,
+///     substep_dt: f32,
 ///     particle_count: u32,
 ///     stretch_count: u32,
 ///     attachment_count: u32,
@@ -115,7 +115,7 @@ pub(crate) struct StepParams {
     /// World-space acceleration in xyz; w is reserved and set to zero.
     pub gravity: [f32; 4],
     /// Positive, finite substep duration in seconds, not the full tick duration.
-    pub dt: f32,
+    pub substep_dt: f32,
     pub particle_count: u32,
     pub stretch_count: u32,
     pub attachment_count: u32,
@@ -129,7 +129,7 @@ pub(crate) struct StepParams {
 /// Constraint range for one color dispatch. Uniform payload size: 16 bytes.
 ///
 /// WGSL equivalent:
-/// struct GroupParams {
+/// struct ConstraintRangeParams {
 ///     start: u32,
 ///     count: u32,
 ///     padding: vec2<u32>,
@@ -139,7 +139,7 @@ pub(crate) struct StepParams {
 /// if i < count. Stretch and bend use separate buffers with this same format.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub(crate) struct GroupParams {
+pub(crate) struct ConstraintRangeParams {
     pub start: u32,
     pub count: u32,
     /// Explicit padding, initialized to zero.
@@ -157,16 +157,16 @@ mod tests {
         assert_eq!(offset_of!(Particle, position), 0);
         assert_eq!(offset_of!(Particle, inv_mass), 12);
 
-        assert_eq!(size_of::<Stretch>(), 16);
-        assert_eq!(offset_of!(Stretch, particles), 0);
-        assert_eq!(offset_of!(Stretch, rest_length), 8);
-        assert_eq!(offset_of!(Stretch, compliance), 12);
+        assert_eq!(size_of::<StretchConstraint>(), 16);
+        assert_eq!(offset_of!(StretchConstraint, particles), 0);
+        assert_eq!(offset_of!(StretchConstraint, rest_length), 8);
+        assert_eq!(offset_of!(StretchConstraint, compliance), 12);
 
-        assert_eq!(size_of::<Bend>(), 32);
-        assert_eq!(offset_of!(Bend, particles), 0);
-        assert_eq!(offset_of!(Bend, rest_angle), 16);
-        assert_eq!(offset_of!(Bend, compliance), 20);
-        assert_eq!(offset_of!(Bend, padding), 24);
+        assert_eq!(size_of::<BendConstraint>(), 32);
+        assert_eq!(offset_of!(BendConstraint, particles), 0);
+        assert_eq!(offset_of!(BendConstraint, rest_angle), 16);
+        assert_eq!(offset_of!(BendConstraint, compliance), 20);
+        assert_eq!(offset_of!(BendConstraint, padding), 24);
 
         assert_eq!(size_of::<FixedAttachment>(), 16);
         assert_eq!(offset_of!(FixedAttachment, target), 0);
@@ -182,7 +182,7 @@ mod tests {
     fn uniform_layout_matches_wgsl() {
         assert_eq!(size_of::<StepParams>(), 48);
         assert_eq!(offset_of!(StepParams, gravity), 0);
-        assert_eq!(offset_of!(StepParams, dt), 16);
+        assert_eq!(offset_of!(StepParams, substep_dt), 16);
         assert_eq!(offset_of!(StepParams, particle_count), 20);
         assert_eq!(offset_of!(StepParams, stretch_count), 24);
         assert_eq!(offset_of!(StepParams, attachment_count), 28);
@@ -190,9 +190,9 @@ mod tests {
         assert_eq!(offset_of!(StepParams, double_sided), 36);
         assert_eq!(offset_of!(StepParams, padding), 40);
 
-        assert_eq!(size_of::<GroupParams>(), 16);
-        assert_eq!(offset_of!(GroupParams, start), 0);
-        assert_eq!(offset_of!(GroupParams, count), 4);
-        assert_eq!(offset_of!(GroupParams, padding), 8);
+        assert_eq!(size_of::<ConstraintRangeParams>(), 16);
+        assert_eq!(offset_of!(ConstraintRangeParams, start), 0);
+        assert_eq!(offset_of!(ConstraintRangeParams, count), 4);
+        assert_eq!(offset_of!(ConstraintRangeParams, padding), 8);
     }
 }

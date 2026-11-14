@@ -29,7 +29,7 @@ use super::{
 ))]
 pub(crate) struct PreparedCollider {
     /// Local-space points in homogeneous coordinates; w is always one.
-    pub positions: Vec<[f32; 4]>,
+    pub local_positions: Vec<[f32; 4]>,
     /// Original triangle indices, three entries per triangle.
     pub indices: Vec<u32>,
     /// Initial local-space bounds, tree topology and refit scheduling data.
@@ -63,13 +63,13 @@ fn prepare_collider(mesh: &Mesh) -> Result<PreparedCollider, String> {
     // Validate and build in source local space, independent of instance transforms.
     let bvh = build_triangle_bvh(local_positions, &indices)?;
 
-    let positions = local_positions
+    let local_positions = local_positions
         .iter()
         .map(|&[x, y, z]| [x, y, z, 1.0])
         .collect();
 
     Ok(PreparedCollider {
-        positions,
+        local_positions,
         indices,
         bvh,
     })
@@ -109,7 +109,7 @@ pub(crate) fn prepare_colliders(
 
         info!(
             ?entity,
-            vertices = prepared.positions.len(),
+            vertices = prepared.local_positions.len(),
             triangles = prepared.indices.len() / 3,
             nodes = prepared.bvh.nodes.len(),
             leaves = prepared.bvh.leaf_nodes.len(),
@@ -195,7 +195,7 @@ mod tests {
 
             assert_eq!(prepared.indices, [0, 1, 2]);
             assert_eq!(
-                prepared.positions,
+                prepared.local_positions,
                 [
                     [0.0, 0.0, 0.0, 1.0],
                     [1.0, 0.0, 0.0, 1.0],
@@ -248,7 +248,10 @@ mod tests {
             .entity_mut(entity)
             .insert((Transform::from_xyz(0.0, 2.0, 0.0), ChildOf(parent)));
         app.update();
-        assert_eq!(prepared(&app, entity).positions[1], [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(
+            prepared(&app, entity).local_positions[1],
+            [1.0, 0.0, 0.0, 1.0]
+        );
         assert_eq!(prepared(&app, entity).bvh.nodes[0].min, [0.0, 0.0, 0.0]);
         assert_eq!(prepared(&app, entity).bvh.nodes[0].max, [1.0, 1.0, 0.0]);
         // Track changes without assuming a fixed change-tick number.
@@ -264,7 +267,10 @@ mod tests {
             .world_mut()
             .query_filtered::<Entity, Changed<PreparedCollider>>();
         assert_eq!(changed.iter(app.world()).count(), 0);
-        assert_eq!(prepared(&app, entity).positions[1], [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(
+            prepared(&app, entity).local_positions[1],
+            [1.0, 0.0, 0.0, 1.0]
+        );
         assert_eq!(prepared(&app, entity).bvh.nodes[0].min, [0.0, 0.0, 0.0]);
         assert_eq!(prepared(&app, entity).bvh.nodes[0].max, [1.0, 1.0, 0.0]);
     }
@@ -301,7 +307,10 @@ mod tests {
         let entity = spawn_collider(&mut app, first);
         app.update();
 
-        assert_eq!(prepared(&app, entity).positions[0], [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(
+            prepared(&app, entity).local_positions[0],
+            [0.0, 0.0, 0.0, 1.0]
+        );
         let replacement = triangle().transformed_by(Transform::from_xyz(2.0, 0.0, 0.0));
         let second = app
             .world_mut()
@@ -309,7 +318,10 @@ mod tests {
             .add(replacement);
         app.world_mut().entity_mut(entity).insert(Mesh3d(second));
         app.update();
-        assert_eq!(prepared(&app, entity).positions[0], [2.0, 0.0, 0.0, 1.0]);
+        assert_eq!(
+            prepared(&app, entity).local_positions[0],
+            [2.0, 0.0, 0.0, 1.0]
+        );
         assert_eq!(prepared(&app, entity).bvh.nodes[0].min, [2.0, 0.0, 0.0]);
         assert_eq!(prepared(&app, entity).bvh.nodes[0].max, [3.0, 1.0, 0.0]);
 

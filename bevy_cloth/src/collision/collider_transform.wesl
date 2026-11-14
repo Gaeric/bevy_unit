@@ -5,7 +5,7 @@ struct TransformParams {
 
 @group(0) @binding(0) var<uniform> params: TransformParams;
 @group(0) @binding(1) var<storage, read> local_positions: array<vec4<f32>>;
-@group(0) @binding(2) var<storage, read_write> positions: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read_write> world_positions: array<vec4<f32>>;
 
 @compute @workgroup_size(64)
 fn transform_vertices(@builtin(global_invocation_id) invocation: vec3<u32>) {
@@ -14,5 +14,5 @@ fn transform_vertices(@builtin(global_invocation_id) invocation: vec3<u32>) {
         return;
     }
 
-    positions[i] = params.world_from_local * local_positions[i];
+    world_positions[i] = params.world_from_local * local_positions[i];
 }

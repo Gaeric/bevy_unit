@@ -31,7 +31,7 @@ fn predict(@builtin(global_invocation_id) invocation: vec3<u32>) {
         return;
     }
 
-    let dt = step_params.dt;
+    let dt = step_params.substep_dt;
     let velocity = velocities[index].xyz + step_params.gravity.xyz * dt;
 
     velocities[index] = vec4<f32>(velocity, 0.0);
@@ -53,7 +53,7 @@ fn update_velocity(@builtin(global_invocation_id) invocation: vec3<u32>) {
     }
 
     let velocity =
-        (particle.position - previous_positions[index].xyz) / step_params.dt;
+        (particle.position - previous_positions[index].xyz) / step_params.substep_dt;
 
     velocities[index] = vec4<f32>(velocity, 0.0);
 }

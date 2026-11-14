@@ -4,11 +4,11 @@ use bevy::{mesh::PrimitiveTopology, prelude::*};
 use std::collections::BTreeSet;
 
 use crate::{
-    components::StretchCloth,
-    solver::layout::{FixedAttachment, Particle, Stretch},
+    components::Cloth,
+    solver::layout::{FixedAttachment as FixedAttachmentData, Particle, StretchConstraint},
 };
 
-use super::{ConstraintGroup, PreparedCloth, bending::prepare_bending};
+use super::{ConstraintColorRange, PreparedCloth, bending::prepare_bending};
 
 /// Validate all inputs before preparing particles and constraints.
 ///
@@ -16,7 +16,7 @@ use super::{ConstraintGroup, PreparedCloth, bending::prepare_bending};
 fn validate_inputs<'a>(
     mesh: &'a Mesh,
     transform: &GlobalTransform,
-    config: &StretchCloth,
+    config: &Cloth,
 ) -> Result<(&'a [[f32; 3]], Vec<u32>), String> {
     // Validate configuration inputs, not derived calculation results.
     if !config.particle_mass.is_finite() || config.particle_mass <= 0.0 {
@@ -96,26 +96,26 @@ fn validate_inputs<'a>(
     Ok((positions, indices))
 }
 
-/// Color stretch constraints and arrange them into contiguous groups.
+/// Color stretch constraints and arrange them into contiguous color ranges.
 ///
-/// Constraints within one group share no particles.
+/// Constraints within one color share no particles.
 /// Particle indices must already be validated.
 fn color_stretch(
     particle_count: usize,
-    stretch: Vec<Stretch>,
-) -> Result<(Vec<Stretch>, Vec<ConstraintGroup>), String> {
-    // Group ranges use u32 indices.
-    u32::try_from(stretch.len()).map_err(|_| "stretch count exceeds u32")?;
+    stretch_constraints: Vec<StretchConstraint>,
+) -> Result<(Vec<StretchConstraint>, Vec<ConstraintColorRange>), String> {
+    // Color ranges use u32 indices.
+    u32::try_from(stretch_constraints.len()).map_err(|_| "stretch count exceeds u32")?;
 
-    let constraint_count = stretch.len();
+    let constraint_count = stretch_constraints.len();
 
     // used_colors[particle] records colors already touching this particle.
     let mut used_colors: Vec<Vec<usize>> = vec![Vec::new(); particle_count];
 
     // buckets[color] contains all constraints assigned to this color.
-    let mut buckets: Vec<Vec<Stretch>> = Vec::new();
+    let mut buckets: Vec<Vec<StretchConstraint>> = Vec::new();
 
-    for constraint in stretch {
+    for constraint in stretch_constraints {
         let [a, b] = constraint.particles.map(|index| index as usize);
 
         // Find the first color unused by both particles.
@@ -137,9 +137,9 @@ fn color_stretch(
         buckets[color].push(constraint);
     }
 
-    // Join the buckets into one array and record each group's range.
+    // Join the buckets into one array and record each color's range.
     let mut reordered = Vec::with_capacity(constraint_count);
-    let mut groups = Vec::with_capacity(buckets.len());
+    let mut colors = Vec::with_capacity(buckets.len());
 
     for bucket in buckets {
         let start = reordered.len() as u32;
@@ -147,10 +147,10 @@ fn color_stretch(
 
         reordered.extend(bucket);
 
-        groups.push(ConstraintGroup { start, count });
+        colors.push(ConstraintColorRange { start, count });
     }
 
-    Ok((reordered, groups))
+    Ok((reordered, colors))
 }
 
 /// Build CSR normal adjacency from validated triangle indices.
@@ -190,7 +190,7 @@ fn build_normal_adjacency(particle_count: usize, indices: &[u32]) -> (Vec<u32>, 
 pub(crate) fn prepare_mesh(
     mesh: &Mesh,
     transform: &GlobalTransform,
-    config: &StretchCloth,
+    config: &Cloth,
 ) -> Result<PreparedCloth, String> {
     let (positions, indices) = validate_inputs(mesh, transform, config)?;
 
@@ -221,13 +221,13 @@ pub(crate) fn prepare_mesh(
     }
 
     // Measure rest lengths before applying attachment targets.
-    let stretch = edges
+    let stretch_constraints = edges
         .into_iter()
         .map(|[i, j]| {
             let a = Vec3::from(particles[i as usize].position);
             let b = Vec3::from(particles[j as usize].position);
 
-            Stretch {
+            StretchConstraint {
                 particles: [i, j],
                 rest_length: a.distance(b),
                 compliance: config.stretch_compliance,
@@ -235,11 +235,13 @@ pub(crate) fn prepare_mesh(
         })
         .collect();
 
-    // Reorder constraints by color and record each group's range.
-    let (stretch, groups) = color_stretch(particles.len(), stretch)?;
+    // Reorder constraints by color and record each color's range.
+    let (stretch_constraints, stretch_colors) =
+        color_stretch(particles.len(), stretch_constraints)?;
 
     // Rest angles, like rest lengths, use geometry before attachment targets.
-    let (bend, bend_groups) = prepare_bending(&particles, &indices, config.bend_compliance)?;
+    let (bend_constraints, bend_colors) =
+        prepare_bending(&particles, &indices, config.bend_compliance)?;
 
     // Fixed targets affect the initial state, not the rest geometry.
     let mut attachments = Vec::with_capacity(config.attachments.len());
@@ -251,7 +253,7 @@ pub(crate) fn prepare_mesh(
         particle.position = target;
         particle.inv_mass = 0.0;
 
-        attachments.push(FixedAttachment {
+        attachments.push(FixedAttachmentData {
             target,
             particle: attachment.particle,
         });
@@ -262,11 +264,11 @@ pub(crate) fn prepare_mesh(
     Ok(PreparedCloth {
         particles,
         velocities,
-        stretch,
-        bend,
-        bend_groups,
+        stretch_constraints,
+        bend_constraints,
+        bend_colors,
         attachments,
-        groups,
+        stretch_colors,
         normal_offsets,
         normal_pairs,
     })
@@ -275,7 +277,7 @@ pub(crate) fn prepare_mesh(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::components::Attachment;
+    use crate::components::FixedAttachment;
     use bevy::{asset::RenderAssetUsages, mesh::Indices};
 
     fn hinge_mesh() -> Mesh {
@@ -295,8 +297,8 @@ mod tests {
         .with_inserted_indices(Indices::U32(vec![2, 0, 1, 3, 1, 0]))
     }
 
-    fn config() -> StretchCloth {
-        StretchCloth {
+    fn config() -> Cloth {
+        Cloth {
             particle_mass: 1.0,
             stretch_compliance: 0.0,
             bend_compliance: 0.125,
@@ -315,15 +317,15 @@ mod tests {
             scale: Vec3::splat(2.0),
         });
         let mut config = config();
-        config.attachments.push(Attachment {
+        config.attachments.push(FixedAttachment {
             particle: 2,
             position: transform.transform_point(Vec3::new(0.0, 1.0, 1.0)),
         });
         let prepared = prepare_mesh(&mesh, &transform, &config).unwrap();
-        assert_eq!(prepared.bend.len(), 1);
-        assert!(prepared.bend[0].rest_angle.abs() < 1e-6);
-        assert_eq!(prepared.bend[0].compliance, 0.125);
-        assert_eq!(prepared.bend_groups[0].count, 1);
+        assert_eq!(prepared.bend_constraints.len(), 1);
+        assert!(prepared.bend_constraints[0].rest_angle.abs() < 1e-6);
+        assert_eq!(prepared.bend_constraints[0].compliance, 0.125);
+        assert_eq!(prepared.bend_colors[0].count, 1);
         assert_eq!(
             prepared.particles[2].position,
             config.attachments[0].position.to_array()

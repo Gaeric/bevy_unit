@@ -1,4 +1,4 @@
-import super::layout::{Particle, Stretch, StepParams, GroupParams};
+import super::layout::{Particle, StretchConstraint, StepParams, ConstraintRangeParams};
 
 // Shared by particle and stretch stages.
 
@@ -11,10 +11,10 @@ var<storage, read_write> particles: array<Particle>;
 // Stretch stage: one color range per dispatch.
 
 @group(0) @binding(4)
-var<uniform> group_params: GroupParams;
+var<uniform> stretch_range_params: ConstraintRangeParams;
 
 @group(0) @binding(5)
-var<storage, read> stretch: array<Stretch>;
+var<storage, read> stretch_constraints: array<StretchConstraint>;
 
 @group(0) @binding(6)
 var<storage, read_write> stretch_lambdas: array<f32>;
@@ -22,12 +22,12 @@ var<storage, read_write> stretch_lambdas: array<f32>;
 @compute @workgroup_size(64)
 fn solve_stretch(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let local_index = invocation.x;
-    if local_index >= group_params.count {
+    if local_index >= stretch_range_params.count {
         return;
     }
 
-    let index = group_params.start + local_index;
-    let constraint = stretch[index];
+    let index = stretch_range_params.start + local_index;
+    let constraint = stretch_constraints[index];
 
     let index_a = constraint.particles.x;
     let index_b = constraint.particles.y;
@@ -51,7 +51,7 @@ fn solve_stretch(@builtin(global_invocation_id) invocation: vec3<u32>) {
 
     let normal = separation / distance;
     let error = distance - constraint.rest_length;
-    let dt = step_params.dt;
+    let dt = step_params.substep_dt;
     let alpha = constraint.compliance / (dt * dt);
     let lambda = stretch_lambdas[index];
 

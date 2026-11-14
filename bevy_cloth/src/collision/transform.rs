@@ -91,7 +91,7 @@ pub(crate) fn init_transform_pipeline(
 #[derive(Component)]
 pub(crate) struct ColliderTransformBindGroup {
     bind_group: BindGroup,
-    pub(crate) submitted: Option<Mat4>,
+    pub(crate) recorded_transform: Option<Mat4>,
 }
 
 pub(crate) fn prepare_transform_bind_groups(
@@ -111,18 +111,18 @@ pub(crate) fn prepare_transform_bind_groups(
             &BindGroupEntries::sequential((
                 gpu.world_from_local.as_entire_binding(),
                 gpu.local_positions.as_entire_binding(),
-                gpu.positions.as_entire_binding(),
+                gpu.world_positions.as_entire_binding(),
             )),
         );
         commands.entity(entity).insert(ColliderTransformBindGroup {
             bind_group,
-            submitted: None,
+            recorded_transform: None,
         });
     }
 }
 
 /// Record world-point updates before later BVH refit/query commands.
-/// submitted tracks command recording, not GPU completion or BVH readiness.
+/// recorded_transform tracks command recording, not GPU completion or BVH readiness.
 pub(crate) fn transform_collider_vertices(
     mut context: RenderContext,
     queue: Res<RenderQueue>,
@@ -139,7 +139,7 @@ pub(crate) fn transform_collider_vertices(
     };
 
     for (gpu, transform, mut binding) in &mut colliders {
-        if binding.submitted == Some(transform.0) {
+        if binding.recorded_transform == Some(transform.0) {
             continue;
         }
         queue.write_buffer(
@@ -157,6 +157,6 @@ pub(crate) fn transform_collider_vertices(
         pass.set_pipeline(transform_pipeline);
         pass.set_bind_group(0, &binding.bind_group, &[]);
         pass.dispatch_workgroups(gpu.vertex_count.div_ceil(WORKGROUP_SIZE), 1, 1);
-        binding.submitted = Some(transform.0);
+        binding.recorded_transform = Some(transform.0);
     }
 }

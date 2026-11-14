@@ -12,14 +12,14 @@ use bevy::{
 /// implied. Initial data is prepared once; later input changes do not rebuild it.
 #[derive(Component, Debug)]
 #[require(ClothStepSettings)]
-pub struct StretchCloth {
+pub struct Cloth {
     /// Mass of each free particle
     pub particle_mass: f32,
     /// XPBD distance-constraint compliance, in m/N; zero means inextensible.
     pub stretch_compliance: f32,
     /// XPBD dihedral-angle compliance; zero preserves the rest angle as a hard constraint.
     pub bend_compliance: f32,
-    pub attachments: Vec<Attachment>,
+    pub attachments: Vec<FixedAttachment>,
     /// World-space contact thickness, in meters.
     pub collision_margin: f32,
     /// Resolve contact on both sides of the triangle surface.
@@ -28,7 +28,7 @@ pub struct StretchCloth {
 
 /// A particle constrained to a fixed world-space position, not a distance limit.
 #[derive(Clone, Copy, Debug)]
-pub struct Attachment {
+pub struct FixedAttachment {
     /// Index into the source mesh's POSITION attribute.
     pub particle: u32,
     pub position: Vec3,

@@ -20,11 +20,11 @@ use crate::{
 
 use super::{
     bindings::{
-        ClothBendBindGroup, ClothBindGroup, ClothContactBindGroup, ColliderContactBindGroup,
+        ClothBendBindGroup, ClothContactBindGroup, ClothStretchBindGroup, ColliderContactBindGroup,
     },
-    gpu::{GpuCloth, group_param_stride},
+    gpu::{ClothBuffers, constraint_range_param_stride},
     layout::StepParams,
-    pipeline::{ClothBendPipeline, ClothContactPipeline, ClothPipelines, WORKGROUP_SIZE},
+    pipeline::{ClothBendPipeline, ClothContactPipeline, ClothStretchPipelines, WORKGROUP_SIZE},
 };
 
 /// Total number of simulation ticks requested by Main World.
@@ -39,11 +39,12 @@ pub(crate) fn request_tick(mut ticks: ResMut<ClothTicks>) {
     ticks.requested += 1;
 }
 
-/// Per-instance command-recording progress, not GPU completion progress.
+/// Per-instance request-consumption position, not GPU completion progress.
 #[derive(Component, Default)]
 pub(crate) struct ClothSimulation {
+    /// Consumed tick requests, including those skipped during loading.
     /// None until the GPU data and all pipelines are ready.
-    pub submitted: Option<u64>,
+    pub tick_cursor: Option<u64>,
 }
 
 /// Record one sequential contact dispatch per collider for this cloth.
@@ -72,15 +73,15 @@ pub(crate) fn simulate_cloths(
     mut context: RenderContext,
     ticks: Res<ClothTicks>,
     cache: Res<PipelineCache>,
-    pipelines: Res<ClothPipelines>,
+    pipelines: Res<ClothStretchPipelines>,
     bend_pipeline: Res<ClothBendPipeline>,
     contact_pipeline: Res<ClothContactPipeline>,
     transform_pipeline: Res<ColliderTransformPipeline>,
     refit_pipeline: Res<ColliderRefitPipeline>,
     colliders: Query<(&ColliderContactBindGroup, Option<&CollisionGroup>)>,
     mut cloths: Query<(
-        &GpuCloth,
-        &ClothBindGroup,
+        &ClothBuffers,
+        &ClothStretchBindGroup,
         &ClothContactBindGroup,
         Option<&ClothBendBindGroup>,
         &PreparedCloth,
@@ -112,35 +113,36 @@ pub(crate) fn simulate_cloths(
         return;
     };
 
-    let group_stride = group_param_stride(context.render_device());
+    let range_param_stride = constraint_range_param_stride(context.render_device());
     let solve_bending = cache.get_compute_pipeline(bend_pipeline.solve_bending);
 
     for (
-        gpu,
-        binding,
-        contact_binding,
-        bend_binding,
+        cloth_buffers,
+        cloth_bind_group,
+        contact_bind_group,
+        bend_bind_group,
         prepared,
-        step,
+        step_params,
         settings,
         collision_group,
         mut simulation,
     ) in &mut cloths
     {
-        let bending = if let Some(data) = &gpu.bending {
-            let (Some(pipeline), Some(binding)) = (solve_bending, bend_binding) else {
+        let bending = if let Some(bend_buffers) = &cloth_buffers.bending {
+            let (Some(bend_pipeline), Some(bend_bind_group)) = (solve_bending, bend_bind_group)
+            else {
                 continue;
             };
-            Some((data, pipeline, binding))
+            Some((bend_buffers, bend_pipeline, bend_bind_group))
         } else {
             None
         };
-        let Some(mut submitted) = simulation.submitted else {
+        let Some(mut tick_cursor) = simulation.tick_cursor else {
             // Start here instead of replaying ticks requested during loading.
-            simulation.submitted = Some(ticks.requested);
+            simulation.tick_cursor = Some(ticks.requested);
             continue;
         };
-        let particle_workgroups = step.particle_count.div_ceil(WORKGROUP_SIZE);
+        let particle_workgroups = step_params.particle_count.div_ceil(WORKGROUP_SIZE);
         let cloth_group = collision_group.copied().unwrap_or_default();
         let collider_bindings: Vec<_> = colliders
             .iter()
@@ -148,7 +150,7 @@ pub(crate) fn simulate_cloths(
             .map(|(binding, _)| &binding.0)
             .collect();
 
-        while submitted < ticks.requested {
+        while tick_cursor < ticks.requested {
             if !collider_bindings.is_empty() {
                 let mut pass =
                     context
@@ -161,7 +163,7 @@ pub(crate) fn simulate_cloths(
                 record_contacts(
                     &mut pass,
                     solve_contact,
-                    &contact_binding.0,
+                    &contact_bind_group.0,
                     &collider_bindings,
                     particle_workgroups,
                 );
@@ -169,9 +171,9 @@ pub(crate) fn simulate_cloths(
 
             for _ in 0..settings.substeps {
                 let encoder = context.command_encoder();
-                encoder.clear_buffer(&gpu.stretch_lambdas, 0, None);
-                if let Some((data, _, _)) = bending {
-                    encoder.clear_buffer(&data.lambdas, 0, None);
+                encoder.clear_buffer(&cloth_buffers.stretch_lambdas, 0, None);
+                if let Some((bend_buffers, _, _)) = bending {
+                    encoder.clear_buffer(&bend_buffers.lambdas, 0, None);
                 }
 
                 let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
@@ -180,43 +182,43 @@ pub(crate) fn simulate_cloths(
                 });
 
                 pass.set_pipeline(predict);
-                pass.set_bind_group(0, &binding.0, &[0]);
+                pass.set_bind_group(0, &cloth_bind_group.0, &[0]);
                 pass.dispatch_workgroups(particle_workgroups, 1, 1);
 
                 record_contacts(
                     &mut pass,
                     solve_contact,
-                    &contact_binding.0,
+                    &contact_bind_group.0,
                     &collider_bindings,
                     particle_workgroups,
                 );
 
                 for _ in 0..settings.iterations {
                     pass.set_pipeline(solve_stretch);
-                    for (color, group) in prepared.groups.iter().enumerate() {
-                        let offset = color as u32 * group_stride;
-                        pass.set_bind_group(0, &binding.0, &[offset]);
-                        pass.dispatch_workgroups(group.count.div_ceil(WORKGROUP_SIZE), 1, 1);
+                    for (color, range) in prepared.stretch_colors.iter().enumerate() {
+                        let offset = color as u32 * range_param_stride;
+                        pass.set_bind_group(0, &cloth_bind_group.0, &[offset]);
+                        pass.dispatch_workgroups(range.count.div_ceil(WORKGROUP_SIZE), 1, 1);
                     }
-                    if let Some((_, pipeline, bend_binding)) = bending {
-                        pass.set_pipeline(pipeline);
-                        for (color, group) in prepared.bend_groups.iter().enumerate() {
-                            let offset = color as u32 * group_stride;
-                            pass.set_bind_group(0, &bend_binding.0, &[offset]);
-                            pass.dispatch_workgroups(group.count.div_ceil(WORKGROUP_SIZE), 1, 1);
+                    if let Some((_, bend_pipeline, bend_bind_group)) = bending {
+                        pass.set_pipeline(bend_pipeline);
+                        for (color, range) in prepared.bend_colors.iter().enumerate() {
+                            let offset = color as u32 * range_param_stride;
+                            pass.set_bind_group(0, &bend_bind_group.0, &[offset]);
+                            pass.dispatch_workgroups(range.count.div_ceil(WORKGROUP_SIZE), 1, 1);
                         }
                     }
                 }
 
                 pass.set_pipeline(update_velocity);
-                pass.set_bind_group(0, &binding.0, &[0]);
+                pass.set_bind_group(0, &cloth_bind_group.0, &[0]);
                 pass.dispatch_workgroups(particle_workgroups, 1, 1);
             }
 
             // Bevy submits the command stream later; no CPU wait or particle readback.
-            submitted += 1;
+            tick_cursor += 1;
         }
 
-        simulation.submitted = Some(submitted);
+        simulation.tick_cursor = Some(tick_cursor);
     }
 }

@@ -92,7 +92,7 @@ pub(crate) struct ColliderRefit {
     /// Leaves first, then one dispatch per internal depth.
     counts: Vec<u32>,
     /// Pose for which all refit commands have been recorded, not GPU completion.
-    submitted: Option<Mat4>,
+    recorded_transform: Option<Mat4>,
 }
 
 pub(crate) fn prepare_refits(
@@ -141,7 +141,7 @@ pub(crate) fn prepare_refits(
             "xpbd collider refit bind group",
             &cache.get_bind_group_layout(&pipeline.layout),
             &BindGroupEntries::sequential((
-                gpu.positions.as_entire_binding(),
+                gpu.world_positions.as_entire_binding(),
                 gpu.indices.as_entire_binding(),
                 gpu.nodes.as_entire_binding(),
                 gpu.triangle_refs.as_entire_binding(),
@@ -156,7 +156,7 @@ pub(crate) fn prepare_refits(
         commands.entity(entity).insert(ColliderRefit {
             bind_group,
             counts: stages.iter().map(|params| params.count).collect(),
-            submitted: None,
+            recorded_transform: None,
         });
     }
 }
@@ -182,7 +182,9 @@ pub(crate) fn refit_colliders(
 
     for (transform, transformed, mut refit) in &mut colliders {
         // A delayed refit must wait for world points from the current pose.
-        if transformed.submitted != Some(transform.0) || refit.submitted == Some(transform.0) {
+        if transformed.recorded_transform != Some(transform.0)
+            || refit.recorded_transform == Some(transform.0)
+        {
             continue;
         }
 
@@ -197,6 +199,6 @@ pub(crate) fn refit_colliders(
             pass.set_bind_group(0, &refit.bind_group, &[stage as u32 * stride]);
             pass.dispatch_workgroups(count.div_ceil(WORKGROUP_SIZE), 1, 1);
         }
-        refit.submitted = Some(transform.0);
+        refit.recorded_transform = Some(transform.0);
     }
 }

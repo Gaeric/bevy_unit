@@ -1,11 +1,11 @@
-//! CPU dihedral topology, rest angles and conflict-free color groups.
+//! CPU dihedral topology, rest angles and conflict-free colors.
 
 use bevy::{math::DVec3, prelude::*};
 use std::collections::BTreeMap;
 
-use crate::solver::layout::{Bend, Particle};
+use crate::solver::layout::{BendConstraint, Particle};
 
-use super::ConstraintGroup;
+use super::ConstraintColorRange;
 
 #[derive(Clone, Copy)]
 struct EdgeFace {
@@ -20,7 +20,7 @@ pub(crate) fn prepare_bending(
     particles: &[Particle],
     indices: &[u32],
     compliance: f32,
-) -> Result<(Vec<Bend>, Vec<ConstraintGroup>), String> {
+) -> Result<(Vec<BendConstraint>, Vec<ConstraintColorRange>), String> {
     let mut edges: BTreeMap<[u32; 2], Vec<EdgeFace>> = BTreeMap::new();
 
     for triangle in indices.chunks_exact(3) {
@@ -55,7 +55,7 @@ pub(crate) fn prepare_bending(
         let Some(rest_angle) = signed_dihedral(points) else {
             continue;
         };
-        bends.push(Bend {
+        bends.push(BendConstraint {
             particles: ids,
             rest_angle,
             compliance,
@@ -106,12 +106,12 @@ fn triangle_normal(a: DVec3, b: DVec3, c: DVec3) -> Option<DVec3> {
 /// as conflicts so scheduling does not depend on a shader's writeback behavior.
 fn color_bending(
     particle_count: usize,
-    bends: Vec<Bend>,
-) -> Result<(Vec<Bend>, Vec<ConstraintGroup>), String> {
+    bends: Vec<BendConstraint>,
+) -> Result<(Vec<BendConstraint>, Vec<ConstraintColorRange>), String> {
     u32::try_from(bends.len()).map_err(|_| "bend count exceeds u32")?;
     let constraint_count = bends.len();
     let mut used_colors: Vec<Vec<usize>> = vec![Vec::new(); particle_count];
-    let mut buckets: Vec<Vec<Bend>> = Vec::new();
+    let mut buckets: Vec<Vec<BendConstraint>> = Vec::new();
 
     for bend in bends {
         let ids = bend.particles.map(|id| id as usize);
@@ -129,15 +129,15 @@ fn color_bending(
     }
 
     let mut reordered = Vec::with_capacity(constraint_count);
-    let mut groups = Vec::with_capacity(buckets.len());
+    let mut colors = Vec::with_capacity(buckets.len());
     for bucket in buckets {
-        groups.push(ConstraintGroup {
+        colors.push(ConstraintColorRange {
             start: reordered.len() as u32,
             count: bucket.len() as u32,
         });
         reordered.extend(bucket);
     }
-    Ok((reordered, groups))
+    Ok((reordered, colors))
 }
 
 #[cfg(test)]
@@ -174,21 +174,21 @@ mod tests {
     fn boundary_only_and_empty_inputs_have_no_bends() {
         let points = hinge(0.0);
         for indices in [&[][..], &HINGE_INDICES[..3]] {
-            let (bends, groups) = prepare_bending(&points, indices, 0.0).unwrap();
+            let (bends, colors) = prepare_bending(&points, indices, 0.0).unwrap();
             assert!(bends.is_empty());
-            assert!(groups.is_empty());
+            assert!(colors.is_empty());
         }
     }
 
     #[test]
     fn flat_hinge_preserves_indices_compliance_and_zero_angle() {
-        let (bends, groups) = prepare_bending(&hinge(0.0), &HINGE_INDICES, 0.125).unwrap();
+        let (bends, colors) = prepare_bending(&hinge(0.0), &HINGE_INDICES, 0.125).unwrap();
         assert_eq!(bends.len(), 1);
         assert_eq!(bends[0].particles, [2, 3, 0, 1]);
         close(bends[0].rest_angle, 0.0);
         assert_eq!(bends[0].compliance, 0.125);
         assert_eq!(bends[0].padding, [0; 2]);
-        assert_eq!((groups[0].start, groups[0].count), (0, 1));
+        assert_eq!((colors[0].start, colors[0].count), (0, 1));
     }
 
     #[test]
@@ -235,9 +235,9 @@ mod tests {
             [0.0, -1.0, 0.0],
             [0.0, 0.0, 1.0],
         ]);
-        let (bends, groups) = prepare_bending(&points, &[2, 0, 1, 3, 1, 0, 4, 0, 1], 0.0).unwrap();
+        let (bends, colors) = prepare_bending(&points, &[2, 0, 1, 3, 1, 0, 4, 0, 1], 0.0).unwrap();
         assert!(bends.is_empty());
-        assert!(groups.is_empty());
+        assert!(colors.is_empty());
     }
 
     #[test]
@@ -300,7 +300,7 @@ mod tests {
             .filter_map(|(edge, count)| (count == 2).then_some(edge))
             .collect();
         assert_eq!(expected.len(), 8);
-        let (bends, groups) = prepare_bending(&points, &indices, 0.0).unwrap();
+        let (bends, colors) = prepare_bending(&points, &indices, 0.0).unwrap();
         assert_eq!(bends.len(), expected.len());
         let actual: BTreeSet<_> = bends
             .iter()
@@ -312,12 +312,12 @@ mod tests {
         assert_eq!(actual, expected);
 
         let mut end = 0;
-        for group in groups {
-            assert_eq!(group.start as usize, end);
-            assert!(group.count > 0);
-            end += group.count as usize;
+        for color in colors {
+            assert_eq!(color.start as usize, end);
+            assert!(color.count > 0);
+            end += color.count as usize;
             let mut touched = BTreeSet::new();
-            for bend in &bends[group.start as usize..end] {
+            for bend in &bends[color.start as usize..end] {
                 for id in bend.particles {
                     assert!(touched.insert(id), "shared particle within one color");
                 }

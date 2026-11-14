@@ -12,7 +12,7 @@ struct RefitParams {
     padding: vec2<u32>,
 };
 
-@group(0) @binding(0) var<storage, read> positions: array<vec4<f32>>;
+@group(0) @binding(0) var<storage, read> world_positions: array<vec4<f32>>;
 @group(0) @binding(1) var<storage, read> indices: array<u32>;
 @group(0) @binding(2) var<storage, read_write> nodes: array<BvhNode>;
 @group(0) @binding(3) var<storage, read> triangle_refs: array<u32>;
@@ -36,9 +36,9 @@ fn refit_leaves(@builtin(global_invocation_id) invocation: vec3<u32>) {
     for (var offset = 0u; offset < node.primitive_count; offset += 1u) {
         let triangle = triangle_refs[node.first_index + offset];
         let base = triangle * 3u;
-        let a = positions[indices[base]].xyz;
-        let b = positions[indices[base + 1u]].xyz;
-        let c = positions[indices[base + 2u]].xyz;
+        let a = world_positions[indices[base]].xyz;
+        let b = world_positions[indices[base + 1u]].xyz;
+        let c = world_positions[indices[base + 2u]].xyz;
         lower = min(lower, min(a, min(b, c)));
         upper = max(upper, max(a, max(b, c)));
     }
