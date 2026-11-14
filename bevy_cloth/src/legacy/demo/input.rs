@@ -6,8 +6,8 @@
 use bevy::{input_focus::InputFocus, prelude::*};
 
 use crate::legacy::demo::{
-    plugin::SimStateRes,
-    scenes::{CurrentScene, PendingScene, SceneId},
+    plugin::LegacySimStateRes,
+    scenes::{LegacyCurrentScene, LegacyPendingScene, LegacySceneId},
 };
 
 /// `1`-`7`, the source's scene keys.
@@ -21,9 +21,9 @@ const SCENE_KEYS: [KeyCode; 7] = [
     KeyCode::Digit7,
 ];
 
-pub struct ClothInputPlugin;
+pub struct LegacyClothInputPlugin;
 
-impl Plugin for ClothInputPlugin {
+impl Plugin for LegacyClothInputPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
@@ -36,9 +36,9 @@ fn keyboard_shortcuts(
     keys: Res<ButtonInput<KeyCode>>,
     focus: Option<Res<InputFocus>>,
     windows: Query<(), With<Window>>,
-    current: Res<CurrentScene>,
-    mut pending: ResMut<PendingScene>,
-    mut state: ResMut<SimStateRes>,
+    current: Res<LegacyCurrentScene>,
+    mut pending: ResMut<LegacyPendingScene>,
+    mut state: ResMut<LegacySimStateRes>,
 ) {
     // `InputFocus` starts on the primary window (`set_initial_focus`), so only a *widget* focus
     // (a check box, a slider) should stand `Space` down; a focused widget eats `Space` for
@@ -68,8 +68,8 @@ fn keyboard_shortcuts(
         state.0.render_wireframe = !state.0.render_wireframe;
     }
 
-    // `1`-`7`: `VtEngine::SwitchScene`, applied by `scenes::apply_scene_switch`
-    for (key, scene) in SCENE_KEYS.into_iter().zip(SceneId::ALL) {
+    // `1`-`7`: `VtEngine::SwitchScene`, applied by `scenes::legacy_apply_scene_switch`
+    for (key, scene) in SCENE_KEYS.into_iter().zip(LegacySceneId::ALL) {
         if keys.just_pressed(key) {
             pending.0 = Some(scene);
         }

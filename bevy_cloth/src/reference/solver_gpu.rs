@@ -20,20 +20,21 @@ use glam::{Mat4, Quat, Vec3};
 
 use super::{
     layout::{
-        GpuAttachEntry, GpuBendConstraint, GpuParams, GpuSdfCollider, GpuVec3, NeighborParams,
-        NeighborStats, ParticleCollisionParams, SdfParams, pack_colliders, pack_vec3, unpack_vec3,
+        RefGpuAttachEntry, RefGpuBendConstraint, RefGpuParams, RefGpuSdfCollider, RefGpuVec3,
+        RefNeighborParams, RefNeighborStats, RefParticleCollisionParams, RefSdfParams,
+        ref_pack_colliders, ref_pack_vec3, ref_unpack_vec3,
     },
-    pipeline::{SolverPipeline, TimingSample, TimingStage, WORKGROUP_SIZE, binding},
+    pipeline::{REF_WORKGROUP_SIZE, RefSolverPipeline, TimingSample, TimingStage, binding},
 };
 use crate::legacy::{
-    demo::scenes::{SceneId, comparison_scene, scene_params},
+    demo::scenes::{LegacySceneId, legacy_comparison_scene, legacy_scene_params},
     sim::{
-        collide::SdfCollider,
-        constraints::{AttachConstraints, BendConstraints},
-        hash::EMPTY,
-        mesh_gen::generate_cloth_mesh,
-        params::SimParams,
-        solver::{self, Solver},
+        collide::LegacySdfCollider,
+        constraints::{LegacyAttachConstraints, LegacyBendConstraints},
+        hash::LEGACY_EMPTY,
+        mesh_gen::legacy_generate_cloth_mesh,
+        params::LegacySimParams,
+        solver::{self, LegacySolver},
     },
 };
 
@@ -51,7 +52,7 @@ const CORNERS: [u32; 4] = [0, RES, RES * (RES + 1), RES * (RES + 1) + RES];
 /// Live workload controls. Resolution changes diameter and the derived speed cap while
 /// retaining unit inverse masses; different resolutions are not physically equivalent cloth.
 #[derive(Resource, Clone, Debug)]
-pub struct LiveConfig {
+pub struct RefLiveConfig {
     pub resolution: u32,
     pub layers: u32,
     pub substeps: u32,
@@ -63,7 +64,7 @@ pub struct LiveConfig {
     pub gpu_timing: bool,
 }
 
-impl Default for LiveConfig {
+impl Default for RefLiveConfig {
     fn default() -> Self {
         Self {
             resolution: RES,
@@ -79,14 +80,14 @@ impl Default for LiveConfig {
     }
 }
 
-impl LiveConfig {
+impl RefLiveConfig {
     pub fn validate(&self) -> Result<(), &'static str> {
         self.validate_resolution_limit(128)
     }
 
     /// Only the shared HD scene admits resolution 200; legacy live controls stay capped at 128.
-    pub(super) fn validate_scene(&self, scene: SceneId) -> Result<(), &'static str> {
-        self.validate_resolution_limit(if scene == SceneId::HighResolution {
+    pub(super) fn validate_scene(&self, scene: LegacySceneId) -> Result<(), &'static str> {
+        self.validate_resolution_limit(if scene == LegacySceneId::HighResolution {
             200
         } else {
             128
@@ -147,20 +148,20 @@ impl LiveConfig {
         let n = u64::from(self.particle_count());
         // At most four attachment incidences per particle; bend constraints have four
         // roles and one constraint per grid cell; stretch has at most eight endpoints/row.
-        let csr_bound = n * (size_of::<GpuBendConstraint>() as u64).max(32);
+        let csr_bound = n * (size_of::<RefGpuBendConstraint>() as u64).max(32);
         (n * u64::from(self.neighbor_capacity) * size_of::<u32>() as u64)
             .max(csr_bound)
             .max((n + 1) * size_of::<u32>() as u64)
-            .max(fixture_colliders(1.0 / 64.0).len() as u64 * size_of::<GpuSdfCollider>() as u64)
+            .max(fixture_colliders(1.0 / 64.0).len() as u64 * size_of::<RefGpuSdfCollider>() as u64)
     }
 }
 
 /// the compare result, shared with the main world so its `Update` system can log it and exit.
 #[derive(Resource, Clone, Default)]
-pub struct SolverResultSlot(pub Arc<Mutex<Option<SolverReport>>>);
+pub struct RefSolverResultSlot(pub Arc<Mutex<Option<RefSolverReport>>>);
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct ParticleCollisionProbeReport {
+pub struct RefParticleCollisionProbeReport {
     pub num_cases: u32,
     /// Total uploaded particles across the independent cases.
     pub num_particles: u32,
@@ -171,7 +172,7 @@ pub struct ParticleCollisionProbeReport {
     pub pass: bool,
 }
 
-impl ParticleCollisionProbeReport {
+impl RefParticleCollisionProbeReport {
     fn comparison_passed(&self) -> bool {
         self.pass
             && self.num_cases > 0
@@ -185,7 +186,7 @@ impl ParticleCollisionProbeReport {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct NeighborProbeReport {
+pub struct RefNeighborProbeReport {
     pub cases: u32,
     pub rebuilds: u32,
     pub overflow_cases: u32,
@@ -193,7 +194,7 @@ pub struct NeighborProbeReport {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct SolverReport {
+pub struct RefSolverReport {
     pub num_particles: u32,
     pub steps: u32,
     pub iterations: u32,
@@ -223,15 +224,15 @@ pub struct SolverReport {
     pub hash_interval: u32,
     pub hash_rebuilds: u32,
     /// Cumulative overflow row EVENTS and stored entries over all rebuilds; max_required is a peak.
-    pub neighbor_stats: NeighborStats,
+    pub neighbor_stats: RefNeighborStats,
     /// CPU input diagnostic, not a GPU counter.
     pub initial_directed_contacts: u32,
-    pub neighbor_probe: NeighborProbeReport,
+    pub neighbor_probe: RefNeighborProbeReport,
     /// Fixed debug candidate tables independently validate the collision kernel.
-    pub particle_collision_probe: ParticleCollisionProbeReport,
+    pub particle_collision_probe: RefParticleCollisionProbeReport,
 }
 
-impl SolverReport {
+impl RefSolverReport {
     /// Diagnostic comparison tolerances, not proof of physical correctness or exact pinning.
     pub fn comparison_passed(&self) -> bool {
         self.particle_collision_probe.comparison_passed()
@@ -266,7 +267,7 @@ struct SolverBuffers {
     _bend_inc_entries: Buffer,
     _bend_constraints: Buffer,
     _params: Buffer,
-    gpu_params: GpuParams,
+    gpu_params: RefGpuParams,
     _sdf_params: Buffer,
     _sdf_colliders: Buffer,
     sdf_bind_group: BindGroup,
@@ -279,7 +280,7 @@ struct SolverBuffers {
     self_collision: bool,
     initial_directed_contacts: u32,
     particle_collision_bind_group: BindGroup,
-    colliders: Vec<SdfCollider>,
+    colliders: Vec<LegacySdfCollider>,
     collision_margin: f32,
     friction: f32,
     initial_max_sdf_correction: f32,
@@ -291,7 +292,7 @@ struct SolverBuffers {
     num_bend_constraints: u32,
     bend_compliance: f32,
     initial_max_bend_angle_error: f32,
-    attachment: AttachConstraints,
+    attachment: LegacyAttachConstraints,
     inverse_masses: Vec<f32>,
     long_range_stretchiness: f32,
     step_time: f32,
@@ -310,7 +311,7 @@ fn validate_neighbors(n: usize, slots: u32, neighbors: &[u32]) -> Result<(), &'s
         let mut ended = false;
         for slot in 0..slots as usize {
             let j = neighbors[i + n * slot];
-            if j == EMPTY {
+            if j == LEGACY_EMPTY {
                 ended = true;
             } else if j as usize >= n {
                 return Err("neighbor ID out of range");
@@ -325,7 +326,7 @@ fn validate_neighbors(n: usize, slots: u32, neighbors: &[u32]) -> Result<(), &'s
 fn particle_collision_bind_group(
     device: &RenderDevice,
     cache: &PipelineCache,
-    pipeline: &SolverPipeline,
+    pipeline: &RefSolverPipeline,
     params: &Buffer,
     collision_params: &Buffer,
     predicted: &Buffer,
@@ -339,17 +340,17 @@ fn particle_collision_bind_group(
         "cloth particle collision bind group",
         &cache.get_bind_group_layout(&pipeline.particle_collision_layout),
         &BindGroupEntries::with_indices((
-            (binding::PARAMS, params.as_entire_binding()),
+            (binding::REF_PARAMS, params.as_entire_binding()),
             (
-                binding::PARTICLE_COLLISION_PARAMS,
+                binding::REF_PARTICLE_COLLISION_PARAMS,
                 collision_params.as_entire_binding(),
             ),
-            (binding::PREDICTED, predicted.as_entire_binding()),
-            (binding::POSITIONS, positions.as_entire_binding()),
-            (binding::DELTAS, deltas.as_entire_binding()),
-            (binding::DELTA_COUNTS, counts.as_entire_binding()),
-            (binding::INV_MASSES, masses.as_entire_binding()),
-            (binding::NEIGHBORS, neighbors.as_entire_binding()),
+            (binding::REF_PREDICTED, predicted.as_entire_binding()),
+            (binding::REF_POSITIONS, positions.as_entire_binding()),
+            (binding::REF_DELTAS, deltas.as_entire_binding()),
+            (binding::REF_DELTA_COUNTS, counts.as_entire_binding()),
+            (binding::REF_INV_MASSES, masses.as_entire_binding()),
+            (binding::REF_NEIGHBORS, neighbors.as_entire_binding()),
         )),
     )
 }
@@ -362,7 +363,7 @@ struct StretchCsr {
     rest: Vec<f32>,
 }
 
-fn build_stretch_csr(solver: &Solver) -> StretchCsr {
+fn build_stretch_csr(solver: &LegacySolver) -> StretchCsr {
     let num_particles = solver.num_particles();
     let stretch = &solver.constraints.stretch;
 
@@ -398,10 +399,10 @@ fn build_stretch_csr(solver: &Solver) -> StretchCsr {
 /// Empty particle ranges and an empty constraint table are both represented by equal offsets.
 struct AttachCsr {
     offsets: Vec<u32>,
-    entries: Vec<GpuAttachEntry>,
+    entries: Vec<RefGpuAttachEntry>,
 }
 
-fn build_attach_csr(num_particles: usize, attach: &AttachConstraints) -> AttachCsr {
+fn build_attach_csr(num_particles: usize, attach: &LegacyAttachConstraints) -> AttachCsr {
     assert_eq!(attach.particle_ids.len(), attach.slot_ids.len());
     assert_eq!(attach.particle_ids.len(), attach.distances.len());
     let mut offsets = vec![0u32; num_particles + 1];
@@ -413,7 +414,7 @@ fn build_attach_csr(num_particles: usize, attach: &AttachConstraints) -> AttachC
         offsets[i + 1] += offsets[i];
     }
     let mut cursor = offsets.clone();
-    let mut entries = vec![GpuAttachEntry::default(); attach.particle_ids.len()];
+    let mut entries = vec![RefGpuAttachEntry::default(); attach.particle_ids.len()];
     for ((&particle, &slot), &rest) in attach
         .particle_ids
         .iter()
@@ -423,7 +424,7 @@ fn build_attach_csr(num_particles: usize, attach: &AttachConstraints) -> AttachC
         assert!((slot as usize) < attach.slot_positions.len());
         assert!(rest.is_finite() && rest >= 0.0);
         let index = cursor[particle as usize] as usize;
-        entries[index] = GpuAttachEntry { slot, rest };
+        entries[index] = RefGpuAttachEntry { slot, rest };
         cursor[particle as usize] += 1;
     }
     AttachCsr { offsets, entries }
@@ -433,10 +434,10 @@ fn build_attach_csr(num_particles: usize, attach: &AttachConstraints) -> AttachC
 struct BendCsr {
     offsets: Vec<u32>,
     entries: Vec<u32>,
-    constraints: Vec<GpuBendConstraint>,
+    constraints: Vec<RefGpuBendConstraint>,
 }
 
-fn build_bend_csr(num_particles: usize, bend: &BendConstraints) -> BendCsr {
+fn build_bend_csr(num_particles: usize, bend: &LegacyBendConstraints) -> BendCsr {
     assert_eq!(bend.indices.len(), bend.angles.len());
     let incidence_count = bend.indices.len().checked_mul(4).expect("bend table size");
     assert!(u32::try_from(incidence_count).is_ok());
@@ -455,7 +456,7 @@ fn build_bend_csr(num_particles: usize, bend: &BendConstraints) -> BendCsr {
     let mut constraints = Vec::with_capacity(bend.indices.len());
     for (id, (&indices, &rest_angle)) in bend.indices.iter().zip(&bend.angles).enumerate() {
         assert!(rest_angle.is_finite());
-        constraints.push(GpuBendConstraint {
+        constraints.push(RefGpuBendConstraint {
             indices,
             rest_angle,
             ..default()
@@ -511,7 +512,7 @@ struct NeighborBuffers {
     cache: BindGroup,
     neighbors: Buffer,
     stats: Buffer,
-    config: NeighborParams,
+    config: RefNeighborParams,
 }
 
 fn uniform_buffer<T: bytemuck::Pod>(
@@ -534,10 +535,10 @@ impl NeighborBuffers {
         device: &RenderDevice,
         queue: &RenderQueue,
         cache: &PipelineCache,
-        pipeline: &SolverPipeline,
+        pipeline: &RefSolverPipeline,
         predicted: &Buffer,
         initial: &[Vec3],
-        config: NeighborParams,
+        config: RefNeighborParams,
     ) -> Self {
         assert_eq!(initial.len(), config.num_particles as usize);
         assert!(config.num_particles > 0 && config.num_buckets > 0);
@@ -552,17 +553,18 @@ impl NeighborBuffers {
         // All kernels use 256 lanes; scan_blocks additionally uses 256 shared u32s.
         // Check the actual device rather than assuming the WebGPU dispatch limit.
         let limits = device.limits();
-        assert!(WORKGROUP_SIZE <= limits.max_compute_workgroup_size_x);
-        assert!(WORKGROUP_SIZE <= limits.max_compute_invocations_per_workgroup);
+        assert!(REF_WORKGROUP_SIZE <= limits.max_compute_workgroup_size_x);
+        assert!(REF_WORKGROUP_SIZE <= limits.max_compute_invocations_per_workgroup);
         assert!(
-            WORKGROUP_SIZE * size_of::<u32>() as u32 <= limits.max_compute_workgroup_storage_size
+            REF_WORKGROUP_SIZE * size_of::<u32>() as u32
+                <= limits.max_compute_workgroup_storage_size
         );
         assert!(
-            config.num_particles.div_ceil(WORKGROUP_SIZE)
+            config.num_particles.div_ceil(REF_WORKGROUP_SIZE)
                 <= limits.max_compute_workgroups_per_dimension
         );
         assert!(
-            config.num_buckets.div_ceil(WORKGROUP_SIZE)
+            config.num_buckets.div_ceil(REF_WORKGROUP_SIZE)
                 <= limits.max_compute_workgroups_per_dimension
         );
         let zeros = vec![0u32; config.num_buckets as usize];
@@ -588,25 +590,25 @@ impl NeighborBuffers {
             device,
             queue,
             "cloth original positions",
-            bytemuck::cast_slice(&pack_vec3(initial)),
+            bytemuck::cast_slice(&ref_pack_vec3(initial)),
         );
         let neighbors = storage_buffer(
             device,
             queue,
             "cloth dynamic neighbors",
-            bytemuck::cast_slice(&vec![EMPTY; table_len.max(1) as usize]),
+            bytemuck::cast_slice(&vec![LEGACY_EMPTY; table_len.max(1) as usize]),
         );
         let stats = storage_buffer(
             device,
             queue,
             "cloth cumulative neighbor stats",
-            bytemuck::bytes_of(&NeighborStats::default()),
+            bytemuck::bytes_of(&RefNeighborStats::default()),
         );
         let uniform = uniform_buffer(device, queue, &config);
         let mut levels: Vec<ScanLevel> = Vec::new();
         let mut length = config.num_buckets;
         loop {
-            let groups = length.div_ceil(WORKGROUP_SIZE);
+            let groups = length.div_ceil(REF_WORKGROUP_SIZE);
             let level_uniform = uniform_buffer(device, queue, &[length, 0u32, 0, 0]);
             let output = storage_buffer(
                 device,
@@ -625,10 +627,10 @@ impl NeighborBuffers {
                 "cloth scan level",
                 &cache.get_bind_group_layout(&pipeline.scan_layout),
                 &BindGroupEntries::with_indices((
-                    (binding::SCAN_PARAMS, level_uniform.as_entire_binding()),
-                    (binding::SCAN_INPUT, input.as_entire_binding()),
-                    (binding::SCAN_OUTPUT, output.as_entire_binding()),
-                    (binding::SCAN_SUMS, sums.as_entire_binding()),
+                    (binding::REF_SCAN_PARAMS, level_uniform.as_entire_binding()),
+                    (binding::REF_SCAN_INPUT, input.as_entire_binding()),
+                    (binding::REF_SCAN_OUTPUT, output.as_entire_binding()),
+                    (binding::REF_SCAN_SUMS, sums.as_entire_binding()),
                 )),
             );
             levels.push(ScanLevel {
@@ -650,15 +652,15 @@ impl NeighborBuffers {
                 &cache.get_bind_group_layout(&pipeline.scan_add_layout),
                 &BindGroupEntries::with_indices((
                     (
-                        binding::SCAN_PARAMS,
+                        binding::REF_SCAN_PARAMS,
                         levels[index]._uniform.as_entire_binding(),
                     ),
                     (
-                        binding::SCAN_INPUT,
+                        binding::REF_SCAN_INPUT,
                         levels[index + 1].output.as_entire_binding(),
                     ),
                     (
-                        binding::SCAN_OUTPUT,
+                        binding::REF_SCAN_OUTPUT,
                         levels[index].output.as_entire_binding(),
                     ),
                 )),
@@ -668,33 +670,33 @@ impl NeighborBuffers {
             "cloth counting hash",
             &cache.get_bind_group_layout(&pipeline.hash_layout),
             &BindGroupEntries::with_indices((
-                (binding::NEIGHBOR_PARAMS, uniform.as_entire_binding()),
-                (binding::PREDICTED, predicted.as_entire_binding()),
-                (binding::BUCKET_COUNTS, counts.as_entire_binding()),
-                (binding::BUCKET_CURSORS, cursors.as_entire_binding()),
+                (binding::REF_NEIGHBOR_PARAMS, uniform.as_entire_binding()),
+                (binding::REF_PREDICTED, predicted.as_entire_binding()),
+                (binding::REF_BUCKET_COUNTS, counts.as_entire_binding()),
+                (binding::REF_BUCKET_CURSORS, cursors.as_entire_binding()),
                 (
-                    binding::BUCKET_OFFSETS,
+                    binding::REF_BUCKET_OFFSETS,
                     levels[0].output.as_entire_binding(),
                 ),
-                (binding::BUCKET_IDS, ids.as_entire_binding()),
-                (binding::NEIGHBOR_STATS, stats.as_entire_binding()),
+                (binding::REF_BUCKET_IDS, ids.as_entire_binding()),
+                (binding::REF_NEIGHBOR_STATS, stats.as_entire_binding()),
             )),
         );
         let neighbor_cache = device.create_bind_group(
             "cloth neighbor cache",
             &cache.get_bind_group_layout(&pipeline.neighbor_layout),
             &BindGroupEntries::with_indices((
-                (binding::NEIGHBOR_PARAMS, uniform.as_entire_binding()),
-                (binding::PREDICTED, predicted.as_entire_binding()),
-                (binding::BUCKET_COUNTS, counts.as_entire_binding()),
+                (binding::REF_NEIGHBOR_PARAMS, uniform.as_entire_binding()),
+                (binding::REF_PREDICTED, predicted.as_entire_binding()),
+                (binding::REF_BUCKET_COUNTS, counts.as_entire_binding()),
                 (
-                    binding::BUCKET_OFFSETS,
+                    binding::REF_BUCKET_OFFSETS,
                     levels[0].output.as_entire_binding(),
                 ),
-                (binding::BUCKET_IDS, ids.as_entire_binding()),
-                (binding::INITIAL_POSITIONS, initial.as_entire_binding()),
-                (binding::NEIGHBOR_OUTPUT, neighbors.as_entire_binding()),
-                (binding::NEIGHBOR_STATS, stats.as_entire_binding()),
+                (binding::REF_BUCKET_IDS, ids.as_entire_binding()),
+                (binding::REF_INITIAL_POSITIONS, initial.as_entire_binding()),
+                (binding::REF_NEIGHBOR_OUTPUT, neighbors.as_entire_binding()),
+                (binding::REF_NEIGHBOR_STATS, stats.as_entire_binding()),
             )),
         );
         Self {
@@ -712,7 +714,7 @@ impl NeighborBuffers {
         }
     }
 
-    fn ready(cache: &PipelineCache, pipeline: &SolverPipeline) -> bool {
+    fn ready(cache: &PipelineCache, pipeline: &RefSolverPipeline) -> bool {
         [
             pipeline.clear_hash,
             pipeline.count_hash,
@@ -725,15 +727,20 @@ impl NeighborBuffers {
         .all(|&id| cache.get_compute_pipeline(id).is_some())
     }
 
-    fn record(&self, pass: &mut ComputePass<'_>, cache: &PipelineCache, pipeline: &SolverPipeline) {
-        let groups = self.config.num_particles.div_ceil(WORKGROUP_SIZE);
+    fn record(
+        &self,
+        pass: &mut ComputePass<'_>,
+        cache: &PipelineCache,
+        pipeline: &RefSolverPipeline,
+    ) {
+        let groups = self.config.num_particles.div_ceil(REF_WORKGROUP_SIZE);
         pass.set_bind_group(0, &self.hash, &[]);
         pass.set_pipeline(
             cache
                 .get_compute_pipeline(pipeline.clear_hash)
                 .expect("ready hash"),
         );
-        pass.dispatch_workgroups(self.config.num_buckets.div_ceil(WORKGROUP_SIZE), 1, 1);
+        pass.dispatch_workgroups(self.config.num_buckets.div_ceil(REF_WORKGROUP_SIZE), 1, 1);
         pass.set_pipeline(
             cache
                 .get_compute_pipeline(pipeline.count_hash)
@@ -778,11 +785,11 @@ impl NeighborBuffers {
 }
 
 /// Static shared inputs: no CPU-only animation or implicit per-frame upload.
-pub(super) fn fixture_colliders(step_time: f32) -> Vec<SdfCollider> {
+pub(super) fn fixture_colliders(step_time: f32) -> Vec<LegacySdfCollider> {
     vec![
-        SdfCollider::plane(-2.15, step_time),
-        SdfCollider::sphere(Vec3::new(0.0, -1.0, 0.0), 0.35, step_time),
-        SdfCollider::cube(
+        LegacySdfCollider::plane(-2.15, step_time),
+        LegacySdfCollider::sphere(Vec3::new(0.0, -1.0, 0.0), 0.35, step_time),
+        LegacySdfCollider::cube(
             Vec3::new(0.65, -1.0, 0.1),
             Vec3::new(0.4, 0.6, 0.4),
             Quat::from_rotation_z(0.35) * Quat::from_rotation_y(0.25),
@@ -795,7 +802,7 @@ pub(super) fn fixture_colliders(step_time: f32) -> Vec<SdfCollider> {
 /// deliberately return a small/zero correction inside their expanded bounds; this is NOT SDF depth.
 fn sdf_correction_diagnostic(
     positions: &[Vec3],
-    colliders: &[SdfCollider],
+    colliders: &[LegacySdfCollider],
     margin: f32,
 ) -> (f32, u32) {
     let mut maximum = 0.0f32;
@@ -819,12 +826,12 @@ fn sdf_correction_diagnostic(
 fn reference_neighbors(
     predicted: &[Vec3],
     initial: &[Vec3],
-    config: NeighborParams,
-) -> (Vec<u32>, NeighborStats) {
+    config: RefNeighborParams,
+) -> (Vec<u32>, RefNeighborStats) {
     let n = predicted.len();
     assert_eq!(initial.len(), n);
-    let mut table = vec![EMPTY; n * config.capacity as usize];
-    let mut stats = NeighborStats::default();
+    let mut table = vec![LEGACY_EMPTY; n * config.capacity as usize];
+    let mut stats = RefNeighborStats::default();
     for (i, &point) in predicted.iter().enumerate() {
         if !(point / config.spacing).abs().cmple(Vec3::splat(1e9)).all() {
             stats.invalid_coordinates += 1;
@@ -851,8 +858,8 @@ fn reference_neighbors(
     (table, stats)
 }
 
-fn neighbor_config(params: &SimParams) -> NeighborParams {
-    NeighborParams {
+fn neighbor_config(params: &LegacySimParams) -> RefNeighborParams {
+    RefNeighborParams {
         num_particles: params.num_particles,
         num_buckets: params
             .num_particles
@@ -866,14 +873,25 @@ fn neighbor_config(params: &SimParams) -> NeighborParams {
     }
 }
 
-fn reference_step(s: &mut Solver, params: &SimParams, colliders: &[SdfCollider], dt: f32) {
+fn reference_step(
+    s: &mut LegacySolver,
+    params: &LegacySimParams,
+    colliders: &[LegacySdfCollider],
+    dt: f32,
+) {
     let h = params.substep_time(dt);
     let snapshot = s.positions.clone();
     s.predicted.copy_from_slice(&snapshot);
-    solver::collide_sdf(&mut s.predicted, &snapshot, colliders, params, dt);
+    solver::legacy_collide_sdf(&mut s.predicted, &snapshot, colliders, params, dt);
     s.positions.copy_from_slice(&s.predicted);
     for substep in 0..params.num_substeps {
-        solver::predict_positions(&mut s.predicted, &mut s.velocities, &s.positions, params, h);
+        solver::legacy_predict_positions(
+            &mut s.predicted,
+            &mut s.velocities,
+            &s.positions,
+            params,
+            h,
+        );
         if substep % params.effective_interleaved_hash() == 0 {
             let (table, stats) =
                 reference_neighbors(&s.predicted, &s.initial_positions, neighbor_config(params));
@@ -887,7 +905,7 @@ fn reference_step(s: &mut Solver, params: &SimParams, colliders: &[SdfCollider],
             );
             s.hash.neighbors = table;
         }
-        solver::collide_particles(
+        solver::legacy_collide_particles(
             &mut s.deltas,
             &mut s.delta_counts,
             &mut s.predicted,
@@ -896,9 +914,9 @@ fn reference_step(s: &mut Solver, params: &SimParams, colliders: &[SdfCollider],
             &s.positions,
             params,
         );
-        solver::collide_sdf(&mut s.predicted, &s.positions, colliders, params, h);
+        solver::legacy_collide_sdf(&mut s.predicted, &s.positions, colliders, params, h);
         for _ in 0..params.num_iterations {
-            solver::solve_stretch(
+            solver::legacy_solve_stretch(
                 &mut s.predicted,
                 &mut s.deltas,
                 &mut s.delta_counts,
@@ -906,7 +924,7 @@ fn reference_step(s: &mut Solver, params: &SimParams, colliders: &[SdfCollider],
                 &s.constraints.stretch,
                 params,
             );
-            solver::solve_attachment(
+            solver::legacy_solve_attachment(
                 &mut s.predicted,
                 &mut s.deltas,
                 &mut s.delta_counts,
@@ -914,7 +932,7 @@ fn reference_step(s: &mut Solver, params: &SimParams, colliders: &[SdfCollider],
                 &s.constraints.attach,
                 params,
             );
-            solver::solve_bending(
+            solver::legacy_solve_bending(
                 &mut s.predicted,
                 &mut s.deltas,
                 &mut s.delta_counts,
@@ -923,9 +941,14 @@ fn reference_step(s: &mut Solver, params: &SimParams, colliders: &[SdfCollider],
                 params,
                 h,
             );
-            solver::apply_deltas(&mut s.predicted, &mut s.deltas, &mut s.delta_counts, params);
+            solver::legacy_apply_deltas(
+                &mut s.predicted,
+                &mut s.deltas,
+                &mut s.delta_counts,
+                params,
+            );
         }
-        solver::finalize(&mut s.velocities, &mut s.positions, &s.predicted, params, h);
+        solver::legacy_finalize(&mut s.velocities, &mut s.positions, &s.predicted, params, h);
     }
 }
 
@@ -933,12 +956,12 @@ fn read_neighbor_stats(
     device: &RenderDevice,
     queue: &RenderQueue,
     buffer: &Buffer,
-) -> NeighborStats {
-    let bytes = read_bytes(device, queue, buffer, size_of::<NeighborStats>() as u64);
+) -> RefNeighborStats {
+    let bytes = read_bytes(device, queue, buffer, size_of::<RefNeighborStats>() as u64);
     bytemuck::pod_read_unaligned(&bytes)
 }
 
-fn accumulate_neighbor_stats(total: &mut NeighborStats, next: NeighborStats) {
+fn accumulate_neighbor_stats(total: &mut RefNeighborStats, next: RefNeighborStats) {
     total.overflow_rows += next.overflow_rows;
     total.max_required = total.max_required.max(next.max_required);
     total.stored_entries += next.stored_entries;
@@ -949,9 +972,9 @@ fn run_neighbor_probe(
     device: &RenderDevice,
     queue: &RenderQueue,
     cache: &PipelineCache,
-    pipeline: &SolverPipeline,
-) -> NeighborProbeReport {
-    let mut report = NeighborProbeReport {
+    pipeline: &RefSolverPipeline,
+) -> RefNeighborProbeReport {
+    let mut report = RefNeighborProbeReport {
         pass: true,
         ..default()
     };
@@ -985,7 +1008,7 @@ fn run_neighbor_probe(
         (1156, 11),
         (65537, 11),
     ] {
-        let config = NeighborParams {
+        let config = RefNeighborParams {
             num_particles: n,
             num_buckets: buckets,
             capacity,
@@ -997,11 +1020,11 @@ fn run_neighbor_probe(
             device,
             queue,
             "neighbor probe predicted",
-            bytemuck::cast_slice(&pack_vec3(&points)),
+            bytemuck::cast_slice(&ref_pack_vec3(&points)),
         );
         let search =
             NeighborBuffers::new(device, queue, cache, pipeline, &predicted, &initial, config);
-        let mut cumulative = NeighborStats::default();
+        let mut cumulative = RefNeighborStats::default();
         let mut overflow = false;
         for snapshot in 0..4 {
             let mut moved = points.clone();
@@ -1017,7 +1040,7 @@ fn run_neighbor_probe(
                     *point = Vec3::new(i as f32 * 3.0, -3.0, 2.0);
                 }
             }
-            queue.write_buffer(&predicted, 0, bytemuck::cast_slice(&pack_vec3(&moved)));
+            queue.write_buffer(&predicted, 0, bytemuck::cast_slice(&ref_pack_vec3(&moved)));
             let (expected, stats) = reference_neighbors(&moved, &initial, config);
             overflow |= stats.overflow_rows > 0;
             accumulate_neighbor_stats(&mut cumulative, stats);
@@ -1079,9 +1102,9 @@ fn run_neighbor_probe(
 }
 
 /// Workload metadata for the seven shared scenes, not the legacy live fixture.
-pub(super) fn scene_live_config(scene: SceneId) -> LiveConfig {
-    let definition = comparison_scene(scene).expect("supported GPU comparison scene");
-    let params = scene_params(scene);
+pub(super) fn scene_live_config(scene: LegacySceneId) -> RefLiveConfig {
+    let definition = legacy_comparison_scene(scene).expect("supported GPU comparison scene");
+    let params = legacy_scene_params(scene);
     let resolution = definition.cloths[0].resolution;
     assert!(
         definition
@@ -1089,7 +1112,7 @@ pub(super) fn scene_live_config(scene: SceneId) -> LiveConfig {
             .iter()
             .all(|cloth| cloth.resolution == resolution)
     );
-    let config = LiveConfig {
+    let config = RefLiveConfig {
         resolution,
         layers: u32::try_from(definition.cloths.len()).expect("scene layer count"),
         substeps: params.num_substeps,
@@ -1106,18 +1129,21 @@ pub(super) fn scene_live_config(scene: SceneId) -> LiveConfig {
 }
 
 /// Exact CPU scene construction: no legacy fixture perturbation or compliance override.
-pub(super) fn scene_fixture(step_time: f32, scene: SceneId) -> (Solver, SimParams) {
+pub(super) fn scene_fixture(
+    step_time: f32,
+    scene: LegacySceneId,
+) -> (LegacySolver, LegacySimParams) {
     assert!(step_time.is_finite() && step_time > 0.0);
     // Validate shared scene bounds before allocating meshes; this does not relax legacy live.
     scene_live_config(scene);
-    let definition = comparison_scene(scene).expect("supported GPU comparison scene");
-    let mut params = scene_params(scene);
-    let mut solver = Solver::default();
+    let definition = legacy_comparison_scene(scene).expect("supported GPU comparison scene");
+    let mut params = legacy_scene_params(scene);
+    let mut solver = LegacySolver::default();
     for cloth in definition.cloths {
         solver
             .add_cloth(
                 &mut params,
-                &generate_cloth_mesh(cloth.resolution),
+                &legacy_generate_cloth_mesh(cloth.resolution),
                 cloth.pose(),
                 &cloth.attached,
                 step_time,
@@ -1130,10 +1156,13 @@ pub(super) fn scene_fixture(step_time: f32, scene: SceneId) -> (Solver, SimParam
 /// Identical layer rest meshes at .5 spacing, translated to .1 live spacing without
 /// modifying original positions or rest constraints. Resolution is a workload control,
 /// not a physically equivalent refinement: add_cloth derives diameter/mass/speed as before.
-pub(super) fn configured_fixture(step_time: f32, config: &LiveConfig) -> (Solver, SimParams) {
+pub(super) fn configured_fixture(
+    step_time: f32,
+    config: &RefLiveConfig,
+) -> (LegacySolver, LegacySimParams) {
     config.validate().expect("valid live cloth configuration");
     assert!(step_time.is_finite() && step_time > 0.0);
-    let mut params = SimParams {
+    let mut params = LegacySimParams {
         num_substeps: config.substeps,
         num_iterations: config.iterations,
         max_num_neighbors: config.neighbor_capacity,
@@ -1144,8 +1173,8 @@ pub(super) fn configured_fixture(step_time: f32, config: &LiveConfig) -> (Solver
     };
     let res = config.resolution;
     let corners = [0, res, res * (res + 1), res * (res + 1) + res];
-    let mesh = generate_cloth_mesh(res);
-    let mut solver = Solver::default();
+    let mesh = legacy_generate_cloth_mesh(res);
+    let mut solver = LegacySolver::default();
     for layer in 0..config.layers {
         let first_slot = solver.constraints.attach.slot_positions.len();
         let first = solver
@@ -1190,7 +1219,7 @@ fn create_buffers(
     device: &RenderDevice,
     queue: &RenderQueue,
     cache: &PipelineCache,
-    pipeline: &SolverPipeline,
+    pipeline: &RefSolverPipeline,
     step_time: f32,
 ) -> SolverBuffers {
     initialize_buffers(
@@ -1200,7 +1229,7 @@ fn create_buffers(
         pipeline,
         step_time,
         true,
-        &LiveConfig::default(),
+        &RefLiveConfig::default(),
     )
 }
 
@@ -1208,10 +1237,10 @@ fn initialize_buffers(
     device: &RenderDevice,
     queue: &RenderQueue,
     cache: &PipelineCache,
-    pipeline: &SolverPipeline,
+    pipeline: &RefSolverPipeline,
     step_time: f32,
     run_reference: bool,
-    live_config: &LiveConfig,
+    live_config: &RefLiveConfig,
 ) -> SolverBuffers {
     live_config
         .validate()
@@ -1244,10 +1273,10 @@ fn initialize_solver_buffers(
     device: &RenderDevice,
     queue: &RenderQueue,
     cache: &PipelineCache,
-    pipeline: &SolverPipeline,
-    solver: Solver,
-    params: SimParams,
-    colliders: Vec<SdfCollider>,
+    pipeline: &RefSolverPipeline,
+    solver: LegacySolver,
+    params: LegacySimParams,
+    colliders: Vec<LegacySdfCollider>,
     step_time: f32,
     run_reference: bool,
 ) -> SolverBuffers {
@@ -1257,17 +1286,17 @@ fn initialize_solver_buffers(
     assert_eq!(n, u64::from(params.num_particles));
     assert!(n > 0);
     let required = [
-        n * size_of::<GpuVec3>() as u64,
+        n * size_of::<RefGpuVec3>() as u64,
         (n + 1) * size_of::<u32>() as u64,
         n * u64::from(config.capacity) * size_of::<u32>() as u64,
         u64::from(config.num_buckets) * size_of::<u32>() as u64,
         solver.constraints.stretch.indices.len() as u64 * 2 * size_of::<u32>() as u64,
-        solver.constraints.attach.particle_ids.len() as u64 * size_of::<GpuAttachEntry>() as u64,
-        solver.constraints.attach.slot_positions.len() as u64 * size_of::<GpuVec3>() as u64,
-        solver.constraints.bend.indices.len() as u64 * size_of::<GpuBendConstraint>() as u64,
+        solver.constraints.attach.particle_ids.len() as u64 * size_of::<RefGpuAttachEntry>() as u64,
+        solver.constraints.attach.slot_positions.len() as u64 * size_of::<RefGpuVec3>() as u64,
+        solver.constraints.bend.indices.len() as u64 * size_of::<RefGpuBendConstraint>() as u64,
         solver.constraints.bend.indices.len() as u64 * 4 * size_of::<u32>() as u64,
-        colliders.len() as u64 * size_of::<GpuSdfCollider>() as u64,
-        size_of::<GpuSdfCollider>() as u64,
+        colliders.len() as u64 * size_of::<RefGpuSdfCollider>() as u64,
+        size_of::<RefGpuSdfCollider>() as u64,
     ]
     .into_iter()
     .max()
@@ -1311,7 +1340,7 @@ fn initialize_solver_buffers(
                 (0..config.capacity as usize)
                     .filter(|&slot| {
                         let j = initial_neighbors[i + solver.num_particles() * slot];
-                        j != EMPTY
+                        j != LEGACY_EMPTY
                             && solver.positions[i].distance_squared(solver.positions[j as usize])
                                 < config.diameter_squared
                     })
@@ -1340,26 +1369,26 @@ fn initialize_solver_buffers(
     let bend_csr = build_bend_csr(solver.num_particles(), &solver.constraints.bend);
     let num_bend_constraints = solver.constraints.bend.indices.len() as u32;
     let num_particles = solver.num_particles() as u32;
-    let zero_vec3 = vec![GpuVec3::default(); solver.num_particles()];
+    let zero_vec3 = vec![RefGpuVec3::default(); solver.num_particles()];
     let zero_counts = vec![0i32; solver.num_particles()];
 
     let positions = storage_buffer(
         device,
         queue,
         "cloth positions",
-        bytemuck::cast_slice(&pack_vec3(&solver.positions)),
+        bytemuck::cast_slice(&ref_pack_vec3(&solver.positions)),
     );
     let predicted = storage_buffer(
         device,
         queue,
         "cloth predicted",
-        bytemuck::cast_slice(&pack_vec3(&solver.predicted)),
+        bytemuck::cast_slice(&ref_pack_vec3(&solver.predicted)),
     );
     let velocities = storage_buffer(
         device,
         queue,
         "cloth velocities",
-        bytemuck::cast_slice(&pack_vec3(&solver.velocities)),
+        bytemuck::cast_slice(&ref_pack_vec3(&solver.velocities)),
     );
     let deltas = storage_buffer(
         device,
@@ -1406,7 +1435,7 @@ fn initialize_solver_buffers(
     );
     // A runtime array must bind at least one complete element, even with zero incidences/slots.
     let attach_entries = if attach_csr.entries.is_empty() {
-        vec![GpuAttachEntry::default()]
+        vec![RefGpuAttachEntry::default()]
     } else {
         attach_csr.entries
     };
@@ -1416,9 +1445,9 @@ fn initialize_solver_buffers(
         "attachment incidence slot and rest",
         bytemuck::cast_slice(&attach_entries),
     );
-    let mut slot_positions = pack_vec3(&solver.constraints.attach.slot_positions);
+    let mut slot_positions = ref_pack_vec3(&solver.constraints.attach.slot_positions);
     if slot_positions.is_empty() {
-        slot_positions.push(GpuVec3::default());
+        slot_positions.push(RefGpuVec3::default());
     }
     let attach_slot_positions = storage_buffer(
         device,
@@ -1445,7 +1474,7 @@ fn initialize_solver_buffers(
         bytemuck::cast_slice(&bend_entries),
     );
     let packed_bends = if bend_csr.constraints.is_empty() {
-        vec![GpuBendConstraint::default()]
+        vec![RefGpuBendConstraint::default()]
     } else {
         bend_csr.constraints
     };
@@ -1456,10 +1485,10 @@ fn initialize_solver_buffers(
         bytemuck::cast_slice(&packed_bends),
     );
 
-    let gpu_params = GpuParams::new(&params, params.substep_time(step_time));
+    let gpu_params = RefGpuParams::new(&params, params.substep_time(step_time));
     let params_buffer = device.create_buffer(&BufferDescriptor {
         label: Some("cloth solver params"),
-        size: size_of::<GpuParams>() as u64,
+        size: size_of::<RefGpuParams>() as u64,
         usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -1477,14 +1506,14 @@ fn initialize_solver_buffers(
     let neighbors = neighbor_search.neighbors.clone();
     let particle_collision_params = device.create_buffer(&BufferDescriptor {
         label: Some("cloth dynamic particle collision params"),
-        size: size_of::<ParticleCollisionParams>() as u64,
+        size: size_of::<RefParticleCollisionParams>() as u64,
         usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
     queue.write_buffer(
         &particle_collision_params,
         0,
-        bytemuck::bytes_of(&ParticleCollisionParams {
+        bytemuck::bytes_of(&RefParticleCollisionParams {
             max_num_neighbors: params.max_num_neighbors,
             particle_diameter: params.particle_diameter,
             friction: params.friction,
@@ -1505,7 +1534,7 @@ fn initialize_solver_buffers(
         &neighbors,
     );
 
-    let sdf_params = SdfParams {
+    let sdf_params = RefSdfParams {
         num_colliders: colliders.len() as u32,
         collision_margin: params.collision_margin,
         friction: params.friction,
@@ -1513,7 +1542,7 @@ fn initialize_solver_buffers(
     };
     let sdf_params_buffer = device.create_buffer(&BufferDescriptor {
         label: Some("cloth solver sdf params"),
-        size: size_of::<SdfParams>() as u64,
+        size: size_of::<RefSdfParams>() as u64,
         usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -1522,18 +1551,24 @@ fn initialize_solver_buffers(
         device,
         queue,
         "cloth packed sdf colliders",
-        bytemuck::cast_slice(&pack_colliders(&colliders)),
+        bytemuck::cast_slice(&ref_pack_colliders(&colliders)),
     );
     let sdf_layout = cache.get_bind_group_layout(&pipeline.sdf_layout);
     let sdf_bind_group = device.create_bind_group(
         "cloth solver sdf bind group",
         &sdf_layout,
         &BindGroupEntries::with_indices((
-            (binding::PARAMS, params_buffer.as_entire_binding()),
-            (binding::SDF_PARAMS, sdf_params_buffer.as_entire_binding()),
-            (binding::POSITIONS, positions.as_entire_binding()),
-            (binding::PREDICTED, predicted.as_entire_binding()),
-            (binding::SDF_COLLIDERS, sdf_colliders.as_entire_binding()),
+            (binding::REF_PARAMS, params_buffer.as_entire_binding()),
+            (
+                binding::REF_SDF_PARAMS,
+                sdf_params_buffer.as_entire_binding(),
+            ),
+            (binding::REF_POSITIONS, positions.as_entire_binding()),
+            (binding::REF_PREDICTED, predicted.as_entire_binding()),
+            (
+                binding::REF_SDF_COLLIDERS,
+                sdf_colliders.as_entire_binding(),
+            ),
         )),
     );
 
@@ -1542,10 +1577,10 @@ fn initialize_solver_buffers(
         "cloth solver particle bind group",
         &particle_layout,
         &BindGroupEntries::with_indices((
-            (binding::PARAMS, params_buffer.as_entire_binding()),
-            (binding::POSITIONS, positions.as_entire_binding()),
-            (binding::PREDICTED, predicted.as_entire_binding()),
-            (binding::VELOCITIES, velocities.as_entire_binding()),
+            (binding::REF_PARAMS, params_buffer.as_entire_binding()),
+            (binding::REF_POSITIONS, positions.as_entire_binding()),
+            (binding::REF_PREDICTED, predicted.as_entire_binding()),
+            (binding::REF_VELOCITIES, velocities.as_entire_binding()),
         )),
     );
 
@@ -1554,21 +1589,21 @@ fn initialize_solver_buffers(
         "cloth solver constraint bind group",
         &constraint_layout,
         &BindGroupEntries::with_indices((
-            (binding::PARAMS, params_buffer.as_entire_binding()),
-            (binding::PREDICTED, predicted.as_entire_binding()),
-            (binding::DELTAS, deltas.as_entire_binding()),
-            (binding::DELTA_COUNTS, delta_counts.as_entire_binding()),
-            (binding::INV_MASSES, inv_masses.as_entire_binding()),
+            (binding::REF_PARAMS, params_buffer.as_entire_binding()),
+            (binding::REF_PREDICTED, predicted.as_entire_binding()),
+            (binding::REF_DELTAS, deltas.as_entire_binding()),
+            (binding::REF_DELTA_COUNTS, delta_counts.as_entire_binding()),
+            (binding::REF_INV_MASSES, inv_masses.as_entire_binding()),
             (
-                binding::STRETCH_INC_OFFSETS,
+                binding::REF_STRETCH_INC_OFFSETS,
                 stretch_inc_offsets.as_entire_binding(),
             ),
             (
-                binding::STRETCH_INC_OTHER,
+                binding::REF_STRETCH_INC_OTHER,
                 stretch_inc_other.as_entire_binding(),
             ),
             (
-                binding::STRETCH_INC_REST,
+                binding::REF_STRETCH_INC_REST,
                 stretch_inc_rest.as_entire_binding(),
             ),
         )),
@@ -1579,21 +1614,21 @@ fn initialize_solver_buffers(
         "cloth solver attachment bind group",
         &attachment_layout,
         &BindGroupEntries::with_indices((
-            (binding::PARAMS, params_buffer.as_entire_binding()),
-            (binding::PREDICTED, predicted.as_entire_binding()),
-            (binding::DELTAS, deltas.as_entire_binding()),
-            (binding::DELTA_COUNTS, delta_counts.as_entire_binding()),
-            (binding::INV_MASSES, inv_masses.as_entire_binding()),
+            (binding::REF_PARAMS, params_buffer.as_entire_binding()),
+            (binding::REF_PREDICTED, predicted.as_entire_binding()),
+            (binding::REF_DELTAS, deltas.as_entire_binding()),
+            (binding::REF_DELTA_COUNTS, delta_counts.as_entire_binding()),
+            (binding::REF_INV_MASSES, inv_masses.as_entire_binding()),
             (
-                binding::ATTACH_INC_OFFSETS,
+                binding::REF_ATTACH_INC_OFFSETS,
                 attach_inc_offsets.as_entire_binding(),
             ),
             (
-                binding::ATTACH_INC_ENTRIES,
+                binding::REF_ATTACH_INC_ENTRIES,
                 attach_inc_entries.as_entire_binding(),
             ),
             (
-                binding::ATTACH_SLOT_POSITIONS,
+                binding::REF_ATTACH_SLOT_POSITIONS,
                 attach_slot_positions.as_entire_binding(),
             ),
         )),
@@ -1604,21 +1639,21 @@ fn initialize_solver_buffers(
         "cloth solver bending bind group",
         &bending_layout,
         &BindGroupEntries::with_indices((
-            (binding::PARAMS, params_buffer.as_entire_binding()),
-            (binding::PREDICTED, predicted.as_entire_binding()),
-            (binding::DELTAS, deltas.as_entire_binding()),
-            (binding::DELTA_COUNTS, delta_counts.as_entire_binding()),
-            (binding::INV_MASSES, inv_masses.as_entire_binding()),
+            (binding::REF_PARAMS, params_buffer.as_entire_binding()),
+            (binding::REF_PREDICTED, predicted.as_entire_binding()),
+            (binding::REF_DELTAS, deltas.as_entire_binding()),
+            (binding::REF_DELTA_COUNTS, delta_counts.as_entire_binding()),
+            (binding::REF_INV_MASSES, inv_masses.as_entire_binding()),
             (
-                binding::BEND_INC_OFFSETS,
+                binding::REF_BEND_INC_OFFSETS,
                 bend_inc_offsets.as_entire_binding(),
             ),
             (
-                binding::BEND_INC_ENTRIES,
+                binding::REF_BEND_INC_ENTRIES,
                 bend_inc_entries.as_entire_binding(),
             ),
             (
-                binding::BEND_CONSTRAINTS,
+                binding::REF_BEND_CONSTRAINTS,
                 bend_constraints.as_entire_binding(),
             ),
         )),
@@ -1681,10 +1716,10 @@ impl SolverBuffers {
         &self,
         pass: &mut ComputePass<'_>,
         cache: &PipelineCache,
-        pipeline: &SolverPipeline,
+        pipeline: &RefSolverPipeline,
         mut timing: Option<&mut TimingSample>,
     ) {
-        let groups = self.num_particles.div_ceil(WORKGROUP_SIZE);
+        let groups = self.num_particles.div_ceil(REF_WORKGROUP_SIZE);
         let dispatch = |pass: &mut ComputePass<'_>, id, bind_group: &BindGroup| {
             pass.set_bind_group(0, bind_group, &[]);
             pass.set_pipeline(cache.get_compute_pipeline(id).expect("ready solver"));
@@ -1742,7 +1777,7 @@ impl SolverBuffers {
 pub(crate) struct LiveSolver(SolverBuffers);
 
 impl LiveSolver {
-    pub(crate) fn ready(cache: &PipelineCache, pipeline: &SolverPipeline) -> bool {
+    pub(crate) fn ready(cache: &PipelineCache, pipeline: &RefSolverPipeline) -> bool {
         NeighborBuffers::ready(cache, pipeline)
             && [
                 pipeline.stabilize_sdf(),
@@ -1763,9 +1798,9 @@ impl LiveSolver {
         device: &RenderDevice,
         queue: &RenderQueue,
         cache: &PipelineCache,
-        pipeline: &SolverPipeline,
+        pipeline: &RefSolverPipeline,
         dt: f32,
-        config: &LiveConfig,
+        config: &RefLiveConfig,
     ) -> Self {
         Self(initialize_buffers(
             device, queue, cache, pipeline, dt, false, config,
@@ -1777,20 +1812,24 @@ impl LiveSolver {
         device: &RenderDevice,
         queue: &RenderQueue,
         cache: &PipelineCache,
-        pipeline: &SolverPipeline,
+        pipeline: &RefSolverPipeline,
         dt: f32,
-        scene: SceneId,
+        scene: LegacySceneId,
     ) -> Self {
         let (solver, params) = scene_fixture(dt, scene);
-        let definition = comparison_scene(scene).expect("supported GPU comparison scene");
+        let definition = legacy_comparison_scene(scene).expect("supported GPU comparison scene");
         let colliders = definition
             .colliders
             .iter()
             .map(|collider| {
                 if collider.enabled {
-                    SdfCollider::from_transform(collider.kind, collider.initial_transform(), dt)
+                    LegacySdfCollider::from_transform(
+                        collider.kind,
+                        collider.initial_transform(),
+                        dt,
+                    )
                 } else {
-                    SdfCollider::disabled()
+                    LegacySdfCollider::disabled()
                 }
             })
             .collect();
@@ -1805,39 +1844,40 @@ impl LiveSolver {
         device: &RenderDevice,
         queue: &RenderQueue,
         cache: &PipelineCache,
-        pipeline: &SolverPipeline,
-        solver: Solver,
-        params: SimParams,
+        pipeline: &RefSolverPipeline,
+        solver: LegacySolver,
+        params: LegacySimParams,
         dt: f32,
     ) -> Result<Self, String> {
         let n = solver.num_particles() as u64;
         let limits = device.limits();
         let buckets = n * 2;
         let required = [
-            n * size_of::<GpuVec3>() as u64,
+            n * size_of::<RefGpuVec3>() as u64,
             (n + 1) * size_of::<u32>() as u64,
             n * u64::from(params.max_num_neighbors) * size_of::<u32>() as u64,
             buckets * size_of::<u32>() as u64,
             solver.constraints.stretch.indices.len() as u64 * 2 * size_of::<u32>() as u64,
             solver.constraints.attach.particle_ids.len() as u64
-                * size_of::<GpuAttachEntry>() as u64,
+                * size_of::<RefGpuAttachEntry>() as u64,
             (solver.constraints.attach.slot_positions.len() as u64).max(1)
-                * size_of::<GpuVec3>() as u64,
+                * size_of::<RefGpuVec3>() as u64,
             (solver.constraints.bend.indices.len() as u64).max(1)
-                * size_of::<GpuBendConstraint>() as u64,
+                * size_of::<RefGpuBendConstraint>() as u64,
             solver.constraints.bend.indices.len() as u64 * 4 * size_of::<u32>() as u64,
-            size_of::<GpuSdfCollider>() as u64,
+            size_of::<RefGpuSdfCollider>() as u64,
         ]
         .into_iter()
         .max()
         .unwrap_or(0);
         if required > u64::from(limits.max_storage_buffer_binding_size)
             || required > limits.max_buffer_size
-            || buckets.div_ceil(u64::from(WORKGROUP_SIZE))
+            || buckets.div_ceil(u64::from(REF_WORKGROUP_SIZE))
                 > u64::from(limits.max_compute_workgroups_per_dimension)
-            || WORKGROUP_SIZE > limits.max_compute_workgroup_size_x
-            || WORKGROUP_SIZE > limits.max_compute_invocations_per_workgroup
-            || WORKGROUP_SIZE * size_of::<u32>() as u32 > limits.max_compute_workgroup_storage_size
+            || REF_WORKGROUP_SIZE > limits.max_compute_workgroup_size_x
+            || REF_WORKGROUP_SIZE > limits.max_compute_invocations_per_workgroup
+            || REF_WORKGROUP_SIZE * size_of::<u32>() as u32
+                > limits.max_compute_workgroup_storage_size
         {
             return Err(format!(
                 "imported cloth exceeds GPU buffer/dispatch limits (largest binding: {required} bytes)"
@@ -1859,7 +1899,11 @@ impl LiveSolver {
     /// Upload before the corresponding submit_step; collider topology cannot change in-place.
     /// Keep caller-supplied history verbatim: CPU ColliderHistory starts translation-only,
     /// so the first scene tick intentionally does not use the initial scaled sphere model.
-    pub(super) fn update_colliders(&mut self, queue: &RenderQueue, colliders: &[SdfCollider]) {
+    pub(super) fn update_colliders(
+        &mut self,
+        queue: &RenderQueue,
+        colliders: &[LegacySdfCollider],
+    ) {
         assert_eq!(
             colliders.len(),
             self.0.colliders.len(),
@@ -1868,7 +1912,7 @@ impl LiveSolver {
         queue.write_buffer(
             &self.0._sdf_colliders,
             0,
-            bytemuck::cast_slice(&pack_colliders(colliders)),
+            bytemuck::cast_slice(&ref_pack_colliders(colliders)),
         );
         self.0.colliders.copy_from_slice(colliders);
     }
@@ -1886,7 +1930,7 @@ impl LiveSolver {
             queue.write_buffer(
                 &self.0.attach_slot_positions,
                 0,
-                bytemuck::cast_slice(&pack_vec3(positions)),
+                bytemuck::cast_slice(&ref_pack_vec3(positions)),
             );
         }
     }
@@ -1914,7 +1958,7 @@ impl LiveSolver {
         device: &RenderDevice,
         queue: &RenderQueue,
         cache: &PipelineCache,
-        pipeline: &SolverPipeline,
+        pipeline: &RefSolverPipeline,
         dt: f32,
         mut timing: Option<&mut TimingSample>,
     ) {
@@ -1928,7 +1972,7 @@ impl LiveSolver {
         queue.write_buffer(
             &self.0._sdf_params,
             0,
-            bytemuck::bytes_of(&SdfParams {
+            bytemuck::bytes_of(&RefSdfParams {
                 num_colliders: self.0.colliders.len() as u32,
                 collision_margin: self.0.collision_margin,
                 friction: self.0.friction,
@@ -1959,7 +2003,7 @@ impl LiveSolver {
 
 /// Debug-only fixed candidates: no CPU all-pairs search or production neighbor generation.
 struct ParticleProbeCase {
-    params: SimParams,
+    params: LegacySimParams,
     predicted: Vec<Vec3>,
     positions: Vec<Vec3>,
     masses: Vec<f32>,
@@ -1999,7 +2043,7 @@ fn particle_probe_cases() -> Vec<ParticleProbeCase> {
             let masses = vec![
                 1.0, 1.0, 1.0, 3.0, 2.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 1.0, 2.0, 1.0, 1.0,
             ];
-            let mut neighbors = vec![EMPTY; 16 * 2];
+            let mut neighbors = vec![LEGACY_EMPTY; 16 * 2];
             for i in (0..12).step_by(2) {
                 neighbors[i] = (i + 1) as u32;
                 neighbors[i + 1] = i as u32;
@@ -2011,7 +2055,7 @@ fn particle_probe_cases() -> Vec<ParticleProbeCase> {
             }
             validate_neighbors(16, 2, &neighbors).expect("fixed probe table");
             ParticleProbeCase {
-                params: SimParams {
+                params: LegacySimParams {
                     num_particles: 16,
                     max_num_neighbors: 2,
                     particle_diameter: 1.0,
@@ -2038,7 +2082,7 @@ fn particle_collision_model(case: &ParticleProbeCase) -> (Vec<Vec3>, Vec<i32>, V
     for i in 0..n {
         for slot in 0..case.params.max_num_neighbors as usize {
             let j = case.neighbors[i + n * slot];
-            if j == EMPTY {
+            if j == LEGACY_EMPTY {
                 break;
             }
             let j = j as usize;
@@ -2100,7 +2144,7 @@ fn particle_probe_reference(case: &ParticleProbeCase) -> (Vec<Vec3>, Vec<i32>, V
     let mut cpu = case.predicted.clone();
     let mut cpu_deltas = vec![Vec3::splat(9.0); cpu.len()];
     let mut cpu_counts = vec![17; cpu.len()];
-    crate::legacy::sim::solver::collide_particles(
+    crate::legacy::sim::solver::legacy_collide_particles(
         &mut cpu_deltas,
         &mut cpu_counts,
         &mut cpu,
@@ -2128,9 +2172,9 @@ fn read_vec3(
         device,
         queue,
         source,
-        u64::from(num_particles) * size_of::<GpuVec3>() as u64,
+        u64::from(num_particles) * size_of::<RefGpuVec3>() as u64,
     );
-    unpack_vec3(bytemuck::cast_slice::<u8, GpuVec3>(&bytes))
+    ref_unpack_vec3(bytemuck::cast_slice::<u8, RefGpuVec3>(&bytes))
 }
 
 fn read_bytes(
@@ -2186,15 +2230,15 @@ fn run_particle_probe(
     device: &RenderDevice,
     queue: &RenderQueue,
     cache: &PipelineCache,
-    pipeline: &SolverPipeline,
-) -> ParticleCollisionProbeReport {
+    pipeline: &RefSolverPipeline,
+) -> RefParticleCollisionProbeReport {
     let collision = cache
         .get_compute_pipeline(pipeline.collide_particles())
         .expect("ready collision");
     let apply = cache
         .get_compute_pipeline(pipeline.apply_deltas())
         .expect("ready apply");
-    let mut report = ParticleCollisionProbeReport {
+    let mut report = RefParticleCollisionProbeReport {
         counts_match: true,
         pass: true,
         ..default()
@@ -2216,11 +2260,11 @@ fn run_particle_probe(
         // Each case is uploaded once and owned locally; no per-frame probe state or CPU search.
         let params = uniform(
             "particle probe params",
-            bytemuck::bytes_of(&GpuParams::new(&case.params, 0.0)),
+            bytemuck::bytes_of(&RefGpuParams::new(&case.params, 0.0)),
         );
         let contact_params = uniform(
             "particle probe collision params",
-            bytemuck::bytes_of(&ParticleCollisionParams {
+            bytemuck::bytes_of(&RefParticleCollisionParams {
                 max_num_neighbors: case.params.max_num_neighbors,
                 particle_diameter: case.params.particle_diameter,
                 friction: case.params.friction,
@@ -2231,13 +2275,13 @@ fn run_particle_probe(
             device,
             queue,
             "probe predicted",
-            bytemuck::cast_slice(&pack_vec3(&case.predicted)),
+            bytemuck::cast_slice(&ref_pack_vec3(&case.predicted)),
         );
         let positions = storage_buffer(
             device,
             queue,
             "probe old positions",
-            bytemuck::cast_slice(&pack_vec3(&case.positions)),
+            bytemuck::cast_slice(&ref_pack_vec3(&case.positions)),
         );
         let masses = storage_buffer(
             device,
@@ -2255,7 +2299,7 @@ fn run_particle_probe(
             device,
             queue,
             "probe dirty deltas",
-            bytemuck::cast_slice(&vec![GpuVec3::from(Vec3::splat(9.0)); n as usize]),
+            bytemuck::cast_slice(&vec![RefGpuVec3::from(Vec3::splat(9.0)); n as usize]),
         );
         let counts = storage_buffer(
             device,
@@ -2282,14 +2326,14 @@ fn run_particle_probe(
             "particle probe apply bind group",
             &cache.get_bind_group_layout(&pipeline.constraint_layout),
             &BindGroupEntries::with_indices((
-                (binding::PARAMS, params.as_entire_binding()),
-                (binding::PREDICTED, predicted.as_entire_binding()),
-                (binding::DELTAS, deltas.as_entire_binding()),
-                (binding::DELTA_COUNTS, counts.as_entire_binding()),
-                (binding::INV_MASSES, masses.as_entire_binding()),
-                (binding::STRETCH_INC_OFFSETS, dummy.as_entire_binding()),
-                (binding::STRETCH_INC_OTHER, dummy.as_entire_binding()),
-                (binding::STRETCH_INC_REST, dummy.as_entire_binding()),
+                (binding::REF_PARAMS, params.as_entire_binding()),
+                (binding::REF_PREDICTED, predicted.as_entire_binding()),
+                (binding::REF_DELTAS, deltas.as_entire_binding()),
+                (binding::REF_DELTA_COUNTS, counts.as_entire_binding()),
+                (binding::REF_INV_MASSES, masses.as_entire_binding()),
+                (binding::REF_STRETCH_INC_OFFSETS, dummy.as_entire_binding()),
+                (binding::REF_STRETCH_INC_OTHER, dummy.as_entire_binding()),
+                (binding::REF_STRETCH_INC_REST, dummy.as_entire_binding()),
             )),
         );
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
@@ -2302,7 +2346,7 @@ fn run_particle_probe(
             });
             pass.set_pipeline(collision);
             pass.set_bind_group(0, &collision_group, &[]);
-            pass.dispatch_workgroups(n.div_ceil(WORKGROUP_SIZE), 1, 1);
+            pass.dispatch_workgroups(n.div_ceil(REF_WORKGROUP_SIZE), 1, 1);
         }
         queue.submit(Some(encoder.finish()));
         // These helper copies are encoded OUTSIDE any compute pass and before apply is submitted.
@@ -2328,7 +2372,7 @@ fn run_particle_probe(
             });
             pass.set_pipeline(apply);
             pass.set_bind_group(0, &apply_group, &[]);
-            pass.dispatch_workgroups(n.div_ceil(WORKGROUP_SIZE), 1, 1);
+            pass.dispatch_workgroups(n.div_ceil(REF_WORKGROUP_SIZE), 1, 1);
         }
         queue.submit(Some(encoder.finish()));
         let applied = read_vec3(device, queue, &predicted, n);
@@ -2355,7 +2399,7 @@ fn max_difference(a: &[Vec3], b: &[Vec3]) -> f32 {
         .fold(0.0, f32::max)
 }
 
-fn max_bend_angle_error(positions: &[Vec3], bend: &BendConstraints) -> f32 {
+fn max_bend_angle_error(positions: &[Vec3], bend: &LegacyBendConstraints) -> f32 {
     let mut maximum = 0.0f32;
     for (indices, rest) in bend.indices.iter().zip(&bend.angles) {
         let [p0, p1, p2, p3] = indices.map(|id| positions[id as usize]);
@@ -2383,7 +2427,7 @@ fn max_bend_angle_error(positions: &[Vec3], bend: &BendConstraints) -> f32 {
 /// Zero-rest incidences measure pin drift separately; neither metric assumes exact pinning.
 fn attachment_errors(
     positions: &[Vec3],
-    attach: &AttachConstraints,
+    attach: &LegacyAttachConstraints,
     inverse_masses: &[f32],
     stretchiness: f32,
 ) -> (f32, f32) {
@@ -2424,7 +2468,7 @@ mod tests {
             (5, 1, 64),
         ] {
             for value in [0, minimum - 1, maximum + 1, u32::MAX] {
-                let mut config = LiveConfig::default();
+                let mut config = RefLiveConfig::default();
                 let fields = [
                     &mut config.resolution,
                     &mut config.layers,
@@ -2437,7 +2481,7 @@ mod tests {
                 assert!(config.validate().is_err(), "field {field}, value {value}");
             }
             for value in [minimum, maximum] {
-                let mut config = LiveConfig::default();
+                let mut config = RefLiveConfig::default();
                 let fields = [
                     &mut config.resolution,
                     &mut config.layers,
@@ -2450,37 +2494,45 @@ mod tests {
                 assert!(config.validate().is_ok());
             }
         }
-        assert_eq!(LiveConfig::default().particle_count(), 578);
+        assert_eq!(RefLiveConfig::default().particle_count(), 578);
     }
 
     #[test]
     fn hd_validation_keeps_legacy_and_other_scene_limits() {
-        let mut config = LiveConfig {
+        let mut config = RefLiveConfig {
             resolution: 200,
             ..default()
         };
         assert!(config.validate().is_err());
-        for scene in SceneId::ALL {
+        for scene in LegacySceneId::ALL {
             assert_eq!(
                 config.validate_scene(scene).is_ok(),
-                scene == SceneId::HighResolution
+                scene == LegacySceneId::HighResolution
             );
         }
         config.resolution = 201;
-        assert!(config.validate_scene(SceneId::HighResolution).is_err());
+        assert!(
+            config
+                .validate_scene(LegacySceneId::HighResolution)
+                .is_err()
+        );
         config.resolution = 200;
         config.neighbor_capacity = 257;
-        assert!(config.validate_scene(SceneId::HighResolution).is_err());
+        assert!(
+            config
+                .validate_scene(LegacySceneId::HighResolution)
+                .is_err()
+        );
         // HD dispatches fit the portable 65535-group limit without tiling.
         let particles = 40401u32;
-        assert_eq!(particles.div_ceil(WORKGROUP_SIZE), 158);
-        assert_eq!((2 * particles).div_ceil(WORKGROUP_SIZE), 316);
+        assert_eq!(particles.div_ceil(REF_WORKGROUP_SIZE), 158);
+        assert_eq!((2 * particles).div_ceil(REF_WORKGROUP_SIZE), 316);
     }
 
     #[test]
     fn configured_fixture_sizes_layers_and_preserves_rest_spacing() {
         for layers in [1, 3] {
-            let config = LiveConfig {
+            let config = RefLiveConfig {
                 resolution: 8,
                 layers,
                 ..default()
@@ -2509,10 +2561,10 @@ mod tests {
             let bound = config.required_storage_binding_bytes();
             for bytes in [
                 stretch.other.len() * size_of::<u32>(),
-                attach.entries.len() * size_of::<GpuAttachEntry>(),
+                attach.entries.len() * size_of::<RefGpuAttachEntry>(),
                 bend.entries.len() * size_of::<u32>(),
-                bend.constraints.len() * size_of::<GpuBendConstraint>(),
-                fixture_colliders(1.0 / 64.0).len() * size_of::<GpuSdfCollider>(),
+                bend.constraints.len() * size_of::<RefGpuBendConstraint>(),
+                fixture_colliders(1.0 / 64.0).len() * size_of::<RefGpuSdfCollider>(),
             ] {
                 assert!(bytes as u64 <= bound);
             }
@@ -2534,22 +2586,22 @@ mod tests {
     #[test]
     fn default_wrapper_matches_legacy_fixture_exactly() {
         let dt = 1.0 / 64.0;
-        let (actual, actual_params) = configured_fixture(dt, &LiveConfig::default());
-        let (configured, _) = configured_fixture(dt, &LiveConfig::default());
+        let (actual, actual_params) = configured_fixture(dt, &RefLiveConfig::default());
+        let (configured, _) = configured_fixture(dt, &RefLiveConfig::default());
         assert_eq!(actual.positions, configured.positions);
         // Reconstruct the previous fixed fixture independently of configured_fixture.
-        let mut params = SimParams {
+        let mut params = LegacySimParams {
             num_substeps: SUBSTEPS,
             num_iterations: ITERATIONS,
             enable_self_collision: true,
             bend_compliance: 1e-4,
             ..default()
         };
-        let mut legacy = Solver::default();
+        let mut legacy = LegacySolver::default();
         legacy
             .add_cloth(
                 &mut params,
-                &generate_cloth_mesh(RES),
+                &legacy_generate_cloth_mesh(RES),
                 Mat4::IDENTITY,
                 &CORNERS,
                 dt,
@@ -2558,7 +2610,7 @@ mod tests {
         let second = legacy
             .add_cloth(
                 &mut params,
-                &generate_cloth_mesh(RES),
+                &legacy_generate_cloth_mesh(RES),
                 Mat4::from_translation(Vec3::new(0.0, 0.0, 0.5)),
                 &CORNERS,
                 dt,
@@ -2604,23 +2656,23 @@ mod tests {
     fn scene_fixture_matches_cpu_initialization_without_legacy_overrides() {
         let dt = 1.0 / 64.0;
         for (scene, count, pins) in [
-            (SceneId::Attach, 1681, vec![0, 40, 1680, 1640]),
-            (SceneId::Collision, 289, vec![0, 16]),
-            (SceneId::SelfCollision, 3721, vec![]),
-            (SceneId::Friction, 4225, vec![]),
-            (SceneId::Multiple, 12675, vec![]),
-            (SceneId::HighResolution, 40401, vec![]),
-            (SceneId::Swirl, 1369, vec![0]),
+            (LegacySceneId::Attach, 1681, vec![0, 40, 1680, 1640]),
+            (LegacySceneId::Collision, 289, vec![0, 16]),
+            (LegacySceneId::SelfCollision, 3721, vec![]),
+            (LegacySceneId::Friction, 4225, vec![]),
+            (LegacySceneId::Multiple, 12675, vec![]),
+            (LegacySceneId::HighResolution, 40401, vec![]),
+            (LegacySceneId::Swirl, 1369, vec![0]),
         ] {
             let (actual, params) = scene_fixture(dt, scene);
-            let definition = comparison_scene(scene).unwrap();
-            let mut expected = Solver::default();
-            let mut expected_params = scene_params(scene);
+            let definition = legacy_comparison_scene(scene).unwrap();
+            let mut expected = LegacySolver::default();
+            let mut expected_params = legacy_scene_params(scene);
             let mut offset = 0;
             let mut stretch_count = 0;
             let mut bend_count = 0;
             for cloth in &definition.cloths {
-                let mesh = generate_cloth_mesh(cloth.resolution);
+                let mesh = legacy_generate_cloth_mesh(cloth.resolution);
                 let resolution = cloth.resolution as usize;
                 stretch_count += 4 * resolution * resolution + 2 * resolution;
                 bend_count += resolution * resolution;
@@ -2649,7 +2701,10 @@ mod tests {
             assert_eq!(actual.constraints.stretch.indices.len(), stretch_count);
             assert_eq!(actual.constraints.bend.indices.len(), bend_count);
             assert_eq!(params, expected_params);
-            assert_eq!(params.bend_compliance, scene_params(scene).bend_compliance);
+            assert_eq!(
+                params.bend_compliance,
+                legacy_scene_params(scene).bend_compliance
+            );
             assert_eq!(params.bend_compliance, 0.0);
             assert_eq!(actual.positions, expected.positions);
             assert_eq!(actual.predicted, expected.predicted);
@@ -2708,20 +2763,23 @@ mod tests {
 
     #[test]
     fn scene_live_config_tracks_shared_definition_and_keeps_other_defaults() {
-        let defaults = LiveConfig::default();
+        let defaults = RefLiveConfig::default();
         for (scene, resolution, layers, count) in [
-            (SceneId::Attach, 40, 1, 1681),
-            (SceneId::Collision, 16, 1, 289),
-            (SceneId::SelfCollision, 60, 1, 3721),
-            (SceneId::Friction, 64, 1, 4225),
-            (SceneId::Multiple, 64, 3, 12675),
-            (SceneId::HighResolution, 200, 1, 40401),
-            (SceneId::Swirl, 36, 1, 1369),
+            (LegacySceneId::Attach, 40, 1, 1681),
+            (LegacySceneId::Collision, 16, 1, 289),
+            (LegacySceneId::SelfCollision, 60, 1, 3721),
+            (LegacySceneId::Friction, 64, 1, 4225),
+            (LegacySceneId::Multiple, 64, 3, 12675),
+            (LegacySceneId::HighResolution, 200, 1, 40401),
+            (LegacySceneId::Swirl, 36, 1, 1369),
         ] {
             let config = scene_live_config(scene);
-            let params = scene_params(scene);
+            let params = legacy_scene_params(scene);
             assert!(config.validate_scene(scene).is_ok());
-            assert_eq!(config.validate().is_ok(), scene != SceneId::HighResolution);
+            assert_eq!(
+                config.validate().is_ok(),
+                scene != LegacySceneId::HighResolution
+            );
             assert_eq!(config.resolution, resolution);
             assert_eq!(config.layers, layers);
             assert_eq!(config.particle_count(), count);
@@ -2737,7 +2795,7 @@ mod tests {
 
     #[test]
     fn configured_fixture_applies_runtime_solver_controls() {
-        let config = LiveConfig {
+        let config = RefLiveConfig {
             resolution: 2,
             layers: 1,
             substeps: 3,
@@ -2759,8 +2817,8 @@ mod tests {
     fn host_hash_neighbors(
         points: &[Vec3],
         initial: &[Vec3],
-        config: NeighborParams,
-    ) -> (Vec<u32>, NeighborStats) {
+        config: RefNeighborParams,
+    ) -> (Vec<u32>, RefNeighborStats) {
         let cell = |point: Vec3| (point / config.spacing).floor().as_ivec3();
         let bucket = |value: glam::IVec3| {
             ((value.x as u32).wrapping_mul(92837111)
@@ -2773,8 +2831,8 @@ mod tests {
             buckets[bucket(cell(point)) as usize].push(i as u32);
         }
         let n = points.len();
-        let mut table = vec![EMPTY; n * config.capacity as usize];
-        let mut stats = NeighborStats::default();
+        let mut table = vec![LEGACY_EMPTY; n * config.capacity as usize];
+        let mut stats = RefNeighborStats::default();
         for (i, &point) in points.iter().enumerate() {
             let mut row = Vec::new();
             let mut required = 0;
@@ -2834,7 +2892,7 @@ mod tests {
         initial[3] = initial[2] + Vec3::X * 0.25;
         for buckets in [1, 2, 3, 7, 52] {
             for capacity in [0, 1, 3, 25, 26] {
-                let config = NeighborParams {
+                let config = RefNeighborParams {
                     num_particles: points.len() as u32,
                     num_buckets: buckets,
                     capacity,
@@ -2848,8 +2906,14 @@ mod tests {
                 if capacity < 23 {
                     assert!(expected.1.overflow_rows > 0);
                 }
-                assert_eq!(expected.0.get(24).copied().unwrap_or(EMPTY), EMPTY);
-                assert_eq!(expected.0.get(25).copied().unwrap_or(EMPTY), EMPTY);
+                assert_eq!(
+                    expected.0.get(24).copied().unwrap_or(LEGACY_EMPTY),
+                    LEGACY_EMPTY
+                );
+                assert_eq!(
+                    expected.0.get(25).copied().unwrap_or(LEGACY_EMPTY),
+                    LEGACY_EMPTY
+                );
             }
         }
     }
@@ -2896,7 +2960,7 @@ mod tests {
     #[test]
     fn dynamic_reference_rebuild_clears_rows_and_reports_invalid_coordinates() {
         let initial = [Vec3::ZERO, Vec3::X * 3.0];
-        let config = NeighborParams {
+        let config = RefNeighborParams {
             num_particles: 2,
             num_buckets: 1,
             capacity: 1,
@@ -2910,7 +2974,7 @@ mod tests {
         );
         assert_eq!(
             reference_neighbors(&[Vec3::ZERO, Vec3::X], &initial, config).0,
-            [EMPTY; 2]
+            [LEGACY_EMPTY; 2]
         );
         for invalid in [
             Vec3::splat(f32::NAN),
@@ -2918,16 +2982,16 @@ mod tests {
             Vec3::splat(2e9),
         ] {
             let (table, stats) = reference_neighbors(&[Vec3::ZERO, invalid], &initial, config);
-            assert_eq!(table, [EMPTY; 2]);
+            assert_eq!(table, [LEGACY_EMPTY; 2]);
             assert_eq!(stats.invalid_coordinates, 1);
         }
-        let empty = NeighborParams {
+        let empty = RefNeighborParams {
             num_particles: 0,
             ..config
         };
         assert_eq!(
             reference_neighbors(&[], &[], empty),
-            (vec![], NeighborStats::default())
+            (vec![], RefNeighborStats::default())
         );
     }
 
@@ -2935,27 +2999,27 @@ mod tests {
     fn rebuild_interval_resets_each_full_step() {
         for substeps in [1, 2, 3, 7] {
             for interval in [0, 1, 2, 3, 10] {
-                let params = SimParams {
+                let params = LegacySimParams {
                     num_substeps: substeps,
                     interleaved_hash: interval,
                     ..default()
                 };
-                let actual = Solver::schedule(&params)
+                let actual = LegacySolver::schedule(&params)
                     .iter()
-                    .filter(|phase| **phase == solver::Phase::RebuildHash)
+                    .filter(|phase| **phase == solver::LegacyPhase::RebuildHash)
                     .count() as u32;
                 assert_eq!(actual, substeps.div_ceil(interval.max(1)));
             }
         }
         assert_eq!(
-            STEPS * SUBSTEPS.div_ceil(SimParams::default().effective_interleaved_hash()),
+            STEPS * SUBSTEPS.div_ceil(LegacySimParams::default().effective_interleaved_hash()),
             60
         );
     }
 
     #[test]
     fn main_two_layer_fixture_has_real_eligible_contacts_and_finite_reference() {
-        let (mut cloth, params) = configured_fixture(1.0 / 64.0, &LiveConfig::default());
+        let (mut cloth, params) = configured_fixture(1.0 / 64.0, &RefLiveConfig::default());
         assert_eq!(cloth.num_particles(), 578);
         assert_eq!(cloth.constraints.bend.indices.len(), 512);
         assert_eq!(cloth.constraints.stretch.indices.len(), 2112);
@@ -2995,20 +3059,26 @@ mod tests {
     #[test]
     fn particle_table_is_slot_major_strict_and_keeps_duplicates() {
         // Rows [1,2], [0], [0] encoded by slots, not row-major.
-        let table = [1, 0, 0, 2, EMPTY, EMPTY];
+        let table = [1, 0, 0, 2, LEGACY_EMPTY, LEGACY_EMPTY];
         assert_eq!(validate_neighbors(3, 2, &table), Ok(()));
         assert_eq!(
-            validate_neighbors(3, 2, &[1, 0, 0, 1, EMPTY, EMPTY]),
+            validate_neighbors(3, 2, &[1, 0, 0, 1, LEGACY_EMPTY, LEGACY_EMPTY]),
             Ok(())
         );
-        assert_eq!(validate_neighbors(3, 2, &[EMPTY; 6]), Ok(()));
+        assert_eq!(validate_neighbors(3, 2, &[LEGACY_EMPTY; 6]), Ok(()));
         assert!(validate_neighbors(3, 2, &[1, 0, 0]).is_err());
-        assert!(validate_neighbors(3, 2, &[3, 0, 0, EMPTY, EMPTY, EMPTY]).is_err());
-        assert!(validate_neighbors(3, 2, &[EMPTY, 0, 0, 2, EMPTY, EMPTY]).is_err());
-        assert!(validate_neighbors(3, 2, &[EMPTY, 0, 0, 3, EMPTY, EMPTY]).is_err());
+        assert!(
+            validate_neighbors(3, 2, &[3, 0, 0, LEGACY_EMPTY, LEGACY_EMPTY, LEGACY_EMPTY]).is_err()
+        );
+        assert!(
+            validate_neighbors(3, 2, &[LEGACY_EMPTY, 0, 0, 2, LEGACY_EMPTY, LEGACY_EMPTY]).is_err()
+        );
+        assert!(
+            validate_neighbors(3, 2, &[LEGACY_EMPTY, 0, 0, 3, LEGACY_EMPTY, LEGACY_EMPTY]).is_err()
+        );
         for case in particle_probe_cases() {
-            assert_eq!(&case.neighbors[12..16], &[13, 12, 12, EMPTY]);
-            assert_eq!(&case.neighbors[28..32], &[14, 14, 13, EMPTY]);
+            assert_eq!(&case.neighbors[12..16], &[13, 12, 12, LEGACY_EMPTY]);
+            assert_eq!(&case.neighbors[28..32], &[14, 14, 13, LEGACY_EMPTY]);
         }
     }
 
@@ -3061,7 +3131,7 @@ mod tests {
 
     #[test]
     fn particle_probe_rejects_count_mismatch_and_nonfinite_output() {
-        let good = ParticleCollisionProbeReport {
+        let good = RefParticleCollisionProbeReport {
             num_cases: 2,
             num_particles: 32,
             active_directed_contacts: 28,
@@ -3071,44 +3141,47 @@ mod tests {
         };
         assert!(good.comparison_passed());
         assert!(
-            !ParticleCollisionProbeReport {
+            !RefParticleCollisionProbeReport {
                 counts_match: false,
                 ..good
             }
             .comparison_passed()
         );
         assert!(
-            !ParticleCollisionProbeReport {
+            !RefParticleCollisionProbeReport {
                 max_delta_diff: f32::NAN,
                 ..good
             }
             .comparison_passed()
         );
         assert!(
-            !ParticleCollisionProbeReport {
+            !RefParticleCollisionProbeReport {
                 max_position_diff: f32::INFINITY,
                 ..good
             }
             .comparison_passed()
         );
         assert!(
-            !ParticleCollisionProbeReport {
+            !RefParticleCollisionProbeReport {
                 pass: false,
                 ..good
             }
             .comparison_passed()
         );
-        assert!(!ParticleCollisionProbeReport::default().comparison_passed());
+        assert!(!RefParticleCollisionProbeReport::default().comparison_passed());
         assert_eq!(probe_difference(&[Vec3::NAN], &[Vec3::ZERO]), f32::INFINITY);
         assert_eq!(probe_difference(&[], &[Vec3::ZERO]), f32::INFINITY);
     }
 
     use crate::{
         legacy::sim::{
-            collide::{ColliderKind, compute_friction},
-            solver::{apply_deltas, collide_sdf, solve_attachment, solve_bending},
+            collide::{LegacyColliderKind, legacy_compute_friction},
+            solver::{
+                legacy_apply_deltas, legacy_collide_sdf, legacy_solve_attachment,
+                legacy_solve_bending,
+            },
         },
-        r#ref::layout::GpuSdfCollider,
+        reference::layout::RefGpuSdfCollider,
     };
 
     fn packed_copy_sign(magnitude: f32, source: f32) -> f32 {
@@ -3116,7 +3189,7 @@ mod tests {
     }
 
     /// Independent packed-shader model, not a call through to SdfCollider::compute_sdf.
-    fn packed_correction(c: &GpuSdfCollider, point: Vec3, margin: f32) -> Vec3 {
+    fn packed_correction(c: &RefGpuSdfCollider, point: Vec3, margin: f32) -> Vec3 {
         let center = Vec3::from(c.position);
         let scale = Vec3::from(c.scale);
         match c.kind {
@@ -3189,7 +3262,7 @@ mod tests {
         }
     }
 
-    fn packed_velocity(c: &GpuSdfCollider, point: Vec3) -> Vec3 {
+    fn packed_velocity(c: &RefGpuSdfCollider, point: Vec3) -> Vec3 {
         if c.delta_time == 0.0 {
             return Vec3::ZERO;
         }
@@ -3214,8 +3287,8 @@ mod tests {
     fn packed_project(
         old: Vec3,
         mut pred: Vec3,
-        colliders: &[GpuSdfCollider],
-        p: SdfParams,
+        colliders: &[RefGpuSdfCollider],
+        p: RefSdfParams,
         h: f32,
     ) -> Vec3 {
         for collider in &colliders[..p.num_colliders as usize] {
@@ -3232,12 +3305,12 @@ mod tests {
     fn compare_sdf(
         old: Vec3,
         pred: Vec3,
-        colliders: &[SdfCollider],
+        colliders: &[LegacySdfCollider],
         margin: f32,
         friction: f32,
         h: f32,
     ) -> Vec3 {
-        let params = SimParams {
+        let params = LegacySimParams {
             num_particles: 1,
             collision_margin: margin,
             friction,
@@ -3246,8 +3319,8 @@ mod tests {
         let packed = packed_project(
             old,
             pred,
-            &pack_colliders(colliders),
-            SdfParams {
+            &ref_pack_colliders(colliders),
+            RefSdfParams {
                 num_colliders: colliders.len() as u32,
                 collision_margin: margin,
                 friction,
@@ -3256,7 +3329,7 @@ mod tests {
             h,
         );
         let mut cpu = [pred];
-        collide_sdf(&mut cpu, &[old], colliders, &params, h);
+        legacy_collide_sdf(&mut cpu, &[old], colliders, &params, h);
         assert!(max_difference(&cpu, &[packed]) < 2e-6);
         packed
     }
@@ -3264,8 +3337,8 @@ mod tests {
     #[test]
     fn sdf_plane_and_sphere_regions_preserve_cpu_guards_and_conventions() {
         let margin = 0.06;
-        let plane = SdfCollider::from_transform(
-            ColliderKind::Plane,
+        let plane = LegacySdfCollider::from_transform(
+            LegacyColliderKind::Plane,
             Mat4::from_scale_rotation_translation(
                 Vec3::new(0.4, 0.6, 0.8),
                 Quat::from_rotation_z(0.7),
@@ -3278,12 +3351,12 @@ mod tests {
             (Vec3::new(5.0, -0.94, 8.0), Vec3::ZERO),
             (Vec3::new(5.0, 0.0, 8.0), Vec3::ZERO),
         ] {
-            let correction = packed_correction(&GpuSdfCollider::from(&plane), point, margin);
+            let correction = packed_correction(&RefGpuSdfCollider::from(&plane), point, margin);
             assert!((correction - expected).length() < 1e-6);
             compare_sdf(point, point, &[plane], margin, 0.0, 0.02);
         }
-        let sphere = SdfCollider::from_transform(
-            ColliderKind::Sphere,
+        let sphere = LegacySdfCollider::from_transform(
+            LegacyColliderKind::Sphere,
             Mat4::from_scale_rotation_translation(
                 Vec3::new(0.5, 1.5, 2.0),
                 Quat::from_rotation_z(0.3),
@@ -3300,15 +3373,21 @@ mod tests {
             (Vec3::X, Vec3::ZERO),
         ] {
             let point = sphere.position + relative;
-            let correction = packed_correction(&GpuSdfCollider::from(&sphere), point, 0.0);
+            let correction = packed_correction(&RefGpuSdfCollider::from(&sphere), point, 0.0);
             assert!((correction - expected).length() < 1e-6);
             compare_sdf(point, point, &[sphere], 0.0, 0.0, 0.02);
         }
         // A disabled CPU slot is deliberately still a zero-radius sphere plus margin.
         let point = Vec3::X * 0.02;
         assert!(
-            (compare_sdf(point, point, &[SdfCollider::disabled()], margin, 0.0, 0.02)
-                - Vec3::X * margin)
+            (compare_sdf(
+                point,
+                point,
+                &[LegacySdfCollider::disabled()],
+                margin,
+                0.0,
+                0.02
+            ) - Vec3::X * margin)
                 .length()
                 < 1e-6
         );
@@ -3316,8 +3395,8 @@ mod tests {
 
     #[test]
     fn sdf_cube_faces_edges_and_rounded_corners_have_real_corrections() {
-        let cube = SdfCollider::cube(Vec3::ZERO, Vec3::ONE, Quat::IDENTITY, 0.02);
-        let packed = GpuSdfCollider::from(&cube);
+        let cube = LegacySdfCollider::cube(Vec3::ZERO, Vec3::ONE, Quat::IDENTITY, 0.02);
+        let packed = RefGpuSdfCollider::from(&cube);
         let margin = 0.06;
         let samples = [
             (Vec3::ZERO, Vec3::X * 0.56),
@@ -3355,14 +3434,14 @@ mod tests {
 
     #[test]
     fn sdf_cube_face_copysign_preserves_negative_zero_after_transform() {
-        let mut cube = SdfCollider::cube(Vec3::ZERO, Vec3::ONE, Quat::IDENTITY, 0.02);
+        let mut cube = LegacySdfCollider::cube(Vec3::ZERO, Vec3::ONE, Quat::IDENTITY, 0.02);
         // Synthetic inverse isolates signed-zero face selection; not a physical fixture transform.
         // Every product and sum in local.x/y/z remains -0.0 for the positive test point.
         cube.inv_cur_transform = Mat4::from_cols_array(&[-0.0; 16]);
         let point = Vec3::ONE;
         let local = cube.inv_cur_transform.transform_point3(point);
         assert_eq!(local.x.to_bits(), (-0.0f32).to_bits());
-        let correction = packed_correction(&GpuSdfCollider::from(&cube), point, 0.0);
+        let correction = packed_correction(&RefGpuSdfCollider::from(&cube), point, 0.0);
         assert_eq!(correction, -Vec3::X * 0.5);
         assert_eq!(cube.compute_sdf(point, 0.0), correction);
     }
@@ -3373,7 +3452,7 @@ mod tests {
         let rotation = Quat::from_rotation_z(0.35) * Quat::from_rotation_y(-0.4);
         let transform =
             Mat4::from_scale_rotation_translation(scale, rotation, Vec3::new(0.6, -1.0, 0.1));
-        let cube = SdfCollider::from_transform(ColliderKind::Cube, transform, 0.02);
+        let cube = LegacySdfCollider::from_transform(LegacyColliderKind::Cube, transform, 0.02);
         let margin = 0.06;
         let extent = Vec3::splat(0.5) + Vec3::splat(margin) / scale;
         for offset in [
@@ -3391,7 +3470,7 @@ mod tests {
             };
             let expected = transform.transform_vector3(local_correction);
             assert!(expected.length() > 0.0);
-            let correction = packed_correction(&GpuSdfCollider::from(&cube), point, margin);
+            let correction = packed_correction(&RefGpuSdfCollider::from(&cube), point, margin);
             assert!((correction - expected).length() < 2e-7);
             compare_sdf(point, point, &[cube], margin, 0.0, 0.02);
         }
@@ -3419,28 +3498,28 @@ mod tests {
             ),
         ];
         for kind in [
-            ColliderKind::Plane,
-            ColliderKind::Sphere,
-            ColliderKind::Cube,
+            LegacyColliderKind::Plane,
+            LegacyColliderKind::Sphere,
+            LegacyColliderKind::Cube,
         ] {
             for last in histories {
-                let collider = SdfCollider::with_history(kind, current, last, 0.02);
+                let collider = LegacySdfCollider::with_history(kind, current, last, 0.02);
                 let point = current.transform_point3(local);
                 let expected = (point - last.transform_point3(local)) / 0.02;
-                let velocity = packed_velocity(&GpuSdfCollider::from(&collider), point);
+                let velocity = packed_velocity(&RefGpuSdfCollider::from(&collider), point);
                 assert!((velocity - expected).length() < 1e-5);
                 assert!((velocity - collider.velocity_at(point)).length() < 1e-6);
                 // Contact point differs from old position: check velocity AFTER projection.
-                let pred = if kind == ColliderKind::Plane {
+                let pred = if kind == LegacyColliderKind::Plane {
                     point - Vec3::Y
                 } else {
                     point
                 };
                 assert!(collider.compute_sdf(pred, 0.06).length() > 0.0);
                 compare_sdf(pred - Vec3::X * 0.02, pred, &[collider], 0.06, 0.4, 0.01);
-                let stopped = SdfCollider::with_history(kind, current, last, 0.0);
+                let stopped = LegacySdfCollider::with_history(kind, current, last, 0.0);
                 assert_eq!(
-                    packed_velocity(&GpuSdfCollider::from(&stopped), point),
+                    packed_velocity(&RefGpuSdfCollider::from(&stopped), point),
                     Vec3::ZERO
                 );
                 assert_eq!(stopped.velocity_at(point), Vec3::ZERO);
@@ -3463,34 +3542,37 @@ mod tests {
             let result = packed_friction(correction, displacement, friction);
             assert!(result.is_finite());
             assert!((result - expected).length() < 1e-6);
-            let params = SimParams {
+            let params = LegacySimParams {
                 friction,
                 ..default()
             };
-            assert!((result - compute_friction(correction, displacement, &params)).length() < 1e-6);
+            assert!(
+                (result - legacy_compute_friction(correction, displacement, &params)).length()
+                    < 1e-6
+            );
         }
         assert_eq!(packed_friction(Vec3::ZERO, Vec3::X, 0.5), Vec3::ZERO);
     }
 
     #[test]
     fn sdf_order_empty_input_and_zero_mass_particles_match_cpu() {
-        let plane = SdfCollider::plane(0.0, 0.02);
-        let sphere = SdfCollider::sphere(Vec3::ZERO, 0.5, 0.02);
+        let plane = LegacySdfCollider::plane(0.0, 0.02);
+        let sphere = LegacySdfCollider::sphere(Vec3::ZERO, 0.5, 0.02);
         let pred = Vec3::new(0.1, -0.2, 0.0);
         let forward = compare_sdf(pred, pred, &[plane, sphere], 0.0, 0.1, 0.01);
         let reverse = compare_sdf(pred, pred, &[sphere, plane], 0.0, 0.1, 0.01);
         assert!((forward - reverse).length() > 0.01);
         assert_eq!(compare_sdf(pred, pred, &[], 0.06, 0.1, 0.01), pred);
-        let params = SimParams {
+        let params = LegacySimParams {
             num_particles: 2,
             collision_margin: 0.0,
             ..default()
         };
-        let mut solver = Solver::default();
+        let mut solver = LegacySolver::default();
         solver.positions = vec![pred; 2];
         solver.predicted = vec![pred; 2];
         solver.constraints.inv_masses = vec![0.0, 1.0];
-        collide_sdf(
+        legacy_collide_sdf(
             &mut solver.predicted,
             &solver.positions,
             &[plane],
@@ -3510,13 +3592,13 @@ mod tests {
         let dt = 0.04;
         let current = Mat4::IDENTITY;
         let last = Mat4::from_translation(-Vec3::X * dt);
-        let moving = SdfCollider::with_history(ColliderKind::Plane, current, last, dt);
+        let moving = LegacySdfCollider::with_history(LegacyColliderKind::Plane, current, last, dt);
         let old = Vec3::new(0.0, -0.2, 0.0);
         let full = compare_sdf(old, old, &[moving], 0.0, 1.0, dt);
         let sub = compare_sdf(old, old, &[moving], 0.0, 1.0, dt / 2.0);
         assert!((full - Vec3::X * dt).length() < 1e-6);
         assert!((sub - Vec3::X * (dt / 2.0)).length() < 1e-6);
-        let mut params = SimParams {
+        let mut params = LegacySimParams {
             num_substeps: 2,
             num_iterations: 0,
             gravity: Vec3::ZERO,
@@ -3526,11 +3608,11 @@ mod tests {
             friction: 1.0,
             ..default()
         };
-        let mut solver = Solver::default();
+        let mut solver = LegacySolver::default();
         solver
             .add_cloth(
                 &mut params,
-                &generate_cloth_mesh(1),
+                &legacy_generate_cloth_mesh(1),
                 Mat4::IDENTITY,
                 &[],
                 dt,
@@ -3558,17 +3640,17 @@ mod tests {
 
     #[test]
     fn sdf_full_fixture_has_initial_sphere_cube_contacts_and_plane_probe() {
-        let mut params = SimParams {
+        let mut params = LegacySimParams {
             bend_compliance: 1e-4,
             enable_self_collision: false,
             ..default()
         };
-        let mut solver = Solver::default();
+        let mut solver = LegacySolver::default();
         let dt = 1.0 / 64.0;
         solver
             .add_cloth(
                 &mut params,
-                &generate_cloth_mesh(RES),
+                &legacy_generate_cloth_mesh(RES),
                 Mat4::IDENTITY,
                 &CORNERS,
                 dt,
@@ -3695,7 +3777,7 @@ mod tests {
     fn compare_bending(
         predicted: &[Vec3],
         masses: &[f32],
-        bend: &BendConstraints,
+        bend: &LegacyBendConstraints,
         compliance: f32,
         h: f32,
     ) -> (Vec<Vec3>, Vec<i32>) {
@@ -3714,11 +3796,11 @@ mod tests {
             compliance,
             h,
         );
-        let params = SimParams {
+        let params = LegacySimParams {
             bend_compliance: compliance,
             ..default()
         };
-        solve_bending(
+        legacy_solve_bending(
             &mut pred,
             &mut cpu_delta,
             &mut cpu_count,
@@ -3746,8 +3828,8 @@ mod tests {
         ]
     }
 
-    fn attachment_fixture() -> AttachConstraints {
-        AttachConstraints {
+    fn attachment_fixture() -> LegacyAttachConstraints {
+        LegacyAttachConstraints {
             particle_ids: vec![2, 0, 2, 1, 0, 3],
             slot_ids: vec![1, 0, 0, 0, 1, 0],
             distances: vec![1.0, 0.0, 2.0, 2.0, 0.25, 1.0],
@@ -3757,7 +3839,7 @@ mod tests {
 
     #[test]
     fn bending_csr_preserves_irregular_order_repeated_roles_and_empty_rows() {
-        let bend = BendConstraints {
+        let bend = LegacyBendConstraints {
             indices: vec![[2, 0, 2, 1], [1, 2, 0, 2]],
             angles: vec![0.2, 0.4],
         };
@@ -3767,16 +3849,19 @@ mod tests {
         assert_eq!(csr.constraints[0].indices, [2, 0, 2, 1]);
         assert_eq!(csr.constraints[1].rest_angle, 0.4);
         assert_eq!(csr.constraints[1].pad, [0.0; 3]);
-        let empty = build_bend_csr(3, &BendConstraints::default());
+        let empty = build_bend_csr(3, &LegacyBendConstraints::default());
         assert_eq!(empty.offsets, [0, 0, 0, 0]);
         assert!(empty.entries.is_empty());
         assert!(empty.constraints.is_empty());
-        assert_eq!(build_bend_csr(0, &BendConstraints::default()).offsets, [0]);
+        assert_eq!(
+            build_bend_csr(0, &LegacyBendConstraints::default()).offsets,
+            [0]
+        );
     }
 
     #[test]
     fn bending_gather_matches_scatter_both_signs_and_appends_zero_weight_roles() {
-        let bend = BendConstraints {
+        let bend = LegacyBendConstraints {
             indices: vec![[0, 1, 2, 3], [1, 0, 3, 2]],
             angles: vec![0.15, 0.3],
         };
@@ -3790,7 +3875,7 @@ mod tests {
             assert!((delta[0] - base).length() > 1e-4);
         }
         // Same particle in two valid endpoint roles must append twice, not deduplicate.
-        let repeated = BendConstraints {
+        let repeated = LegacyBendConstraints {
             indices: vec![[0, 0, 2, 3]],
             angles: vec![0.2],
         };
@@ -3800,7 +3885,7 @@ mod tests {
 
     #[test]
     fn bending_compliance_uses_h_squared_and_changes_correction() {
-        let bend = BendConstraints {
+        let bend = LegacyBendConstraints {
             indices: vec![[0, 1, 2, 3]],
             angles: vec![0.1],
         };
@@ -3818,7 +3903,7 @@ mod tests {
 
     #[test]
     fn bending_zero_error_is_counted_and_empty_table_preserves_accumulators() {
-        let bend = BendConstraints {
+        let bend = LegacyBendConstraints {
             indices: vec![[0, 1, 2, 3]],
             angles: vec![0.0],
         };
@@ -3828,7 +3913,7 @@ mod tests {
         let (_, count) = compare_bending(
             &hinge(0.6),
             &[1.0; 4],
-            &BendConstraints::default(),
+            &LegacyBendConstraints::default(),
             1e-4,
             0.02,
         );
@@ -3837,7 +3922,7 @@ mod tests {
 
     #[test]
     fn bending_guards_degenerate_geometry_time_and_nonfinite_denominator() {
-        let bend = BendConstraints {
+        let bend = LegacyBendConstraints {
             indices: vec![[0, 1, 2, 3]],
             angles: vec![0.1],
         };
@@ -3877,7 +3962,7 @@ mod tests {
             pairs,
             [(0, 0.0), (1, 0.25), (0, 2.0), (1, 1.0), (0, 2.0), (0, 1.0)]
         );
-        let empty = build_attach_csr(3, &AttachConstraints::default());
+        let empty = build_attach_csr(3, &LegacyAttachConstraints::default());
         assert_eq!(empty.offsets, [0, 0, 0, 0]);
         assert!(empty.entries.is_empty());
     }
@@ -3889,7 +3974,7 @@ mod tests {
         // pin; slack; extended beyond both slots; exactly at scaled target.
         let initial = vec![Vec3::Y, Vec3::X, Vec3::X * 5.0, Vec3::X * 1.5];
         let masses = [0.0, 1.0, 1.0, 1.0];
-        let params = SimParams {
+        let params = LegacySimParams {
             num_particles: 4,
             long_range_stretchiness: 1.5,
             ..default()
@@ -3913,7 +3998,7 @@ mod tests {
                 }
             }
         }
-        solve_attachment(
+        legacy_solve_attachment(
             &mut cpu_pred,
             &mut cpu_delta,
             &mut cpu_count,
@@ -3926,7 +4011,7 @@ mod tests {
         assert_eq!(max_difference(&cpu_delta, &gathered), 0.0);
         assert_eq!(cpu_delta[0], -Vec3::Y);
         assert_eq!(cpu_delta[2], Vec3::new(-4.5, 1.0, 0.0));
-        apply_deltas(&mut cpu_pred, &mut cpu_delta, &mut cpu_count, &params);
+        legacy_apply_deltas(&mut cpu_pred, &mut cpu_delta, &mut cpu_count, &params);
         assert!((cpu_pred[0].y - 2.0 / 3.0).abs() < 1e-6);
         let (pin, lra) = attachment_errors(&cpu_pred, &attach, &masses, 1.5);
         assert!((pin - 2.0 / 3.0).abs() < 1e-6);
@@ -3935,14 +4020,14 @@ mod tests {
 
     #[test]
     fn attachment_zero_scale_uses_scaled_target_for_pin_skip() {
-        let attach = AttachConstraints {
+        let attach = LegacyAttachConstraints {
             particle_ids: vec![0],
             slot_ids: vec![0],
             distances: vec![2.0],
             slot_positions: vec![Vec3::ZERO],
         };
         let csr = build_attach_csr(1, &attach);
-        let params = SimParams {
+        let params = LegacySimParams {
             num_particles: 1,
             long_range_stretchiness: 0.0,
             ..default()
@@ -3950,7 +4035,7 @@ mod tests {
         let mut pred = [Vec3::X];
         let mut delta = [Vec3::ZERO];
         let mut count = [0];
-        solve_attachment(&mut pred, &mut delta, &mut count, &[0.0], &attach, &params);
+        legacy_solve_attachment(&mut pred, &mut delta, &mut count, &[0.0], &attach, &params);
         let target = csr.entries[0].rest * params.long_range_stretchiness;
         assert_eq!(target, 0.0);
         assert_eq!(delta, [-Vec3::X]);
@@ -3976,14 +4061,14 @@ mod tests {
     }
 }
 
-pub struct SolverGpuPlugin;
+pub struct RefSolverGpuPlugin;
 
-impl Plugin for SolverGpuPlugin {
+impl Plugin for RefSolverGpuPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "solver.wesl");
-        app.init_resource::<SolverResultSlot>();
+        app.init_resource::<RefSolverResultSlot>();
 
-        let slot = app.world().resource::<SolverResultSlot>().clone();
+        let slot = app.world().resource::<RefSolverResultSlot>().clone();
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.insert_resource(slot);
             render_app.add_systems(Render, run_solver);
@@ -4000,17 +4085,17 @@ impl Plugin for SolverGpuPlugin {
             return;
         };
         render_app.insert_resource(SolverBatchTime(step_time));
-        render_app.init_resource::<SolverPipeline>();
+        render_app.init_resource::<RefSolverPipeline>();
     }
 }
 
 fn run_solver(
     mut buffers: Local<Option<SolverBuffers>>,
-    pipeline: Res<SolverPipeline>,
+    pipeline: Res<RefSolverPipeline>,
     cache: Res<PipelineCache>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
-    slot: Res<SolverResultSlot>,
+    slot: Res<RefSolverResultSlot>,
     batch_time: Res<SolverBatchTime>,
 ) {
     if slot.0.lock().expect("solver result slot").is_some() {
@@ -4057,7 +4142,7 @@ fn run_solver(
         &buffers.inverse_masses,
         buffers.long_range_stretchiness,
     );
-    let report = SolverReport {
+    let report = RefSolverReport {
         cloth_self_collision_enabled: true,
         neighbor_spacing: buffers.neighbor_search.config.spacing,
         neighbor_capacity: buffers.neighbor_search.config.capacity,

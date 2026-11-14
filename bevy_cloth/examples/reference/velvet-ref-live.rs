@@ -3,10 +3,10 @@
 //! Startup-only CLI workload controls; no CPU mesh writeback.
 
 use bevy::prelude::*;
-use bevy_cloth::r#ref::{LiveConfig, SolverLivePlugin};
+use bevy_cloth::reference::{RefLiveConfig, RefSolverLivePlugin};
 
-fn parse_config(args: impl IntoIterator<Item = String>) -> Result<Option<LiveConfig>, String> {
-    let mut config = LiveConfig::default();
+fn parse_config(args: impl IntoIterator<Item = String>) -> Result<Option<RefLiveConfig>, String> {
+    let mut config = RefLiveConfig::default();
     let mut args = args.into_iter();
     while let Some(flag) = args.next() {
         match flag.as_str() {
@@ -63,7 +63,7 @@ fn main() -> AppExit {
             ..default()
         }))
         .insert_resource(ClearColor(Color::srgb(0.015, 0.02, 0.035)))
-        .add_plugins(SolverLivePlugin)
+        .add_plugins(RefSolverLivePlugin)
         .run()
 }
 
@@ -71,7 +71,7 @@ fn main() -> AppExit {
 mod tests {
     use super::*;
 
-    fn parse(args: &[&str]) -> Result<Option<LiveConfig>, String> {
+    fn parse(args: &[&str]) -> Result<Option<RefLiveConfig>, String> {
         parse_config(args.iter().map(|arg| (*arg).to_owned()))
     }
 

@@ -21,47 +21,47 @@ use bevy::{
 };
 
 /// matches `solver.wesl`; 1d dispatch, Velvet's `BLOCK_SIZE`.
-pub const WORKGROUP_SIZE: u32 = 256;
+pub const REF_WORKGROUP_SIZE: u32 = 256;
 
 /// group 0 binding numbers, fixed for the whole shader module: one `@binding` can only name one
 /// resource, so every phase picks its subset out of these and the layouts have gaps.
 pub mod binding {
-    pub const PARAMS: u32 = 0;
-    pub const POSITIONS: u32 = 1;
-    pub const PREDICTED: u32 = 2;
-    pub const VELOCITIES: u32 = 3;
-    pub const DELTAS: u32 = 4;
-    pub const DELTA_COUNTS: u32 = 5;
-    pub const INV_MASSES: u32 = 6;
-    pub const STRETCH_INC_OFFSETS: u32 = 7;
-    pub const STRETCH_INC_OTHER: u32 = 8;
-    pub const STRETCH_INC_REST: u32 = 9;
-    pub const ATTACH_INC_OFFSETS: u32 = 10;
-    pub const ATTACH_INC_ENTRIES: u32 = 11;
-    pub const ATTACH_SLOT_POSITIONS: u32 = 12;
-    pub const BEND_INC_OFFSETS: u32 = 13;
-    pub const BEND_INC_ENTRIES: u32 = 14;
-    pub const BEND_CONSTRAINTS: u32 = 15;
-    pub const SDF_PARAMS: u32 = 16;
-    pub const SDF_COLLIDERS: u32 = 17;
-    pub const PARTICLE_COLLISION_PARAMS: u32 = 18;
-    pub const NEIGHBORS: u32 = 19;
-    pub const NEIGHBOR_PARAMS: u32 = 20;
-    pub const BUCKET_COUNTS: u32 = 21;
-    pub const BUCKET_CURSORS: u32 = 22;
-    pub const BUCKET_OFFSETS: u32 = 23;
-    pub const BUCKET_IDS: u32 = 24;
-    pub const INITIAL_POSITIONS: u32 = 25;
-    pub const NEIGHBOR_OUTPUT: u32 = 26;
-    pub const NEIGHBOR_STATS: u32 = 27;
-    pub const SCAN_PARAMS: u32 = 28;
-    pub const SCAN_INPUT: u32 = 29;
-    pub const SCAN_OUTPUT: u32 = 30;
-    pub const SCAN_SUMS: u32 = 31;
+    pub const REF_PARAMS: u32 = 0;
+    pub const REF_POSITIONS: u32 = 1;
+    pub const REF_PREDICTED: u32 = 2;
+    pub const REF_VELOCITIES: u32 = 3;
+    pub const REF_DELTAS: u32 = 4;
+    pub const REF_DELTA_COUNTS: u32 = 5;
+    pub const REF_INV_MASSES: u32 = 6;
+    pub const REF_STRETCH_INC_OFFSETS: u32 = 7;
+    pub const REF_STRETCH_INC_OTHER: u32 = 8;
+    pub const REF_STRETCH_INC_REST: u32 = 9;
+    pub const REF_ATTACH_INC_OFFSETS: u32 = 10;
+    pub const REF_ATTACH_INC_ENTRIES: u32 = 11;
+    pub const REF_ATTACH_SLOT_POSITIONS: u32 = 12;
+    pub const REF_BEND_INC_OFFSETS: u32 = 13;
+    pub const REF_BEND_INC_ENTRIES: u32 = 14;
+    pub const REF_BEND_CONSTRAINTS: u32 = 15;
+    pub const REF_SDF_PARAMS: u32 = 16;
+    pub const REF_SDF_COLLIDERS: u32 = 17;
+    pub const REF_PARTICLE_COLLISION_PARAMS: u32 = 18;
+    pub const REF_NEIGHBORS: u32 = 19;
+    pub const REF_NEIGHBOR_PARAMS: u32 = 20;
+    pub const REF_BUCKET_COUNTS: u32 = 21;
+    pub const REF_BUCKET_CURSORS: u32 = 22;
+    pub const REF_BUCKET_OFFSETS: u32 = 23;
+    pub const REF_BUCKET_IDS: u32 = 24;
+    pub const REF_INITIAL_POSITIONS: u32 = 25;
+    pub const REF_NEIGHBOR_OUTPUT: u32 = 26;
+    pub const REF_NEIGHBOR_STATS: u32 = 27;
+    pub const REF_SCAN_PARAMS: u32 = 28;
+    pub const REF_SCAN_INPUT: u32 = 29;
+    pub const REF_SCAN_OUTPUT: u32 = 30;
+    pub const REF_SCAN_SUMS: u32 = 31;
 }
 
 #[derive(Resource)]
-pub struct SolverPipeline {
+pub struct RefSolverPipeline {
     pub hash_layout: BindGroupLayoutDescriptor,
     pub neighbor_layout: BindGroupLayoutDescriptor,
     pub scan_layout: BindGroupLayoutDescriptor,
@@ -95,7 +95,7 @@ pub struct SolverPipeline {
     finalize: CachedComputePipelineId,
 }
 
-impl SolverPipeline {
+impl RefSolverPipeline {
     pub fn collide_particles(&self) -> CachedComputePipelineId {
         self.collide_particles
     }
@@ -133,7 +133,7 @@ impl SolverPipeline {
     }
 }
 
-impl FromWorld for SolverPipeline {
+impl FromWorld for RefSolverPipeline {
     fn from_world(world: &mut World) -> Self {
         let shader = load_embedded_asset!(world, "solver.wesl");
 
@@ -142,10 +142,10 @@ impl FromWorld for SolverPipeline {
             &BindGroupLayoutEntries::with_indices(
                 ShaderStages::COMPUTE,
                 (
-                    (binding::PARAMS, uniform_buffer_sized(false, None)),
-                    (binding::POSITIONS, storage_buffer_sized(false, None)),
-                    (binding::PREDICTED, storage_buffer_sized(false, None)),
-                    (binding::VELOCITIES, storage_buffer_sized(false, None)),
+                    (binding::REF_PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::REF_POSITIONS, storage_buffer_sized(false, None)),
+                    (binding::REF_PREDICTED, storage_buffer_sized(false, None)),
+                    (binding::REF_VELOCITIES, storage_buffer_sized(false, None)),
                 ),
             ),
         );
@@ -155,24 +155,24 @@ impl FromWorld for SolverPipeline {
             &BindGroupLayoutEntries::with_indices(
                 ShaderStages::COMPUTE,
                 (
-                    (binding::PARAMS, uniform_buffer_sized(false, None)),
-                    (binding::PREDICTED, storage_buffer_sized(false, None)),
-                    (binding::DELTAS, storage_buffer_sized(false, None)),
-                    (binding::DELTA_COUNTS, storage_buffer_sized(false, None)),
+                    (binding::REF_PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::REF_PREDICTED, storage_buffer_sized(false, None)),
+                    (binding::REF_DELTAS, storage_buffer_sized(false, None)),
+                    (binding::REF_DELTA_COUNTS, storage_buffer_sized(false, None)),
                     (
-                        binding::INV_MASSES,
+                        binding::REF_INV_MASSES,
                         storage_buffer_read_only_sized(false, None),
                     ),
                     (
-                        binding::STRETCH_INC_OFFSETS,
+                        binding::REF_STRETCH_INC_OFFSETS,
                         storage_buffer_read_only_sized(false, None),
                     ),
                     (
-                        binding::STRETCH_INC_OTHER,
+                        binding::REF_STRETCH_INC_OTHER,
                         storage_buffer_read_only_sized(false, None),
                     ),
                     (
-                        binding::STRETCH_INC_REST,
+                        binding::REF_STRETCH_INC_REST,
                         storage_buffer_read_only_sized(false, None),
                     ),
                 ),
@@ -184,24 +184,24 @@ impl FromWorld for SolverPipeline {
             &BindGroupLayoutEntries::with_indices(
                 ShaderStages::COMPUTE,
                 (
-                    (binding::PARAMS, uniform_buffer_sized(false, None)),
-                    (binding::PREDICTED, storage_buffer_sized(false, None)),
-                    (binding::DELTAS, storage_buffer_sized(false, None)),
-                    (binding::DELTA_COUNTS, storage_buffer_sized(false, None)),
+                    (binding::REF_PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::REF_PREDICTED, storage_buffer_sized(false, None)),
+                    (binding::REF_DELTAS, storage_buffer_sized(false, None)),
+                    (binding::REF_DELTA_COUNTS, storage_buffer_sized(false, None)),
                     (
-                        binding::INV_MASSES,
+                        binding::REF_INV_MASSES,
                         storage_buffer_read_only_sized(false, None),
                     ),
                     (
-                        binding::ATTACH_INC_OFFSETS,
+                        binding::REF_ATTACH_INC_OFFSETS,
                         storage_buffer_read_only_sized(false, None),
                     ),
                     (
-                        binding::ATTACH_INC_ENTRIES,
+                        binding::REF_ATTACH_INC_ENTRIES,
                         storage_buffer_read_only_sized(false, None),
                     ),
                     (
-                        binding::ATTACH_SLOT_POSITIONS,
+                        binding::REF_ATTACH_SLOT_POSITIONS,
                         storage_buffer_read_only_sized(false, None),
                     ),
                 ),
@@ -213,24 +213,24 @@ impl FromWorld for SolverPipeline {
             &BindGroupLayoutEntries::with_indices(
                 ShaderStages::COMPUTE,
                 (
-                    (binding::PARAMS, uniform_buffer_sized(false, None)),
-                    (binding::PREDICTED, storage_buffer_sized(false, None)),
-                    (binding::DELTAS, storage_buffer_sized(false, None)),
-                    (binding::DELTA_COUNTS, storage_buffer_sized(false, None)),
+                    (binding::REF_PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::REF_PREDICTED, storage_buffer_sized(false, None)),
+                    (binding::REF_DELTAS, storage_buffer_sized(false, None)),
+                    (binding::REF_DELTA_COUNTS, storage_buffer_sized(false, None)),
                     (
-                        binding::INV_MASSES,
+                        binding::REF_INV_MASSES,
                         storage_buffer_read_only_sized(false, None),
                     ),
                     (
-                        binding::BEND_INC_OFFSETS,
+                        binding::REF_BEND_INC_OFFSETS,
                         storage_buffer_read_only_sized(false, None),
                     ),
                     (
-                        binding::BEND_INC_ENTRIES,
+                        binding::REF_BEND_INC_ENTRIES,
                         storage_buffer_read_only_sized(false, None),
                     ),
                     (
-                        binding::BEND_CONSTRAINTS,
+                        binding::REF_BEND_CONSTRAINTS,
                         storage_buffer_read_only_sized(false, None),
                     ),
                 ),
@@ -242,12 +242,12 @@ impl FromWorld for SolverPipeline {
             &BindGroupLayoutEntries::with_indices(
                 ShaderStages::COMPUTE,
                 (
-                    (binding::PARAMS, uniform_buffer_sized(false, None)),
-                    (binding::SDF_PARAMS, uniform_buffer_sized(false, None)),
-                    (binding::POSITIONS, storage_buffer_sized(false, None)),
-                    (binding::PREDICTED, storage_buffer_sized(false, None)),
+                    (binding::REF_PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::REF_SDF_PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::REF_POSITIONS, storage_buffer_sized(false, None)),
+                    (binding::REF_PREDICTED, storage_buffer_sized(false, None)),
                     (
-                        binding::SDF_COLLIDERS,
+                        binding::REF_SDF_COLLIDERS,
                         storage_buffer_read_only_sized(false, None),
                     ),
                 ),
@@ -259,21 +259,21 @@ impl FromWorld for SolverPipeline {
             &BindGroupLayoutEntries::with_indices(
                 ShaderStages::COMPUTE,
                 (
-                    (binding::PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::REF_PARAMS, uniform_buffer_sized(false, None)),
                     (
-                        binding::PARTICLE_COLLISION_PARAMS,
+                        binding::REF_PARTICLE_COLLISION_PARAMS,
                         uniform_buffer_sized(false, None),
                     ),
-                    (binding::PREDICTED, storage_buffer_sized(false, None)),
-                    (binding::POSITIONS, storage_buffer_sized(false, None)),
-                    (binding::DELTAS, storage_buffer_sized(false, None)),
-                    (binding::DELTA_COUNTS, storage_buffer_sized(false, None)),
+                    (binding::REF_PREDICTED, storage_buffer_sized(false, None)),
+                    (binding::REF_POSITIONS, storage_buffer_sized(false, None)),
+                    (binding::REF_DELTAS, storage_buffer_sized(false, None)),
+                    (binding::REF_DELTA_COUNTS, storage_buffer_sized(false, None)),
                     (
-                        binding::INV_MASSES,
+                        binding::REF_INV_MASSES,
                         storage_buffer_read_only_sized(false, None),
                     ),
                     (
-                        binding::NEIGHBORS,
+                        binding::REF_NEIGHBORS,
                         storage_buffer_read_only_sized(false, None),
                     ),
                 ),
@@ -285,16 +285,28 @@ impl FromWorld for SolverPipeline {
             &BindGroupLayoutEntries::with_indices(
                 ShaderStages::COMPUTE,
                 (
-                    (binding::NEIGHBOR_PARAMS, uniform_buffer_sized(false, None)),
-                    (binding::PREDICTED, storage_buffer_sized(false, None)),
-                    (binding::BUCKET_COUNTS, storage_buffer_sized(false, None)),
-                    (binding::BUCKET_CURSORS, storage_buffer_sized(false, None)),
                     (
-                        binding::BUCKET_OFFSETS,
+                        binding::REF_NEIGHBOR_PARAMS,
+                        uniform_buffer_sized(false, None),
+                    ),
+                    (binding::REF_PREDICTED, storage_buffer_sized(false, None)),
+                    (
+                        binding::REF_BUCKET_COUNTS,
+                        storage_buffer_sized(false, None),
+                    ),
+                    (
+                        binding::REF_BUCKET_CURSORS,
+                        storage_buffer_sized(false, None),
+                    ),
+                    (
+                        binding::REF_BUCKET_OFFSETS,
                         storage_buffer_read_only_sized(false, None),
                     ),
-                    (binding::BUCKET_IDS, storage_buffer_sized(false, None)),
-                    (binding::NEIGHBOR_STATS, storage_buffer_sized(false, None)),
+                    (binding::REF_BUCKET_IDS, storage_buffer_sized(false, None)),
+                    (
+                        binding::REF_NEIGHBOR_STATS,
+                        storage_buffer_sized(false, None),
+                    ),
                 ),
             ),
         );
@@ -303,20 +315,32 @@ impl FromWorld for SolverPipeline {
             &BindGroupLayoutEntries::with_indices(
                 ShaderStages::COMPUTE,
                 (
-                    (binding::NEIGHBOR_PARAMS, uniform_buffer_sized(false, None)),
-                    (binding::PREDICTED, storage_buffer_sized(false, None)),
-                    (binding::BUCKET_COUNTS, storage_buffer_sized(false, None)),
                     (
-                        binding::BUCKET_OFFSETS,
+                        binding::REF_NEIGHBOR_PARAMS,
+                        uniform_buffer_sized(false, None),
+                    ),
+                    (binding::REF_PREDICTED, storage_buffer_sized(false, None)),
+                    (
+                        binding::REF_BUCKET_COUNTS,
+                        storage_buffer_sized(false, None),
+                    ),
+                    (
+                        binding::REF_BUCKET_OFFSETS,
                         storage_buffer_read_only_sized(false, None),
                     ),
-                    (binding::BUCKET_IDS, storage_buffer_sized(false, None)),
+                    (binding::REF_BUCKET_IDS, storage_buffer_sized(false, None)),
                     (
-                        binding::INITIAL_POSITIONS,
+                        binding::REF_INITIAL_POSITIONS,
                         storage_buffer_read_only_sized(false, None),
                     ),
-                    (binding::NEIGHBOR_OUTPUT, storage_buffer_sized(false, None)),
-                    (binding::NEIGHBOR_STATS, storage_buffer_sized(false, None)),
+                    (
+                        binding::REF_NEIGHBOR_OUTPUT,
+                        storage_buffer_sized(false, None),
+                    ),
+                    (
+                        binding::REF_NEIGHBOR_STATS,
+                        storage_buffer_sized(false, None),
+                    ),
                 ),
             ),
         );
@@ -325,13 +349,13 @@ impl FromWorld for SolverPipeline {
             &BindGroupLayoutEntries::with_indices(
                 ShaderStages::COMPUTE,
                 (
-                    (binding::SCAN_PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::REF_SCAN_PARAMS, uniform_buffer_sized(false, None)),
                     (
-                        binding::SCAN_INPUT,
+                        binding::REF_SCAN_INPUT,
                         storage_buffer_read_only_sized(false, None),
                     ),
-                    (binding::SCAN_OUTPUT, storage_buffer_sized(false, None)),
-                    (binding::SCAN_SUMS, storage_buffer_sized(false, None)),
+                    (binding::REF_SCAN_OUTPUT, storage_buffer_sized(false, None)),
+                    (binding::REF_SCAN_SUMS, storage_buffer_sized(false, None)),
                 ),
             ),
         );
@@ -340,12 +364,12 @@ impl FromWorld for SolverPipeline {
             &BindGroupLayoutEntries::with_indices(
                 ShaderStages::COMPUTE,
                 (
-                    (binding::SCAN_PARAMS, uniform_buffer_sized(false, None)),
+                    (binding::REF_SCAN_PARAMS, uniform_buffer_sized(false, None)),
                     (
-                        binding::SCAN_INPUT,
+                        binding::REF_SCAN_INPUT,
                         storage_buffer_read_only_sized(false, None),
                     ),
-                    (binding::SCAN_OUTPUT, storage_buffer_sized(false, None)),
+                    (binding::REF_SCAN_OUTPUT, storage_buffer_sized(false, None)),
                 ),
             ),
         );

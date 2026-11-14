@@ -1,11 +1,11 @@
 //! solver wiring (schedule, `add_cloth`) plus the M2b acceptance targets.
 
 use bevy_cloth::legacy::sim::{
-    ClothError,
-    collide::SdfCollider,
-    mesh_gen::generate_cloth_mesh,
-    params::SimParams,
-    solver::{Phase, Solver, collide_sdf},
+    LegacyClothError,
+    collide::LegacySdfCollider,
+    mesh_gen::legacy_generate_cloth_mesh,
+    params::LegacySimParams,
+    solver::{LegacyPhase, LegacySolver, legacy_collide_sdf},
 };
 use glam::{Mat4, Quat, Vec3};
 
@@ -15,14 +15,14 @@ fn close(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() < tolerance
 }
 
-fn iterations(repeat: usize) -> Vec<Phase> {
+fn iterations(repeat: usize) -> Vec<LegacyPhase> {
     let mut phases = Vec::new();
     for _ in 0..repeat {
         phases.extend([
-            Phase::SolveStretch,
-            Phase::SolveAttachment,
-            Phase::SolveBending,
-            Phase::ApplyDeltas,
+            LegacyPhase::SolveStretch,
+            LegacyPhase::SolveAttachment,
+            LegacyPhase::SolveBending,
+            LegacyPhase::ApplyDeltas,
         ]);
     }
     phases
@@ -34,17 +34,28 @@ fn scene_1_pose() -> Mat4 {
         * Mat4::from_quat(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
 }
 
-fn cloth(res: u32, params: &mut SimParams, transform: Mat4, attached: &[u32]) -> Solver {
-    let mut solver = Solver::default();
+fn cloth(
+    res: u32,
+    params: &mut LegacySimParams,
+    transform: Mat4,
+    attached: &[u32],
+) -> LegacySolver {
+    let mut solver = LegacySolver::default();
     solver
-        .add_cloth(params, &generate_cloth_mesh(res), transform, attached, DT)
+        .add_cloth(
+            params,
+            &legacy_generate_cloth_mesh(res),
+            transform,
+            attached,
+            DT,
+        )
         .expect("generated meshes are source-layout grids");
     solver
 }
 
 #[test]
 fn schedule_matches_the_source() {
-    let params = SimParams {
+    let params = LegacySimParams {
         num_substeps: 2,
         num_iterations: 4,
         interleaved_hash: 3,
@@ -52,74 +63,78 @@ fn schedule_matches_the_source() {
     };
 
     let mut expected = vec![
-        Phase::StabilizeSdf,
+        LegacyPhase::StabilizeSdf,
         // substep 0: the hash is due
-        Phase::Predict,
-        Phase::RebuildHash,
-        Phase::CollideParticles,
-        Phase::CollideSdf,
+        LegacyPhase::Predict,
+        LegacyPhase::RebuildHash,
+        LegacyPhase::CollideParticles,
+        LegacyPhase::CollideSdf,
     ];
     expected.extend(iterations(4));
-    expected.push(Phase::Finalize);
+    expected.push(LegacyPhase::Finalize);
     // substep 1
-    expected.extend([Phase::Predict, Phase::CollideParticles, Phase::CollideSdf]);
+    expected.extend([
+        LegacyPhase::Predict,
+        LegacyPhase::CollideParticles,
+        LegacyPhase::CollideSdf,
+    ]);
     expected.extend(iterations(4));
-    expected.push(Phase::Finalize);
-    expected.push(Phase::ComputeNormals);
+    expected.push(LegacyPhase::Finalize);
+    expected.push(LegacyPhase::ComputeNormals);
 
-    assert_eq!(Solver::schedule(&params), expected);
+    assert_eq!(LegacySolver::schedule(&params), expected);
 }
 
 #[test]
 fn hash_is_rebuilt_once_per_interleaved_substeps() {
-    let params = SimParams {
+    let params = LegacySimParams {
         num_substeps: 6,
         interleaved_hash: 3,
         ..Default::default()
     };
-    let schedule = Solver::schedule(&params);
+    let schedule = LegacySolver::schedule(&params);
 
     let rebuilds: Vec<usize> = schedule
         .iter()
         .enumerate()
-        .filter(|(_, phase)| **phase == Phase::RebuildHash)
+        .filter(|(_, phase)| **phase == LegacyPhase::RebuildHash)
         .map(|(index, _)| index)
         .collect();
     assert_eq!(rebuilds.len(), 2, "substeps 0 and 3");
 
     // every rebuild is followed by the collision pass it feeds
     for index in rebuilds {
-        assert_eq!(schedule[index + 1], Phase::CollideParticles);
+        assert_eq!(schedule[index + 1], LegacyPhase::CollideParticles);
     }
 }
 
 #[test]
 fn self_collision_is_skipped_when_disabled() {
-    let params = SimParams {
+    let params = LegacySimParams {
         enable_self_collision: false,
         ..Default::default()
     };
-    let schedule = Solver::schedule(&params);
+    let schedule = LegacySolver::schedule(&params);
 
-    assert!(!schedule.contains(&Phase::RebuildHash));
-    assert!(!schedule.contains(&Phase::CollideParticles));
+    assert!(!schedule.contains(&LegacyPhase::RebuildHash));
+    assert!(!schedule.contains(&LegacyPhase::CollideParticles));
 }
 
 #[test]
 fn zero_interleaved_hash_does_not_divide_by_zero() {
-    let params = SimParams {
+    let params = LegacySimParams {
         interleaved_hash: 0,
         ..Default::default()
     };
 
-    assert!(Solver::schedule(&params).contains(&Phase::RebuildHash));
+    assert!(LegacySolver::schedule(&params).contains(&LegacyPhase::RebuildHash));
 }
 
 #[test]
 fn add_cloth_bookkeeping() {
-    let mesh = generate_cloth_mesh(2);
-    let mut params = SimParams::default();
-    let mut solver = Solver::default();
+    let mesh = legacy_generate_cloth_mesh(2);
+    let mut params = LegacySimParams::default();
+    let mut solver = LegacySolver::default();
 
     let offset = solver.add_cloth(&mut params, &mesh, scene_1_pose(), &[0], DT);
     assert_eq!(offset, Ok(0));
@@ -162,9 +177,9 @@ fn add_cloth_bookkeeping() {
 
 #[test]
 fn a_second_cloth_is_shifted_into_solver_space() {
-    let mesh = generate_cloth_mesh(2);
-    let mut params = SimParams::default();
-    let mut solver = Solver::default();
+    let mesh = legacy_generate_cloth_mesh(2);
+    let mut params = LegacySimParams::default();
+    let mut solver = LegacySolver::default();
 
     assert_eq!(
         solver.add_cloth(&mut params, &mesh, Mat4::IDENTITY, &[0], DT),
@@ -213,14 +228,14 @@ fn a_second_cloth_is_shifted_into_solver_space() {
 
 #[test]
 fn add_cloth_rejects_a_mesh_that_is_not_a_source_layout_grid() {
-    let mut mesh = generate_cloth_mesh(1);
+    let mut mesh = legacy_generate_cloth_mesh(1);
     mesh.indices = vec![0, 1, 2, 2, 1, 3];
 
-    let mut params = SimParams::default();
-    let mut solver = Solver::default();
+    let mut params = LegacySimParams::default();
+    let mut solver = LegacySolver::default();
     assert_eq!(
         solver.add_cloth(&mut params, &mesh, Mat4::IDENTITY, &[], DT),
-        Err(ClothError::IndexLayout { first_mismatch: 1 })
+        Err(LegacyClothError::IndexLayout { first_mismatch: 1 })
     );
 
     // a rejected cloth leaves the solver untouched
@@ -231,7 +246,7 @@ fn add_cloth_rejects_a_mesh_that_is_not_a_source_layout_grid() {
 
 #[test]
 fn free_fall_matches_the_discrete_integration() {
-    let mut params = SimParams {
+    let mut params = LegacySimParams {
         num_substeps: 1,
         num_iterations: 0,
         gravity: Vec3::new(0.0, -9.8, 0.0),
@@ -256,7 +271,7 @@ fn free_fall_matches_the_discrete_integration() {
 
 #[test]
 fn no_gravity_keeps_the_cloth_still() {
-    let mut params = SimParams {
+    let mut params = LegacySimParams {
         gravity: Vec3::ZERO,
         damping: 0.0,
         enable_self_collision: false,
@@ -277,13 +292,13 @@ fn no_gravity_keeps_the_cloth_still() {
 
 #[test]
 fn plane_holds_the_cloth_at_the_collision_margin() {
-    let mut params = SimParams::default();
+    let mut params = LegacySimParams::default();
     // the sheet is rotated into the x-z plane and lifted clear of the floor, so it falls flat
     // instead of starting buried (a buried start turns the pre-stabilization push into velocity)
     let pose = Mat4::from_translation(Vec3::new(0.0, 0.5, 0.0))
         * Mat4::from_quat(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
     let mut solver = cloth(4, &mut params, pose, &[]);
-    let plane = SdfCollider::plane(0.0, DT);
+    let plane = LegacySdfCollider::plane(0.0, DT);
 
     for _ in 0..120 {
         solver.step(&params, &[plane], DT);
@@ -299,15 +314,15 @@ fn plane_holds_the_cloth_at_the_collision_margin() {
     assert!(solver.positions.iter().all(|p| p.is_finite()));
 }
 
-/// drives `collide_sdf` directly: through `Solver::step` the constraint iterations run *after*
+/// drives `legacy_collide_sdf` directly: through `LegacySolver::step` the constraint iterations run *after*
 /// the collision pass, so a particle can be pulled back inside; the kernel contract is only about
 /// the push itself.
 #[test]
 fn sphere_push_out_is_radial() {
     let center = Vec3::new(0.0, -0.5, 0.0);
     let radius = 0.5;
-    let collider = SdfCollider::sphere(center, radius, DT);
-    let params = SimParams {
+    let collider = LegacySdfCollider::sphere(center, radius, DT);
+    let params = LegacySimParams {
         num_particles: 3,
         friction: 0.0,
         ..Default::default()
@@ -320,7 +335,7 @@ fn sphere_push_out_is_radial() {
     ];
     let mut predicted = positions.clone();
 
-    collide_sdf(&mut predicted, &positions, &[collider], &params, DT);
+    legacy_collide_sdf(&mut predicted, &positions, &[collider], &params, DT);
 
     let surface = radius + params.collision_margin;
     for (i, (now, was)) in predicted.iter().zip(&positions).enumerate() {
@@ -345,7 +360,7 @@ fn sphere_push_out_is_radial() {
 
 #[test]
 fn max_speed_clamps_the_velocity() {
-    let mut params = SimParams {
+    let mut params = LegacySimParams {
         num_substeps: 1,
         num_iterations: 1,
         gravity: Vec3::new(0.0, -2000.0, 0.0),
@@ -375,7 +390,7 @@ fn substeps_barely_change_the_result() {
     let mut results = Vec::new();
 
     for substeps in [1u32, 2, 4] {
-        let mut params = SimParams {
+        let mut params = LegacySimParams {
             num_substeps: substeps,
             ..Default::default()
         };
@@ -437,7 +452,7 @@ fn substeps_barely_change_the_result() {
 /// stretch lengths.
 #[test]
 fn a_pinned_corner_hangs_at_the_rest_length() {
-    let mut params = SimParams::default();
+    let mut params = LegacySimParams::default();
     let mut solver = cloth(1, &mut params, Mat4::IDENTITY, &[0]);
     let pinned = solver.positions[0];
     let rest = solver.constraints.stretch.lengths[0];

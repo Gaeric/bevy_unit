@@ -7,7 +7,7 @@ use bevy::{
     dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin},
     prelude::*,
 };
-use bevy_cloth::legacy::ClothPlugin;
+use bevy_cloth::legacy::LegacyClothPlugin;
 
 fn main() {
     App::new()
@@ -24,6 +24,6 @@ fn main() {
                 ..default()
             },
         })
-        .add_plugins(ClothPlugin)
+        .add_plugins(LegacyClothPlugin)
         .run();
 }

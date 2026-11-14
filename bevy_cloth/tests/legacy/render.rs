@@ -1,13 +1,13 @@
 //! the render writeback path. it only touches the mesh asset, so it is testable headless.
 //!
 //! the trap this guards against: `Mesh::attribute_mut` panics when the mesh was built without
-//! `RenderAssetUsages::MAIN_WORLD` (`bevy_mesh/src/mesh.rs:44`), which is why `build_cloth_mesh`
+//! `RenderAssetUsages::MAIN_WORLD` (`bevy_mesh/src/mesh.rs:44`), which is why `legacy_build_cloth_mesh`
 //! uses `RenderAssetUsages::default()`.
 
 use bevy::{mesh::VertexAttributeValues, prelude::*};
 use bevy_cloth::legacy::{
-    demo::render::{build_cloth_mesh, sync_cloth_mesh},
-    sim::{mesh_gen::generate_cloth_mesh, params::SimParams, solver::Solver},
+    demo::render::{legacy_build_cloth_mesh, legacy_sync_cloth_mesh},
+    sim::{mesh_gen::legacy_generate_cloth_mesh, params::LegacySimParams, solver::LegacySolver},
 };
 use glam::{Mat4, Vec3};
 
@@ -29,8 +29,8 @@ fn uv_count(mesh: &Mesh) -> usize {
 
 #[test]
 fn the_cloth_mesh_starts_as_the_rest_pose() {
-    let cloth = generate_cloth_mesh(2);
-    let mesh = build_cloth_mesh(&cloth);
+    let cloth = legacy_generate_cloth_mesh(2);
+    let mesh = legacy_build_cloth_mesh(&cloth);
 
     let positions = positions_of(&mesh);
     assert_eq!(positions.len(), cloth.positions.len());
@@ -47,12 +47,12 @@ fn the_cloth_mesh_starts_as_the_rest_pose() {
 
 #[test]
 fn writeback_tracks_the_solver_positions() {
-    let mut params = SimParams {
+    let mut params = LegacySimParams {
         enable_self_collision: false,
         ..Default::default()
     };
-    let cloth = generate_cloth_mesh(2);
-    let mut solver = Solver::default();
+    let cloth = legacy_generate_cloth_mesh(2);
+    let mut solver = LegacySolver::default();
     solver
         .add_cloth(
             &mut params,
@@ -63,11 +63,11 @@ fn writeback_tracks_the_solver_positions() {
         )
         .expect("generated meshes are source-layout grids");
 
-    let mut mesh = build_cloth_mesh(&cloth);
+    let mut mesh = legacy_build_cloth_mesh(&cloth);
     for _ in 0..30 {
         solver.step(&params, &[], DT);
     }
-    sync_cloth_mesh(&mut mesh, &solver.positions, &solver.normals);
+    legacy_sync_cloth_mesh(&mut mesh, &solver.positions, &solver.normals);
 
     // the cloth fell, so this is not the rest pose any more
     assert!(solver.positions[0].y < 1.0);

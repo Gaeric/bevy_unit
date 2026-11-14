@@ -3,21 +3,23 @@
 use glam::{Mat4, Vec3};
 
 use crate::legacy::sim::{
-    ClothError,
-    collide::{SdfCollider, compute_friction},
+    LegacyClothError,
+    collide::{LegacySdfCollider, legacy_compute_friction},
     constraints::{
-        AttachConstraints, BendConstraints, ClothConstraints, StretchConstraints, build_constraints,
+        LegacyAttachConstraints, LegacyBendConstraints, LegacyClothConstraints,
+        LegacyStretchConstraints, legacy_build_constraints,
     },
-    hash::SpatialHash,
+    hash::LegacySpatialHash,
     mesh_gen::{
-        ClothMesh, bake_transform, collect_original_positions, particle_diameter_from_first_edge,
+        LegacyClothMesh, legacy_bake_transform, legacy_collect_original_positions,
+        legacy_particle_diameter_from_first_edge,
     },
-    params::SimParams,
+    params::LegacySimParams,
 };
 
 /// one fixed step, in the order `VtClothSolverGPU.hpp::Simulate` runs them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Phase {
+pub enum LegacyPhase {
     /// sdf pass that moves positions only
     StabilizeSdf,
     Predict,
@@ -34,7 +36,7 @@ pub enum Phase {
 
 /// the solver state of plan.org §1.2, shared by every cloth in the scene.
 #[derive(Clone, Debug, Default)]
-pub struct Solver {
+pub struct LegacySolver {
     /// world positions, also the render positions
     pub positions: Vec<Vec3>,
     pub normals: Vec<Vec3>,
@@ -46,12 +48,12 @@ pub struct Solver {
     pub delta_counts: Vec<i32>,
     /// `SpatialHashGPU::initialPositions`, captured after the transform bake
     pub initial_positions: Vec<Vec3>,
-    pub constraints: ClothConstraints,
-    pub hash: SpatialHash,
+    pub constraints: LegacyClothConstraints,
+    pub hash: LegacySpatialHash,
     scratch: Vec<Vec3>,
 }
 
-impl Solver {
+impl LegacySolver {
     pub fn num_particles(&self) -> usize {
         self.positions.len()
     }
@@ -60,21 +62,23 @@ impl Solver {
     /// particle offset (`m_indexOffset`). `attached` are cloth-local particle ids.
     pub fn add_cloth(
         &mut self,
-        params: &mut SimParams,
-        mesh: &ClothMesh,
+        params: &mut LegacySimParams,
+        mesh: &LegacyClothMesh,
         transform: Mat4,
         attached: &[u32],
         delta_time: f32,
-    ) -> Result<u32, ClothError> {
+    ) -> Result<u32, LegacyClothError> {
         let mut baked = mesh.positions.clone();
-        bake_transform(&mut baked, transform);
+        legacy_bake_transform(&mut baked, transform);
 
         // before touching self, so a rejected mesh leaves the solver untouched
-        let cloth = build_constraints(&baked, &mesh.indices, attached)?;
+        let cloth = legacy_build_constraints(&baked, &mesh.indices, attached)?;
 
         // measured on the local mesh, before the bake
-        let particle_diameter =
-            particle_diameter_from_first_edge(&mesh.positions, params.particle_diameter_scalar);
+        let particle_diameter = legacy_particle_diameter_from_first_edge(
+            &mesh.positions,
+            params.particle_diameter_scalar,
+        );
 
         let particle_offset = self.positions.len() as u32;
         let slot_offset = self.constraints.attach.slot_positions.len() as u32;
@@ -84,7 +88,7 @@ impl Solver {
         }
         self.positions.extend_from_slice(&baked);
         self.initial_positions
-            .extend(collect_original_positions(&baked));
+            .extend(legacy_collect_original_positions(&baked));
         self.velocities.resize(self.positions.len(), Vec3::ZERO);
         self.predicted.resize(self.positions.len(), Vec3::ZERO);
         self.deltas.resize(self.positions.len(), Vec3::ZERO);
@@ -98,14 +102,14 @@ impl Solver {
         params.delta_time = delta_time;
         params.max_speed = 2.0 * particle_diameter / delta_time * params.num_substeps as f32;
 
-        self.hash = SpatialHash::new(particle_diameter, self.positions.len(), params);
+        self.hash = LegacySpatialHash::new(particle_diameter, self.positions.len(), params);
 
         Ok(particle_offset)
     }
 
     fn append_constraints(
         &mut self,
-        mut cloth: ClothConstraints,
+        mut cloth: LegacyClothConstraints,
         particle_offset: u32,
         slot_offset: u32,
     ) {
@@ -158,64 +162,70 @@ impl Solver {
     }
 
     /// the phase sequence of one fixed step; pure data, so it is testable without the kernels.
-    pub fn schedule(params: &SimParams) -> Vec<Phase> {
-        let mut phases = vec![Phase::StabilizeSdf];
+    pub fn schedule(params: &LegacySimParams) -> Vec<LegacyPhase> {
+        let mut phases = vec![LegacyPhase::StabilizeSdf];
 
         for substep in 0..params.num_substeps {
-            phases.push(Phase::Predict);
+            phases.push(LegacyPhase::Predict);
 
             if params.enable_self_collision {
                 if substep % params.effective_interleaved_hash() == 0 {
-                    phases.push(Phase::RebuildHash);
+                    phases.push(LegacyPhase::RebuildHash);
                 }
-                phases.push(Phase::CollideParticles);
+                phases.push(LegacyPhase::CollideParticles);
             }
 
-            phases.push(Phase::CollideSdf);
+            phases.push(LegacyPhase::CollideSdf);
 
             for _ in 0..params.num_iterations {
-                phases.push(Phase::SolveStretch);
-                phases.push(Phase::SolveAttachment);
-                phases.push(Phase::SolveBending);
-                phases.push(Phase::ApplyDeltas);
+                phases.push(LegacyPhase::SolveStretch);
+                phases.push(LegacyPhase::SolveAttachment);
+                phases.push(LegacyPhase::SolveBending);
+                phases.push(LegacyPhase::ApplyDeltas);
             }
 
-            phases.push(Phase::Finalize);
+            phases.push(LegacyPhase::Finalize);
         }
 
-        phases.push(Phase::ComputeNormals);
+        phases.push(LegacyPhase::ComputeNormals);
         phases
     }
 
     /// one fixed step; `dt` is `Time<Fixed>::delta_secs()`.
-    pub fn step(&mut self, params: &SimParams, colliders: &[SdfCollider], dt: f32) {
+    pub fn step(&mut self, params: &LegacySimParams, colliders: &[LegacySdfCollider], dt: f32) {
         let substep_time = params.substep_time(dt);
 
         for phase in Self::schedule(params) {
             match phase {
-                Phase::StabilizeSdf => {
+                LegacyPhase::StabilizeSdf => {
                     // the source aliases `positions` on both sides of this kernel, so the kernel's
                     // working value starts out equal to the current position; `scratch` keeps that
                     // read side stable while `predicted` is overwritten
                     if !colliders.is_empty() {
                         self.scratch.copy_from_slice(&self.positions);
                         self.predicted.copy_from_slice(&self.positions);
-                        collide_sdf(&mut self.predicted, &self.scratch, colliders, params, dt);
+                        legacy_collide_sdf(
+                            &mut self.predicted,
+                            &self.scratch,
+                            colliders,
+                            params,
+                            dt,
+                        );
                         self.positions.copy_from_slice(&self.predicted);
                     }
                 }
-                Phase::Predict => predict_positions(
+                LegacyPhase::Predict => legacy_predict_positions(
                     &mut self.predicted,
                     &mut self.velocities,
                     &self.positions,
                     params,
                     substep_time,
                 ),
-                Phase::RebuildHash => {
+                LegacyPhase::RebuildHash => {
                     self.hash
                         .rebuild(&self.predicted, &self.initial_positions, params)
                 }
-                Phase::CollideParticles => collide_particles(
+                LegacyPhase::CollideParticles => legacy_collide_particles(
                     &mut self.deltas,
                     &mut self.delta_counts,
                     &mut self.predicted,
@@ -224,14 +234,14 @@ impl Solver {
                     &self.positions,
                     params,
                 ),
-                Phase::CollideSdf => collide_sdf(
+                LegacyPhase::CollideSdf => legacy_collide_sdf(
                     &mut self.predicted,
                     &self.positions,
                     colliders,
                     params,
                     substep_time,
                 ),
-                Phase::SolveStretch => solve_stretch(
+                LegacyPhase::SolveStretch => legacy_solve_stretch(
                     &mut self.predicted,
                     &mut self.deltas,
                     &mut self.delta_counts,
@@ -239,7 +249,7 @@ impl Solver {
                     &self.constraints.stretch,
                     params,
                 ),
-                Phase::SolveAttachment => solve_attachment(
+                LegacyPhase::SolveAttachment => legacy_solve_attachment(
                     &mut self.predicted,
                     &mut self.deltas,
                     &mut self.delta_counts,
@@ -247,7 +257,7 @@ impl Solver {
                     &self.constraints.attach,
                     params,
                 ),
-                Phase::SolveBending => solve_bending(
+                LegacyPhase::SolveBending => legacy_solve_bending(
                     &mut self.predicted,
                     &mut self.deltas,
                     &mut self.delta_counts,
@@ -256,21 +266,21 @@ impl Solver {
                     params,
                     substep_time,
                 ),
-                Phase::ApplyDeltas => apply_deltas(
+                LegacyPhase::ApplyDeltas => legacy_apply_deltas(
                     &mut self.predicted,
                     &mut self.deltas,
                     &mut self.delta_counts,
                     params,
                 ),
-                Phase::Finalize => finalize(
+                LegacyPhase::Finalize => legacy_finalize(
                     &mut self.velocities,
                     &mut self.positions,
                     &self.predicted,
                     params,
                     substep_time,
                 ),
-                Phase::ComputeNormals => {
-                    compute_normals(&mut self.normals, &self.positions, &self.indices)
+                LegacyPhase::ComputeNormals => {
+                    legacy_compute_normals(&mut self.normals, &self.positions, &self.indices)
                 }
             }
         }
@@ -281,11 +291,11 @@ impl Solver {
 
 /// `VtClothSolverGPU.cu:42`, `PredictPositions`
 #[allow(unused_variables)]
-pub fn predict_positions(
+pub fn legacy_predict_positions(
     predicted: &mut [Vec3],
     velocities: &mut [Vec3],
     positions: &[Vec3],
-    params: &SimParams,
+    params: &LegacySimParams,
     delta_time: f32,
 ) {
     for i in 0..params.num_particles {
@@ -297,13 +307,13 @@ pub fn predict_positions(
 
 /// `VtClothSolverGPU.cu:65`, `SolveStretch`
 #[allow(unused_variables)]
-pub fn solve_stretch(
+pub fn legacy_solve_stretch(
     predicted: &mut [Vec3],
     deltas: &mut [Vec3],
     delta_counts: &mut [i32],
     inv_masses: &[f32],
-    stretch: &StretchConstraints,
-    params: &SimParams,
+    stretch: &LegacyStretchConstraints,
+    params: &LegacySimParams,
 ) {
     const EPSILON: f32 = 1e-6;
 
@@ -337,13 +347,13 @@ pub fn solve_stretch(
 
 /// `VtClothSolverGPU.cu:205`, `SolveAttachment`
 #[allow(unused_variables)]
-pub fn solve_attachment(
+pub fn legacy_solve_attachment(
     predicted: &mut [Vec3],
     deltas: &mut [Vec3],
     delta_counts: &mut [i32],
     inv_masses: &[f32],
-    attach: &AttachConstraints,
-    params: &SimParams,
+    attach: &LegacyAttachConstraints,
+    params: &LegacySimParams,
 ) {
     for ((particle_id, slot_id), distance) in attach
         .particle_ids
@@ -374,13 +384,13 @@ pub fn solve_attachment(
 
 /// `VtClothSolverGPU.cu:117`, `SolveBending`
 #[allow(unused_variables)]
-pub fn solve_bending(
+pub fn legacy_solve_bending(
     predicted: &mut [Vec3],
     deltas: &mut [Vec3],
     delta_counts: &mut [i32],
     inv_masses: &[f32],
-    bend: &BendConstraints,
-    params: &SimParams,
+    bend: &LegacyBendConstraints,
+    params: &LegacySimParams,
     delta_time: f32,
 ) {
     const EPSILON: f32 = 1e-6;
@@ -460,11 +470,11 @@ pub fn solve_bending(
 }
 
 /// `VtClothSolverGPU.cu:253`, `ApplyDeltas`
-pub fn apply_deltas(
+pub fn legacy_apply_deltas(
     predicted: &mut [Vec3],
     deltas: &mut [Vec3],
     delta_counts: &mut [i32],
-    params: &SimParams,
+    params: &LegacySimParams,
 ) {
     for i in 0..params.num_particles as usize {
         let count = delta_counts[i] as f32;
@@ -477,11 +487,11 @@ pub fn apply_deltas(
 }
 
 /// `VtClothSolverGPU.cu:388`, `Finalize`
-pub fn finalize(
+pub fn legacy_finalize(
     velocities: &mut [Vec3],
     positions: &mut [Vec3],
     predicted: &[Vec3],
-    params: &SimParams,
+    params: &LegacySimParams,
     delta_time: f32,
 ) {
     for i in 0..params.num_particles as usize {
@@ -501,11 +511,11 @@ pub fn finalize(
 }
 
 /// `VtClothSolverGPU.cu:289`, `CollideSDF`. `positions` is the pre-collision state.
-pub fn collide_sdf(
+pub fn legacy_collide_sdf(
     predicted: &mut [Vec3],
     positions: &[Vec3],
-    colliders: &[SdfCollider],
-    params: &SimParams,
+    colliders: &[LegacySdfCollider],
+    params: &LegacySimParams,
     delta_time: f32,
 ) {
     if colliders.is_empty() {
@@ -522,7 +532,7 @@ pub fn collide_sdf(
 
             if correction.dot(correction) > 0.0 {
                 let relative_velocity = pred - position - collider.velocity_at(pred) * delta_time;
-                pred += compute_friction(correction, relative_velocity, params);
+                pred += legacy_compute_friction(correction, relative_velocity, params);
             }
         }
 
@@ -531,14 +541,14 @@ pub fn collide_sdf(
 }
 
 /// `VtClothSolverGPU.cu:329`, `CollideParticles` (the source wrapper also applies the deltas)
-pub fn collide_particles(
+pub fn legacy_collide_particles(
     deltas: &mut [Vec3],
     delta_counts: &mut [i32],
     predicted: &mut [Vec3],
     inv_masses: &[f32],
     neighbors: &[u32],
     positions: &[Vec3],
-    params: &SimParams,
+    params: &LegacySimParams,
 ) {
     const EPSILON: f32 = 1e-6;
 
@@ -557,7 +567,7 @@ pub fn collide_particles(
         // `neighbors[i + n * slot]`, walked as the source's `for (k = id; k < n * max; k += n)`
         for slot in 0..max_num_neighbors {
             let j = neighbors[i + num_particles * slot];
-            // `EMPTY` is the sentinel; the source compares with `>`, so equal-to-n would not break
+            // `LEGACY_EMPTY` is the sentinel; the source compares with `>`, so equal-to-n would not break
             if j as usize > num_particles {
                 break;
             }
@@ -584,18 +594,18 @@ pub fn collide_particles(
             position_delta -= w_i * common;
 
             let relative_velocity = velocity_i - (pred_j - positions[j]);
-            position_delta += w_i * compute_friction(common, relative_velocity, params);
+            position_delta += w_i * legacy_compute_friction(common, relative_velocity, params);
         }
 
         deltas[i] = position_delta;
         delta_counts[i] = delta_count;
     }
 
-    apply_deltas(predicted, deltas, delta_counts, params);
+    legacy_apply_deltas(predicted, deltas, delta_counts, params);
 }
 
 /// `VtClothSolverGPU.cu:419` / `:443`, `ComputeNormal`
-pub fn compute_normals(normals: &mut [Vec3], positions: &[Vec3], indices: &[u32]) {
+pub fn legacy_compute_normals(normals: &mut [Vec3], positions: &[Vec3], indices: &[u32]) {
     normals.fill(Vec3::ZERO);
 
     for triangle in indices.as_chunks::<3>().0 {

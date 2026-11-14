@@ -2,13 +2,14 @@
 
 use bevy_cloth::legacy::{
     demo::{
-        plugin::ColliderMotion,
+        plugin::LegacyColliderMotion,
         scenes::{
-            ClothSpec, ColliderSpec, SceneId, comparison_scene, friction_sweep_pose, scene_params,
-            sweep_z_position, swirl_slot_position,
+            LegacyClothSpec, LegacyColliderSpec, LegacySceneId, legacy_comparison_scene,
+            legacy_friction_sweep_pose, legacy_scene_params, legacy_sweep_z_position,
+            legacy_swirl_slot_position,
         },
     },
-    sim::{collide::ColliderKind, params::SimParams},
+    sim::{collide::LegacyColliderKind, params::LegacySimParams},
 };
 use glam::{Mat4, Vec3};
 
@@ -16,7 +17,7 @@ use glam::{Mat4, Vec3};
 fn shared_fixtures_preserve_cloth_layout_and_collider_order() {
     for (id, resolution, texture, position, rotation, attached, radius, center, motion) in [
         (
-            SceneId::Attach,
+            LegacySceneId::Attach,
             40,
             1,
             Vec3::new(0.0, 1.5, 1.0),
@@ -24,10 +25,10 @@ fn shared_fixtures_preserve_cloth_layout_and_collider_order() {
             vec![0, 40, 1680, 1640],
             0.5,
             Vec3::new(0.0, 0.5, 0.0),
-            ColliderMotion::Static,
+            LegacyColliderMotion::Static,
         ),
         (
-            SceneId::Collision,
+            LegacySceneId::Collision,
             16,
             2,
             Vec3::new(0.0, 2.5, 0.0),
@@ -35,10 +36,10 @@ fn shared_fixtures_preserve_cloth_layout_and_collider_order() {
             vec![0, 16],
             0.6,
             Vec3::new(0.0, 0.6, -1.0),
-            ColliderMotion::SweepZ,
+            LegacyColliderMotion::SweepZ,
         ),
     ] {
-        let scene = comparison_scene(id).unwrap();
+        let scene = legacy_comparison_scene(id).unwrap();
         assert_eq!(scene.cloths.len(), 1);
         let cloth = scene.cloths[0].clone();
         assert_eq!(cloth.resolution, resolution);
@@ -51,14 +52,14 @@ fn shared_fixtures_preserve_cloth_layout_and_collider_order() {
 
         assert_eq!(scene.colliders.len(), 2);
         let ground = &scene.colliders[0];
-        assert_eq!(ground.kind, ColliderKind::Plane);
+        assert_eq!(ground.kind, LegacyColliderKind::Plane);
         assert_eq!(ground.position, Vec3::ZERO);
         assert_eq!(ground.radius, 0.0);
         assert_eq!(ground.half_extents, Vec3::ONE);
-        assert_eq!(ground.motion, ColliderMotion::Static);
+        assert_eq!(ground.motion, LegacyColliderMotion::Static);
         assert!(ground.enabled);
         let sphere = scene.colliders[1].clone();
-        assert_eq!(sphere.kind, ColliderKind::Sphere);
+        assert_eq!(sphere.kind, LegacyColliderKind::Sphere);
         assert_eq!(sphere.radius, radius);
         assert_eq!(sphere.position, center);
         assert_eq!(sphere.half_extents, Vec3::ONE);
@@ -74,7 +75,7 @@ fn shared_fixtures_preserve_cloth_layout_and_collider_order() {
 
 #[test]
 fn shared_cloth_pose_matches_source_rotation_order() {
-    let cloth = ClothSpec {
+    let cloth = LegacyClothSpec {
         resolution: 2,
         texture: 1,
         position: Vec3::new(0.3, 1.5, -0.7),
@@ -87,7 +88,10 @@ fn shared_cloth_pose_matches_source_rotation_order() {
         * Mat4::from_rotation_x(-15.0_f32.to_radians());
     assert!(cloth.pose().abs_diff_eq(expected, 1e-6));
 
-    let attach = comparison_scene(SceneId::Attach).unwrap().cloths.remove(0);
+    let attach = legacy_comparison_scene(LegacySceneId::Attach)
+        .unwrap()
+        .cloths
+        .remove(0);
     assert!(
         attach
             .pose()
@@ -100,7 +104,7 @@ fn shared_cloth_pose_matches_source_rotation_order() {
             .transform_vector3(Vec3::Y)
             .abs_diff_eq(Vec3::Z, 1e-6)
     );
-    let collision = comparison_scene(SceneId::Collision)
+    let collision = legacy_comparison_scene(LegacySceneId::Collision)
         .unwrap()
         .cloths
         .remove(0);
@@ -109,7 +113,7 @@ fn shared_cloth_pose_matches_source_rotation_order() {
 
 #[test]
 fn comparison_sphere_motion_uses_simulation_seconds_and_keeps_shape_scale() {
-    let scene = comparison_scene(SceneId::Collision).unwrap();
+    let scene = legacy_comparison_scene(LegacySceneId::Collision).unwrap();
     let sphere = &scene.colliders[1];
     for (seconds, z) in [
         (0.0, -1.0),
@@ -118,7 +122,7 @@ fn comparison_sphere_motion_uses_simulation_seconds_and_keeps_shape_scale() {
         (std::f32::consts::PI, -1.0),
     ] {
         let expected = Vec3::new(0.0, 0.6, z);
-        assert!(sweep_z_position(0.6, seconds).abs_diff_eq(expected, 1e-6));
+        assert!(legacy_sweep_z_position(0.6, seconds).abs_diff_eq(expected, 1e-6));
         let model = sphere.transform_at(seconds);
         assert!(
             model
@@ -133,7 +137,7 @@ fn comparison_sphere_motion_uses_simulation_seconds_and_keeps_shape_scale() {
 
 #[test]
 fn static_colliders_keep_initial_world_model_and_scale_once() {
-    let scene = comparison_scene(SceneId::Attach).unwrap();
+    let scene = legacy_comparison_scene(LegacySceneId::Attach).unwrap();
     for collider in &scene.colliders {
         assert_eq!(collider.transform_at(12.5), collider.initial_transform());
     }
@@ -145,12 +149,12 @@ fn static_colliders_keep_initial_world_model_and_scale_once() {
         Vec3::new(0.5, 0.5, 0.0)
     );
 
-    let cube = ColliderSpec {
-        kind: ColliderKind::Cube,
+    let cube = LegacyColliderSpec {
+        kind: LegacyColliderKind::Cube,
         radius: 0.0,
         half_extents: Vec3::new(0.2, 0.3, 0.4),
         position: Vec3::new(1.0, 2.0, 3.0),
-        motion: ColliderMotion::Static,
+        motion: LegacyColliderMotion::Static,
         enabled: true,
     };
     assert!(
@@ -158,8 +162,8 @@ fn static_colliders_keep_initial_world_model_and_scale_once() {
             .transform_point3(Vec3::splat(0.5))
             .abs_diff_eq(cube.position + cube.half_extents, 1e-6)
     );
-    let raised_ground = ColliderSpec {
-        kind: ColliderKind::Plane,
+    let raised_ground = LegacyColliderSpec {
+        kind: LegacyColliderKind::Plane,
         position: Vec3::new(0.0, -2.0, 0.0),
         ..cube
     };
@@ -173,7 +177,7 @@ fn static_colliders_keep_initial_world_model_and_scale_once() {
 fn remaining_shared_fixtures_preserve_source_actor_order_and_values() {
     for (id, resolution, textures, heights, rotation, attached, collider) in [
         (
-            SceneId::SelfCollision,
+            LegacySceneId::SelfCollision,
             60,
             vec![1],
             vec![1.5],
@@ -182,48 +186,63 @@ fn remaining_shared_fixtures_preserve_source_actor_order_and_values() {
             None,
         ),
         (
-            SceneId::Friction,
+            LegacySceneId::Friction,
             64,
             vec![2],
             vec![1.5],
             Vec3::new(90.0, 0.0, 0.0),
             vec![],
             Some((
-                ColliderKind::Sphere,
+                LegacyColliderKind::Sphere,
                 0.5,
-                ColliderMotion::FrictionSweep,
+                LegacyColliderMotion::FrictionSweep,
                 true,
             )),
         ),
         (
-            SceneId::Multiple,
+            LegacySceneId::Multiple,
             64,
             vec![1, 2, 3],
             vec![1.5, 1.8, 2.1],
             Vec3::new(90.0, 0.0, 0.0),
             vec![],
-            Some((ColliderKind::Cube, 0.0, ColliderMotion::Static, true)),
+            Some((
+                LegacyColliderKind::Cube,
+                0.0,
+                LegacyColliderMotion::Static,
+                true,
+            )),
         ),
         (
-            SceneId::HighResolution,
+            LegacySceneId::HighResolution,
             200,
             vec![2],
             vec![1.5],
             Vec3::new(90.0, 0.0, 0.0),
             vec![],
-            Some((ColliderKind::Sphere, 0.6, ColliderMotion::Static, true)),
+            Some((
+                LegacyColliderKind::Sphere,
+                0.6,
+                LegacyColliderMotion::Static,
+                true,
+            )),
         ),
         (
-            SceneId::Swirl,
+            LegacySceneId::Swirl,
             36,
             vec![1],
             vec![1.5],
             Vec3::new(90.0, 0.0, 0.0),
             vec![0],
-            Some((ColliderKind::Sphere, 0.1, ColliderMotion::SwirlSlot, false)),
+            Some((
+                LegacyColliderKind::Sphere,
+                0.1,
+                LegacyColliderMotion::SwirlSlot,
+                false,
+            )),
         ),
     ] {
-        let scene = comparison_scene(id).expect("all seven scenes are supported");
+        let scene = legacy_comparison_scene(id).expect("all seven scenes are supported");
         assert_eq!(scene.cloths.len(), textures.len(), "{id:?}");
         for ((cloth, texture), height) in scene.cloths.iter().zip(textures).zip(heights) {
             assert_eq!(cloth.resolution, resolution, "{id:?}");
@@ -244,11 +263,11 @@ fn remaining_shared_fixtures_preserve_source_actor_order_and_values() {
             "{id:?}"
         );
         let ground = &scene.colliders[0];
-        assert_eq!(ground.kind, ColliderKind::Plane);
+        assert_eq!(ground.kind, LegacyColliderKind::Plane);
         assert_eq!(ground.position, Vec3::ZERO);
         assert_eq!(ground.radius, 0.0);
         assert_eq!(ground.half_extents, Vec3::ONE);
-        assert_eq!(ground.motion, ColliderMotion::Static);
+        assert_eq!(ground.motion, LegacyColliderMotion::Static);
         assert!(ground.enabled);
         assert_eq!(ground.initial_transform(), Mat4::IDENTITY);
         if let Some((kind, radius, motion, enabled)) = collider {
@@ -257,12 +276,12 @@ fn remaining_shared_fixtures_preserve_source_actor_order_and_values() {
             assert_eq!(actor.radius, radius, "{id:?}");
             assert_eq!(actor.motion, motion, "{id:?}");
             assert_eq!(actor.enabled, enabled, "{id:?}");
-            let half_extents = if kind == ColliderKind::Cube {
+            let half_extents = if kind == LegacyColliderKind::Cube {
                 Vec3::splat(0.5)
             } else {
                 Vec3::ONE
             };
-            let height = if kind == ColliderKind::Cube {
+            let height = if kind == LegacyColliderKind::Cube {
                 0.5
             } else {
                 radius
@@ -279,7 +298,7 @@ fn remaining_shared_fixtures_preserve_source_actor_order_and_values() {
 
 #[test]
 fn friction_motion_preserves_delay_signed_remainder_and_scaled_rotation() {
-    let scene = comparison_scene(SceneId::Friction).unwrap();
+    let scene = legacy_comparison_scene(LegacySceneId::Friction).unwrap();
     let sphere = &scene.colliders[1];
     // Include negative clock values to distinguish signed % from rem_euclid,
     // and fractional values around every truncation-based spin boundary.
@@ -298,7 +317,7 @@ fn friction_motion_preserves_delay_signed_remainder_and_scaled_rotation() {
         (6.5, true),
     ] {
         let time = seconds - 0.5;
-        let (position, rotation) = friction_sweep_pose(0.5, seconds);
+        let (position, rotation) = legacy_friction_sweep_pose(0.5, seconds);
         let expected_position = if seconds > 0.5 {
             Some(Vec3::new(time.sin(), 0.5, 0.0))
         } else {
@@ -333,7 +352,7 @@ fn friction_motion_preserves_delay_signed_remainder_and_scaled_rotation() {
 
 #[test]
 fn swirl_disabled_visual_and_slot_share_the_same_motion() {
-    let scene = comparison_scene(SceneId::Swirl).unwrap();
+    let scene = legacy_comparison_scene(LegacySceneId::Swirl).unwrap();
     let sphere = &scene.colliders[1];
     assert!(!sphere.enabled);
     assert_eq!(sphere.position, Vec3::new(0.0, 0.1, 0.0));
@@ -343,7 +362,7 @@ fn swirl_disabled_visual_and_slot_share_the_same_motion() {
         (std::f32::consts::PI / 3.0, Vec3::new(0.0, 1.0, 0.0)),
         (std::f32::consts::TAU / 3.0, Vec3::new(0.0, 3.0, 0.0)),
     ] {
-        assert!(swirl_slot_position(seconds).abs_diff_eq(expected, 1e-6));
+        assert!(legacy_swirl_slot_position(seconds).abs_diff_eq(expected, 1e-6));
         let model = sphere.transform_at(seconds);
         assert!(
             model
@@ -358,9 +377,9 @@ fn swirl_disabled_visual_and_slot_share_the_same_motion() {
 
 #[test]
 fn scene_table_matches_the_source_key_order() {
-    assert_eq!(SceneId::ALL.len(), 7);
+    assert_eq!(LegacySceneId::ALL.len(), 7);
 
-    let labels: Vec<&str> = SceneId::ALL.iter().map(|id| id.label()).collect();
+    let labels: Vec<&str> = LegacySceneId::ALL.iter().map(|id| id.label()).collect();
     assert_eq!(
         labels,
         vec![
@@ -378,21 +397,29 @@ fn scene_table_matches_the_source_key_order() {
 /// the source starts on the first scene (`main.cpp` list order).
 #[test]
 fn the_default_scene_is_attach() {
-    assert_eq!(SceneId::default(), SceneId::Attach);
+    assert_eq!(LegacySceneId::default(), LegacySceneId::Attach);
 }
 
 /// `Attach`, `Collision` and `Swirl` have no `ModifyParameter` calls.
 #[test]
 fn scenes_without_overrides_keep_the_defaults() {
-    for id in [SceneId::Attach, SceneId::Collision, SceneId::Swirl] {
-        assert_eq!(scene_params(id), SimParams::default(), "{id:?}");
+    for id in [
+        LegacySceneId::Attach,
+        LegacySceneId::Collision,
+        LegacySceneId::Swirl,
+    ] {
+        assert_eq!(
+            legacy_scene_params(id),
+            LegacySimParams::default(),
+            "{id:?}"
+        );
     }
 }
 
 /// `SceneClothSelfCollision` sets `numSubsteps = 3` then `8`, so only 8 survives (§1.7).
 #[test]
 fn self_collision_ends_up_at_eight_substeps() {
-    let params = scene_params(SceneId::SelfCollision);
+    let params = legacy_scene_params(LegacySceneId::SelfCollision);
 
     assert_eq!(params.num_substeps, 8);
     assert_eq!(params.friction, 0.3);
@@ -401,8 +428,8 @@ fn self_collision_ends_up_at_eight_substeps() {
 /// `SceneClothFriction` and `SceneClothMultiple` carry the same override block.
 #[test]
 fn friction_and_multiple_share_their_overrides() {
-    for id in [SceneId::Friction, SceneId::Multiple] {
-        let params = scene_params(id);
+    for id in [LegacySceneId::Friction, LegacySceneId::Multiple] {
+        let params = legacy_scene_params(id);
 
         assert_eq!(params.friction, 0.6, "{id:?}");
         assert_eq!(params.num_substeps, 5, "{id:?}");
@@ -412,19 +439,19 @@ fn friction_and_multiple_share_their_overrides() {
 
 #[test]
 fn high_resolution_raises_substeps_and_iterations() {
-    let params = scene_params(SceneId::HighResolution);
+    let params = legacy_scene_params(LegacySceneId::HighResolution);
 
     assert_eq!(params.num_substeps, 10);
     assert_eq!(params.num_iterations, 10);
 }
 
-/// `scene_params` always starts from `SimParams::default()`, so a switch can never carry the
+/// `legacy_scene_params` always starts from `LegacySimParams::default()`, so a switch can never carry the
 /// previous scene's overrides forward (plan.org §6, "parameter override leakage").
 #[test]
 fn overrides_never_leak_between_scenes() {
-    let friction = scene_params(SceneId::Friction);
-    let after_switching_away = scene_params(SceneId::Swirl);
+    let friction = legacy_scene_params(LegacySceneId::Friction);
+    let after_switching_away = legacy_scene_params(LegacySceneId::Swirl);
 
     assert_ne!(friction.num_substeps, after_switching_away.num_substeps);
-    assert_eq!(after_switching_away, SimParams::default());
+    assert_eq!(after_switching_away, LegacySimParams::default());
 }

@@ -3,12 +3,12 @@
 use glam::Vec3;
 
 use crate::legacy::sim::{
-    ClothError,
-    mesh_gen::{validate_cloth_grid, vertex_index_at},
+    LegacyClothError,
+    mesh_gen::{legacy_validate_cloth_grid, legacy_vertex_index_at},
 };
 
 #[derive(Clone, Debug, Default)]
-pub struct StretchConstraints {
+pub struct LegacyStretchConstraints {
     /// particle pairs, in the source's traversal order.
     pub indices: Vec<[u32; 2]>,
     /// rest length of `indices[i]`, in world units.
@@ -17,14 +17,14 @@ pub struct StretchConstraints {
 
 /// bending constraints; the source never computes the rest angle
 #[derive(Clone, Debug, Default)]
-pub struct BendConstraints {
+pub struct LegacyBendConstraints {
     pub indices: Vec<[u32; 4]>,
     pub angles: Vec<f32>,
 }
 
 /// attachment and long range attachment: every particle is constrained to every slot.
 #[derive(Clone, Debug, Default)]
-pub struct AttachConstraints {
+pub struct LegacyAttachConstraints {
     pub particle_ids: Vec<u32>,
     pub slot_ids: Vec<u32>,
     pub distances: Vec<f32>,
@@ -34,23 +34,23 @@ pub struct AttachConstraints {
 
 /// everything the solver needs besides the particle arrays.
 #[derive(Clone, Debug, Default)]
-pub struct ClothConstraints {
-    pub stretch: StretchConstraints,
-    pub bend: BendConstraints,
-    pub attach: AttachConstraints,
+pub struct LegacyClothConstraints {
+    pub stretch: LegacyStretchConstraints,
+    pub bend: LegacyBendConstraints,
+    pub attach: LegacyAttachConstraints,
     /// inverse mass: 1.0, except particles pinned by a slot (0.0).
     pub inv_masses: Vec<f32>,
 }
 
 /// builds the constraint tables from a *baked* (world space) cloth mesh
 /// `attached` lists the particles that carry an attachment slot. the grid layout contract is
-/// validated first, so this only accepts meshes `mesh_gen::generate_cloth_mesh` could produce.
-pub fn build_constraints(
+/// validated first, so this only accepts meshes `mesh_gen::legacy_generate_cloth_mesh` could produce.
+pub fn legacy_build_constraints(
     vertices: &[Vec3],
     indices: &[u32],
     attached: &[u32],
-) -> Result<ClothConstraints, ClothError> {
-    let res = validate_cloth_grid(vertices, indices)?;
+) -> Result<LegacyClothConstraints, LegacyClothError> {
+    let res = legacy_validate_cloth_grid(vertices, indices)?;
 
     let mut inv_masses = vec![1.0; vertices.len()];
 
@@ -58,7 +58,7 @@ pub fn build_constraints(
     let attach = build_attach(vertices, attached, &mut inv_masses)?;
     let bend = build_bend(indices);
 
-    Ok(ClothConstraints {
+    Ok(LegacyClothConstraints {
         stretch,
         bend,
         attach,
@@ -68,19 +68,19 @@ pub fn build_constraints(
 
 /// source `GenerateStretch`: for every particle one constraint to its `+y` neighbour, one to its
 /// `+x` neighbour, and both quad diagonals, `4 * res^2 + 2 * res` constraints in total.
-fn build_stretch(vertices: &[Vec3], res: u32) -> StretchConstraints {
+fn build_stretch(vertices: &[Vec3], res: u32) -> LegacyStretchConstraints {
     let side = res + 1;
-    let mut stretch = StretchConstraints::default();
+    let mut stretch = LegacyStretchConstraints::default();
 
     for row in 0..side {
         for column in 0..side {
-            let idx1 = vertex_index_at(res, row, column);
+            let idx1 = legacy_vertex_index_at(res, row, column);
             if column != res {
                 push_stretch(
                     vertices,
                     &mut stretch,
                     idx1,
-                    vertex_index_at(res, row, column + 1),
+                    legacy_vertex_index_at(res, row, column + 1),
                 );
             }
             if row != res {
@@ -88,7 +88,7 @@ fn build_stretch(vertices: &[Vec3], res: u32) -> StretchConstraints {
                     vertices,
                     &mut stretch,
                     idx1,
-                    vertex_index_at(res, row + 1, column),
+                    legacy_vertex_index_at(res, row + 1, column),
                 );
             }
 
@@ -97,14 +97,14 @@ fn build_stretch(vertices: &[Vec3], res: u32) -> StretchConstraints {
                     vertices,
                     &mut stretch,
                     idx1,
-                    vertex_index_at(res, row + 1, column + 1),
+                    legacy_vertex_index_at(res, row + 1, column + 1),
                 );
 
                 push_stretch(
                     vertices,
                     &mut stretch,
-                    vertex_index_at(res, row, column + 1),
-                    vertex_index_at(res, row + 1, column),
+                    legacy_vertex_index_at(res, row, column + 1),
+                    legacy_vertex_index_at(res, row + 1, column),
                 );
             }
         }
@@ -113,7 +113,7 @@ fn build_stretch(vertices: &[Vec3], res: u32) -> StretchConstraints {
     stretch
 }
 
-fn push_stretch(vertices: &[Vec3], sink: &mut StretchConstraints, i1: u32, i2: u32) {
+fn push_stretch(vertices: &[Vec3], sink: &mut LegacyStretchConstraints, i1: u32, i2: u32) {
     sink.indices.push([i1, i2]);
     sink.lengths
         .push((vertices[i1 as usize] - vertices[i2 as usize]).length());
@@ -126,12 +126,12 @@ fn build_attach(
     vertices: &[Vec3],
     attached: &[u32],
     inv_masses: &mut [f32],
-) -> Result<AttachConstraints, ClothError> {
-    let mut attach = AttachConstraints::default();
+) -> Result<LegacyAttachConstraints, LegacyClothError> {
+    let mut attach = LegacyAttachConstraints::default();
 
     for (idx, &particle) in attached.iter().enumerate() {
         let Some(&slot_position) = vertices.get(particle as usize) else {
-            return Err(ClothError::AttachmentOutOfRange { particle });
+            return Err(LegacyClothError::AttachmentOutOfRange { particle });
         };
         attach.slot_positions.push(slot_position);
 
@@ -150,10 +150,10 @@ fn build_attach(
     Ok(attach)
 }
 
-fn build_bend(indices: &[u32]) -> BendConstraints {
-    let mut bend = BendConstraints::default();
+fn build_bend(indices: &[u32]) -> LegacyBendConstraints {
+    let mut bend = LegacyBendConstraints::default();
 
-    // `validate_cloth_grid` guarantees the index count is a multiple of 6
+    // `legacy_validate_cloth_grid` guarantees the index count is a multiple of 6
     for quad in indices.as_chunks::<6>().0 {
         bend.indices.push([quad[0], quad[5], quad[2], quad[1]]);
         bend.angles.push(0.0);

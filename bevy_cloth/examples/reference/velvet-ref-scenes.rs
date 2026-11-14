@@ -3,8 +3,8 @@
 
 use bevy::prelude::*;
 use bevy_cloth::{
-    legacy::demo::scenes::SceneId,
-    r#ref::{GpuSceneConfig, SolverScenesPlugin},
+    legacy::demo::scenes::LegacySceneId,
+    reference::{RefGpuSceneConfig, RefSolverScenesPlugin},
 };
 
 const SCENE_VALUES: &str =
@@ -17,8 +17,10 @@ Controls: 1..7 switch scene and pause; Space pause/resume; S step while paused;
 R reset and pause; C toggle solid collider bodies (simulation unchanged);
 L toggle triangle-edge overlay on the lit cloth; middle drag orbit; mouse wheel zoom.";
 
-fn parse_config(args: impl IntoIterator<Item = String>) -> Result<Option<GpuSceneConfig>, String> {
-    let mut config = GpuSceneConfig::default();
+fn parse_config(
+    args: impl IntoIterator<Item = String>,
+) -> Result<Option<RefGpuSceneConfig>, String> {
+    let mut config = RefGpuSceneConfig::default();
     let mut args = args.into_iter();
     while let Some(flag) = args.next() {
         match flag.as_str() {
@@ -30,13 +32,13 @@ fn parse_config(args: impl IntoIterator<Item = String>) -> Result<Option<GpuScen
                     .next()
                     .ok_or_else(|| format!("--scene requires {SCENE_VALUES}"))?;
                 config.scene = match value.as_str() {
-                    "1" | "attach" => SceneId::Attach,
-                    "2" | "collision" => SceneId::Collision,
-                    "3" | "self-collision" => SceneId::SelfCollision,
-                    "4" | "friction" => SceneId::Friction,
-                    "5" | "multiple" => SceneId::Multiple,
-                    "6" | "high-resolution" => SceneId::HighResolution,
-                    "7" | "swirl" => SceneId::Swirl,
+                    "1" | "attach" => LegacySceneId::Attach,
+                    "2" | "collision" => LegacySceneId::Collision,
+                    "3" | "self-collision" => LegacySceneId::SelfCollision,
+                    "4" | "friction" => LegacySceneId::Friction,
+                    "5" | "multiple" => LegacySceneId::Multiple,
+                    "6" | "high-resolution" => LegacySceneId::HighResolution,
+                    "7" | "swirl" => LegacySceneId::Swirl,
                     _ => {
                         return Err(format!(
                             "unsupported --scene value: {value}; expected {SCENE_VALUES}"
@@ -72,7 +74,7 @@ fn main() -> AppExit {
             ..default()
         }))
         .insert_resource(ClearColor(Color::srgb(0.015, 0.02, 0.035)))
-        .add_plugins(SolverScenesPlugin)
+        .add_plugins(RefSolverScenesPlugin)
         .run()
 }
 
@@ -80,14 +82,14 @@ fn main() -> AppExit {
 mod tests {
     use super::*;
 
-    fn parse(args: &[&str]) -> Result<Option<GpuSceneConfig>, String> {
+    fn parse(args: &[&str]) -> Result<Option<RefGpuSceneConfig>, String> {
         parse_config(args.iter().map(|arg| (*arg).to_owned()))
     }
 
     #[test]
     fn cli_defaults() {
         let config = parse(&[]).unwrap().unwrap();
-        assert_eq!(config.scene, SceneId::Attach);
+        assert_eq!(config.scene, LegacySceneId::Attach);
         assert!(!config.start_paused);
         assert!(!config.gpu_timing);
     }
@@ -95,20 +97,20 @@ mod tests {
     #[test]
     fn cli_scene_options_and_flags() {
         for (value, expected) in [
-            ("1", SceneId::Attach),
-            ("attach", SceneId::Attach),
-            ("2", SceneId::Collision),
-            ("collision", SceneId::Collision),
-            ("3", SceneId::SelfCollision),
-            ("self-collision", SceneId::SelfCollision),
-            ("4", SceneId::Friction),
-            ("friction", SceneId::Friction),
-            ("5", SceneId::Multiple),
-            ("multiple", SceneId::Multiple),
-            ("6", SceneId::HighResolution),
-            ("high-resolution", SceneId::HighResolution),
-            ("7", SceneId::Swirl),
-            ("swirl", SceneId::Swirl),
+            ("1", LegacySceneId::Attach),
+            ("attach", LegacySceneId::Attach),
+            ("2", LegacySceneId::Collision),
+            ("collision", LegacySceneId::Collision),
+            ("3", LegacySceneId::SelfCollision),
+            ("self-collision", LegacySceneId::SelfCollision),
+            ("4", LegacySceneId::Friction),
+            ("friction", LegacySceneId::Friction),
+            ("5", LegacySceneId::Multiple),
+            ("multiple", LegacySceneId::Multiple),
+            ("6", LegacySceneId::HighResolution),
+            ("high-resolution", LegacySceneId::HighResolution),
+            ("7", LegacySceneId::Swirl),
+            ("swirl", LegacySceneId::Swirl),
         ] {
             let config = parse(&["--timing", "--scene", value, "--paused"])
                 .unwrap()

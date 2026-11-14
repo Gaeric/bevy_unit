@@ -2,30 +2,30 @@
 
 use glam::Vec3;
 
-use crate::legacy::sim::params::SimParams;
+use crate::legacy::sim::params::LegacySimParams;
 
 /// the source's empty-slot sentinel `0xffffffff`.
-pub const EMPTY: u32 = u32::MAX;
+pub const LEGACY_EMPTY: u32 = u32::MAX;
 
 /// `SpatialHashGPU.cu:17`, `ComputeIntCoord`. C++ `(int)floor` truncates; rust saturates on overflow.
-pub fn compute_int_coord(value: f32, spacing: f32) -> i32 {
+pub fn legacy_compute_int_coord(value: f32, spacing: f32) -> i32 {
     (value / spacing).floor() as i32
 }
 
 /// `SpatialHashGPU.cu:22`, `HashCoords`: `abs(h % tableSize)` with
 /// `h = (x * 92837111) ^ (y * 689287499) ^ (z * 283923481)`. the C++ ints overflow (UB), so we wrap;
 /// `unsigned_abs` avoids the `abs(i32::MIN)` overflow.
-pub fn hash_coords(x: i32, y: i32, z: i32, table_size: i32) -> u32 {
+pub fn legacy_hash_coords(x: i32, y: i32, z: i32, table_size: i32) -> u32 {
     let h = x.wrapping_mul(92_837_111) ^ y.wrapping_mul(689_287_499) ^ z.wrapping_mul(283_923_481);
     h.wrapping_rem(table_size).unsigned_abs()
 }
 
 /// `SpatialHashGPU.cu:26`, `HashPosition`.
-pub fn hash_position(position: Vec3, spacing: f32, table_size: i32) -> u32 {
-    hash_coords(
-        compute_int_coord(position.x, spacing),
-        compute_int_coord(position.y, spacing),
-        compute_int_coord(position.z, spacing),
+pub fn legacy_hash_position(position: Vec3, spacing: f32, table_size: i32) -> u32 {
+    legacy_hash_coords(
+        legacy_compute_int_coord(position.x, spacing),
+        legacy_compute_int_coord(position.y, spacing),
+        legacy_compute_int_coord(position.z, spacing),
         table_size,
     )
 }
@@ -35,7 +35,7 @@ pub fn hash_position(position: Vec3, spacing: f32, table_size: i32) -> u32 {
 /// the slots of particle `i` live at `neighbors[i + num_particles * slot]`; the stride is the
 /// particle count, not `max_num_neighbors` (§1.6).
 #[derive(Clone, Debug, Default)]
-pub struct SpatialHash {
+pub struct LegacySpatialHash {
     /// `particle_diameter * hash_cell_size_scalar`
     pub spacing: f32,
     /// `2 * num_particles`
@@ -45,18 +45,18 @@ pub struct SpatialHash {
     pub particle_hash: Vec<u32>,
     /// particle ids sorted by hash; ascending id inside one cell
     pub particle_index: Vec<u32>,
-    /// `EMPTY` when the cell holds no particle
+    /// `LEGACY_EMPTY` when the cell holds no particle
     pub cell_start: Vec<u32>,
-    /// one past the last slot; only meaningful where `cell_start != EMPTY`
+    /// one past the last slot; only meaningful where `cell_start != LEGACY_EMPTY`
     pub cell_end: Vec<u32>,
-    /// `neighbors[i + num_particles * slot]`, `EMPTY` terminated
+    /// `neighbors[i + num_particles * slot]`, `LEGACY_EMPTY` terminated
     pub neighbors: Vec<u32>,
 }
 
-impl SpatialHash {
+impl LegacySpatialHash {
     /// `SpatialHashGPU.hpp:16`. the source re-creates the hash on every `AddCloth`, sized for the
     /// whole solver.
-    pub fn new(particle_diameter: f32, max_num_objects: usize, params: &SimParams) -> Self {
+    pub fn new(particle_diameter: f32, max_num_objects: usize, params: &LegacySimParams) -> Self {
         let max_num_neighbors = params.max_num_neighbors as usize;
         Self {
             spacing: particle_diameter * params.hash_cell_size_scalar,
@@ -65,9 +65,9 @@ impl SpatialHash {
             num_particles: max_num_objects,
             particle_hash: vec![0; max_num_objects],
             particle_index: vec![0; max_num_objects],
-            cell_start: vec![EMPTY; 2 * max_num_objects],
+            cell_start: vec![LEGACY_EMPTY; 2 * max_num_objects],
             cell_end: vec![0; 2 * max_num_objects],
-            neighbors: vec![EMPTY; max_num_objects * max_num_neighbors],
+            neighbors: vec![LEGACY_EMPTY; max_num_objects * max_num_neighbors],
         }
     }
 
@@ -80,7 +80,12 @@ impl SpatialHash {
     }
 
     /// `SpatialHashGPU.cu:160`, `HashObjects`: hash, sort, cell ranges, neighbour cache.
-    pub fn rebuild(&mut self, positions: &[Vec3], original_positions: &[Vec3], params: &SimParams) {
+    pub fn rebuild(
+        &mut self,
+        positions: &[Vec3],
+        original_positions: &[Vec3],
+        params: &LegacySimParams,
+    ) {
         assert_eq!(
             positions.len(),
             original_positions.len(),
@@ -92,13 +97,13 @@ impl SpatialHash {
         assert_eq!(
             positions.len(),
             self.num_particles,
-            "SpatialHash::new fixes the particle count"
+            "LegacySpatialHash::new fixes the particle count"
         );
 
         let table_size = self.table_size as i32;
         for (i, position) in positions.iter().enumerate() {
             self.particle_index[i] = i as u32;
-            self.particle_hash[i] = hash_position(*position, self.spacing, table_size);
+            self.particle_hash[i] = legacy_hash_position(*position, self.spacing, table_size);
         }
 
         // the source radix-sorts over `ceil(log2(tableSize))` bits; the hashes are already below
@@ -106,7 +111,7 @@ impl SpatialHash {
         let hashes = &self.particle_hash;
         self.particle_index.sort_by_key(|&id| hashes[id as usize]);
 
-        self.cell_start.fill(EMPTY);
+        self.cell_start.fill(LEGACY_EMPTY);
         self.cell_end.fill(0);
         let mut start = 0;
         while start < self.num_particles {
@@ -130,11 +135,11 @@ impl SpatialHash {
         &mut self,
         positions: &[Vec3],
         original_positions: &[Vec3],
-        params: &SimParams,
+        params: &LegacySimParams,
     ) {
         // the source leaves the stale slots behind the sentinel in place; we clear them instead so
         // that a rebuild is deterministic
-        self.neighbors.fill(EMPTY);
+        self.neighbors.fill(LEGACY_EMPTY);
 
         let n = self.num_particles;
         let max = self.max_num_neighbors;
@@ -145,17 +150,17 @@ impl SpatialHash {
         for id in 0..n {
             let position = positions[id];
             let original = original_positions[id];
-            let ix = compute_int_coord(position.x, self.spacing);
-            let iy = compute_int_coord(position.y, self.spacing);
-            let iz = compute_int_coord(position.z, self.spacing);
+            let ix = legacy_compute_int_coord(position.x, self.spacing);
+            let iy = legacy_compute_int_coord(position.y, self.spacing);
+            let iz = legacy_compute_int_coord(position.z, self.spacing);
 
             let mut slot = 0;
             'cells: for x in ix - 1..=ix + 1 {
                 for y in iy - 1..=iy + 1 {
                     for z in iz - 1..=iz + 1 {
-                        let cell = hash_coords(x, y, z, table_size) as usize;
+                        let cell = legacy_hash_coords(x, y, z, table_size) as usize;
                         let start = self.cell_start[cell];
-                        if start == EMPTY {
+                        if start == LEGACY_EMPTY {
                             continue;
                         }
                         // the source clamps the cell to `maxNumNeighbors` (its own BUG_LOG), so a
@@ -189,7 +194,7 @@ impl SpatialHash {
             }
 
             if slot < max {
-                self.neighbors[id + n * slot] = EMPTY;
+                self.neighbors[id + n * slot] = LEGACY_EMPTY;
             }
         }
     }

@@ -1,6 +1,6 @@
 //! the seven scenes of `main.cpp`, 1:1 (plan.org §1.7).
 //!
-//! `SimParams` overrides follow the source's `Scene::ModifyParameter` semantics: applied when a
+//! `LegacySimParams` overrides follow the source's `Scene::ModifyParameter` semantics: applied when a
 //! scene is entered, reverted when it is left, so nothing leaks into the next scene. every switch
 //! rebuilds the whole scene (camera, light, colliders, cloth), like the source rebuilding its
 //! `GameInstance`.
@@ -10,19 +10,21 @@ use glam::{Mat3, Mat4, Quat, Vec3};
 
 use crate::legacy::{
     demo::{
-        camera::OrbitCamera,
+        camera::LegacyOrbitCamera,
         plugin::{
-            ClothCollider, ClothVisual, ColliderHistory, ColliderMotion, FIXED_DELTA, SimParamsRes,
-            SolverRes,
+            LEGACY_FIXED_DELTA, LegacyClothCollider, LegacyClothVisual, LegacyColliderHistory,
+            LegacyColliderMotion, LegacySimParamsRes, LegacySolverRes,
         },
-        render::build_cloth_mesh,
+        render::legacy_build_cloth_mesh,
     },
-    sim::{collide::ColliderKind, mesh_gen::generate_cloth_mesh, params::SimParams},
+    sim::{
+        collide::LegacyColliderKind, mesh_gen::legacy_generate_cloth_mesh, params::LegacySimParams,
+    },
 };
 
 /// the source's `main.cpp` scene list, in `1`-`7` order.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SceneId {
+pub enum LegacySceneId {
     #[default]
     Attach,
     Collision,
@@ -33,97 +35,97 @@ pub enum SceneId {
     Swirl,
 }
 
-impl SceneId {
+impl LegacySceneId {
     /// every scene, in the source's `1`-`7` order (`GameInstance::ProcessKeyboard`).
-    pub const ALL: [SceneId; 7] = [
-        SceneId::Attach,
-        SceneId::Collision,
-        SceneId::SelfCollision,
-        SceneId::Friction,
-        SceneId::Multiple,
-        SceneId::HighResolution,
-        SceneId::Swirl,
+    pub const ALL: [LegacySceneId; 7] = [
+        LegacySceneId::Attach,
+        LegacySceneId::Collision,
+        LegacySceneId::SelfCollision,
+        LegacySceneId::Friction,
+        LegacySceneId::Multiple,
+        LegacySceneId::HighResolution,
+        LegacySceneId::Swirl,
     ];
 
     /// `Scene::name`.
     pub fn label(self) -> &'static str {
         match self {
-            SceneId::Attach => "Cloth / Attach",
-            SceneId::Collision => "Cloth / SDF Collision",
-            SceneId::SelfCollision => "Cloth / Self Collision",
-            SceneId::Friction => "Cloth / Friction",
-            SceneId::Multiple => "Cloth / Multiple Object",
-            SceneId::HighResolution => "Cloth / High Resolution",
-            SceneId::Swirl => "Cloth / Swirl",
+            LegacySceneId::Attach => "Cloth / Attach",
+            LegacySceneId::Collision => "Cloth / SDF Collision",
+            LegacySceneId::SelfCollision => "Cloth / Self Collision",
+            LegacySceneId::Friction => "Cloth / Friction",
+            LegacySceneId::Multiple => "Cloth / Multiple Object",
+            LegacySceneId::HighResolution => "Cloth / High Resolution",
+            LegacySceneId::Swirl => "Cloth / Swirl",
         }
     }
 }
 
 /// the scene currently built into the world.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct CurrentScene(pub SceneId);
+pub struct LegacyCurrentScene(pub LegacySceneId);
 
 /// `VtEngine::SwitchScene` / `Reset`: the scene to build on the next `Update`.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PendingScene(pub Option<SceneId>);
+pub struct LegacyPendingScene(pub Option<LegacySceneId>);
 
 /// everything a scene build spawns; torn down on switch (the source rebuilds `GameInstance`).
 #[derive(Component)]
-pub struct SceneEntity;
+pub struct LegacySceneEntity;
 
 /// `Scene::ModifyParameter`: this scene's overrides on top of the parameter defaults.
 ///
 /// the source applies them in `onEnter` and reverts them in `onExit`, so a switch never leaks
 /// (plan.org §1.7, §6).
-pub fn scene_params(id: SceneId) -> SimParams {
-    let mut params = SimParams::default();
+pub fn legacy_scene_params(id: LegacySceneId) -> LegacySimParams {
+    let mut params = LegacySimParams::default();
 
     match id {
-        SceneId::SelfCollision => {
+        LegacySceneId::SelfCollision => {
             // the source stacks `numSubsteps` 3 then 8, so 8 wins (plan.org §1.7)
             params.num_substeps = 8;
             params.friction = 0.3;
         }
-        SceneId::Friction | SceneId::Multiple => {
+        LegacySceneId::Friction | LegacySceneId::Multiple => {
             params.friction = 0.6;
             params.num_substeps = 5;
             params.num_iterations = 5;
         }
-        SceneId::HighResolution => {
+        LegacySceneId::HighResolution => {
             params.num_substeps = 10;
             params.num_iterations = 10;
         }
-        SceneId::Attach | SceneId::Collision | SceneId::Swirl => {}
+        LegacySceneId::Attach | LegacySceneId::Collision | LegacySceneId::Swirl => {}
     }
 
     params
 }
 
-/// Shared fixtures for all seven CPU/GPU scenes. Parameters remain in `scene_params`.
-pub struct ComparisonScene {
-    pub cloths: Vec<ClothSpec>,
+/// Shared fixtures for all seven CPU/GPU scenes. Parameters remain in `legacy_scene_params`.
+pub struct LegacyComparisonScene {
+    pub cloths: Vec<LegacyClothSpec>,
     /// Source spawn order: ground first, then any sphere or cube (including disabled visuals).
-    pub colliders: Vec<ColliderSpec>,
+    pub colliders: Vec<LegacyColliderSpec>,
 }
 
 /// Analytic collider description; model matrices include the shape's scale exactly once.
 #[derive(Clone)]
-pub struct ColliderSpec {
-    pub kind: ColliderKind,
+pub struct LegacyColliderSpec {
+    pub kind: LegacyColliderKind,
     pub radius: f32,
     pub half_extents: Vec3,
     pub position: Vec3,
-    pub motion: ColliderMotion,
+    pub motion: LegacyColliderMotion,
     pub enabled: bool,
 }
 
-impl ColliderSpec {
+impl LegacyColliderSpec {
     /// Initial world model, independent of the animation clock.
     pub fn initial_transform(&self) -> Mat4 {
         let scale = match self.kind {
-            ColliderKind::Sphere => Vec3::splat(self.radius),
-            ColliderKind::Cube => self.half_extents * 2.0,
-            ColliderKind::Plane => Vec3::ONE,
+            LegacyColliderKind::Sphere => Vec3::splat(self.radius),
+            LegacyColliderKind::Cube => self.half_extents * 2.0,
+            LegacyColliderKind::Plane => Vec3::ONE,
         };
         Mat4::from_scale_rotation_translation(scale, Quat::IDENTITY, self.position)
     }
@@ -133,20 +135,20 @@ impl ColliderSpec {
     pub fn transform_at(&self, seconds: f32) -> Mat4 {
         let mut model = self.initial_transform();
         match self.motion {
-            ColliderMotion::Static => {}
-            ColliderMotion::SweepZ => {
-                model.w_axis = sweep_z_position(self.radius, seconds).extend(1.0);
+            LegacyColliderMotion::Static => {}
+            LegacyColliderMotion::SweepZ => {
+                model.w_axis = legacy_sweep_z_position(self.radius, seconds).extend(1.0);
             }
-            ColliderMotion::FrictionSweep => {
-                let (position, rotation) = friction_sweep_pose(self.radius, seconds);
+            LegacyColliderMotion::FrictionSweep => {
+                let (position, rotation) = legacy_friction_sweep_pose(self.radius, seconds);
                 model = Mat4::from_scale_rotation_translation(
                     Vec3::splat(self.radius),
                     rotation,
                     position.unwrap_or(self.position),
                 );
             }
-            ColliderMotion::SwirlSlot => {
-                model.w_axis = swirl_slot_position(seconds).extend(1.0);
+            LegacyColliderMotion::SwirlSlot => {
+                model.w_axis = legacy_swirl_slot_position(seconds).extend(1.0);
             }
         }
         model
@@ -154,13 +156,13 @@ impl ColliderSpec {
 }
 
 /// `SceneClothCollision` sphere center, shared by CPU animation and comparison fixtures.
-pub fn sweep_z_position(radius: f32, seconds: f32) -> Vec3 {
+pub fn legacy_sweep_z_position(radius: f32, seconds: f32) -> Vec3 {
     Vec3::new(0.0, radius, -(seconds * 2.0).cos())
 }
 
 /// `SceneClothFriction`: translation is assigned only after the half-second delay;
 /// spin uses truncation to signed integer and signed remainder, not Euclidean modulo.
-pub fn friction_sweep_pose(radius: f32, seconds: f32) -> (Option<Vec3>, Quat) {
+pub fn legacy_friction_sweep_pose(radius: f32, seconds: f32) -> (Option<Vec3>, Quat) {
     let time = seconds - 0.5;
     let position = (time > 0.0).then(|| Vec3::new(time.sin(), radius, 0.0));
     let spin = if (time as i32) % 4 > 1 {
@@ -172,17 +174,17 @@ pub fn friction_sweep_pose(radius: f32, seconds: f32) -> (Option<Vec3>, Quat) {
 }
 
 /// `SceneClothSwirl`: shared attachment slot and disabled decorative sphere center.
-pub fn swirl_slot_position(seconds: f32) -> Vec3 {
+pub fn legacy_swirl_slot_position(seconds: f32) -> Vec3 {
     Vec3::new((seconds * 3.0).sin(), (seconds * 3.0).cos() + 2.0, 0.0)
 }
 
-/// Every `SceneId` has a shared fixture; the `Option` signature is retained for callers.
-pub fn comparison_scene(id: SceneId) -> Option<ComparisonScene> {
+/// Every `LegacySceneId` has a shared fixture; the `Option` signature is retained for callers.
+pub fn legacy_comparison_scene(id: LegacySceneId) -> Option<LegacyComparisonScene> {
     let (cloth, collider) = match id {
-        SceneId::Attach => {
+        LegacySceneId::Attach => {
             let resolution = 40;
             (
-                ClothSpec {
+                LegacyClothSpec {
                     resolution,
                     texture: 1,
                     position: Vec3::new(0.0, 1.5, 1.0),
@@ -194,35 +196,35 @@ pub fn comparison_scene(id: SceneId) -> Option<ComparisonScene> {
                         (resolution + 1) * resolution,
                     ],
                 },
-                ColliderSpec {
-                    kind: ColliderKind::Sphere,
+                LegacyColliderSpec {
+                    kind: LegacyColliderKind::Sphere,
                     radius: 0.5,
                     half_extents: Vec3::ONE,
                     position: Vec3::new(0.0, 0.5, 0.0),
-                    motion: ColliderMotion::Static,
+                    motion: LegacyColliderMotion::Static,
                     enabled: true,
                 },
             )
         }
-        SceneId::Collision => (
-            ClothSpec {
+        LegacySceneId::Collision => (
+            LegacyClothSpec {
                 resolution: 16,
                 texture: 2,
                 position: Vec3::new(0.0, 2.5, 0.0),
                 rotation: Vec3::ZERO,
                 attached: vec![0, 16],
             },
-            ColliderSpec {
-                kind: ColliderKind::Sphere,
+            LegacyColliderSpec {
+                kind: LegacyColliderKind::Sphere,
                 radius: 0.6,
                 half_extents: Vec3::ONE,
                 position: Vec3::new(0.0, 0.6, -1.0),
-                motion: ColliderMotion::SweepZ,
+                motion: LegacyColliderMotion::SweepZ,
                 enabled: true,
             },
         ),
-        SceneId::SelfCollision => (
-            ClothSpec {
+        LegacySceneId::SelfCollision => (
+            LegacyClothSpec {
                 resolution: 60,
                 texture: 1,
                 position: Vec3::new(0.0, 1.5, 1.0),
@@ -230,74 +232,77 @@ pub fn comparison_scene(id: SceneId) -> Option<ComparisonScene> {
                 attached: Vec::new(),
             },
             // No actor collider beyond the ground in this scene.
-            ColliderSpec {
-                kind: ColliderKind::Plane,
+            LegacyColliderSpec {
+                kind: LegacyColliderKind::Plane,
                 radius: 0.0,
                 half_extents: Vec3::ONE,
                 position: Vec3::ZERO,
-                motion: ColliderMotion::Static,
+                motion: LegacyColliderMotion::Static,
                 enabled: true,
             },
         ),
-        SceneId::Friction | SceneId::Multiple | SceneId::HighResolution | SceneId::Swirl => {
+        LegacySceneId::Friction
+        | LegacySceneId::Multiple
+        | LegacySceneId::HighResolution
+        | LegacySceneId::Swirl => {
             let (resolution, texture, radius, kind, motion, enabled, attached) = match id {
-                SceneId::Friction => (
+                LegacySceneId::Friction => (
                     64,
                     2,
                     0.5,
-                    ColliderKind::Sphere,
-                    ColliderMotion::FrictionSweep,
+                    LegacyColliderKind::Sphere,
+                    LegacyColliderMotion::FrictionSweep,
                     true,
                     vec![],
                 ),
-                SceneId::Multiple => (
+                LegacySceneId::Multiple => (
                     64,
                     1,
                     0.0,
-                    ColliderKind::Cube,
-                    ColliderMotion::Static,
+                    LegacyColliderKind::Cube,
+                    LegacyColliderMotion::Static,
                     true,
                     vec![],
                 ),
-                SceneId::HighResolution => (
+                LegacySceneId::HighResolution => (
                     200,
                     2,
                     0.6,
-                    ColliderKind::Sphere,
-                    ColliderMotion::Static,
+                    LegacyColliderKind::Sphere,
+                    LegacyColliderMotion::Static,
                     true,
                     vec![],
                 ),
-                SceneId::Swirl => (
+                LegacySceneId::Swirl => (
                     36,
                     1,
                     0.1,
-                    ColliderKind::Sphere,
-                    ColliderMotion::SwirlSlot,
+                    LegacyColliderKind::Sphere,
+                    LegacyColliderMotion::SwirlSlot,
                     false,
                     vec![0],
                 ),
                 _ => unreachable!(),
             };
             (
-                ClothSpec {
+                LegacyClothSpec {
                     resolution,
                     texture,
                     position: Vec3::new(0.0, 1.5, 1.0),
                     rotation: Vec3::new(90.0, 0.0, 0.0),
                     attached,
                 },
-                ColliderSpec {
+                LegacyColliderSpec {
                     kind,
                     radius,
-                    half_extents: if kind == ColliderKind::Cube {
+                    half_extents: if kind == LegacyColliderKind::Cube {
                         Vec3::splat(0.5)
                     } else {
                         Vec3::ONE
                     },
                     position: Vec3::new(
                         0.0,
-                        if kind == ColliderKind::Cube {
+                        if kind == LegacyColliderKind::Cube {
                             0.5
                         } else {
                             radius
@@ -311,27 +316,27 @@ pub fn comparison_scene(id: SceneId) -> Option<ComparisonScene> {
         }
     };
     let mut cloths = vec![cloth];
-    if id == SceneId::Multiple {
+    if id == LegacySceneId::Multiple {
         for (texture, height) in [(2, 1.8), (3, 2.1)] {
-            cloths.push(ClothSpec {
+            cloths.push(LegacyClothSpec {
                 texture,
                 position: Vec3::new(0.0, height, 1.0),
                 ..cloths[0].clone()
             });
         }
     }
-    let mut scene = ComparisonScene {
+    let mut scene = LegacyComparisonScene {
         cloths,
-        colliders: vec![ColliderSpec {
-            kind: ColliderKind::Plane,
+        colliders: vec![LegacyColliderSpec {
+            kind: LegacyColliderKind::Plane,
             radius: 0.0,
             half_extents: Vec3::ONE,
             position: Vec3::ZERO,
-            motion: ColliderMotion::Static,
+            motion: LegacyColliderMotion::Static,
             enabled: true,
         }],
     };
-    if id != SceneId::SelfCollision {
+    if id != LegacySceneId::SelfCollision {
         scene.colliders.push(collider);
     }
     Some(scene)
@@ -339,28 +344,28 @@ pub fn comparison_scene(id: SceneId) -> Option<ComparisonScene> {
 
 /// the assets and solver state a scene build needs, grouped so the helper signatures stay short.
 #[derive(SystemParam)]
-pub struct SceneContext<'w, 's> {
+pub struct LegacySceneContext<'w, 's> {
     commands: Commands<'w, 's>,
     asset_server: Res<'w, AssetServer>,
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
-    solver: ResMut<'w, SolverRes>,
-    params: ResMut<'w, SimParamsRes>,
+    solver: ResMut<'w, LegacySolverRes>,
+    params: ResMut<'w, LegacySimParamsRes>,
 }
 
 /// `Scene::PopulateActors` + `onEnter` for the initial scene.
-pub fn setup_initial_scene(mut context: SceneContext) {
-    build_scene(&mut context, SceneId::default());
+pub fn legacy_setup_initial_scene(mut context: LegacySceneContext) {
+    build_scene(&mut context, LegacySceneId::default());
 }
 
 /// `VtEngine::SwitchScene` / `Reset`: run the current scene's `onExit`, then the next `onEnter`.
-pub fn apply_scene_switch(
-    mut context: SceneContext,
-    mut current: ResMut<CurrentScene>,
-    mut pending: ResMut<PendingScene>,
-    entities: Query<Entity, With<SceneEntity>>,
-    meshes: Query<&Mesh3d, With<SceneEntity>>,
-    materials: Query<&MeshMaterial3d<StandardMaterial>, With<SceneEntity>>,
+pub fn legacy_apply_scene_switch(
+    mut context: LegacySceneContext,
+    mut current: ResMut<LegacyCurrentScene>,
+    mut pending: ResMut<LegacyPendingScene>,
+    entities: Query<Entity, With<LegacySceneEntity>>,
+    meshes: Query<&Mesh3d, With<LegacySceneEntity>>,
+    materials: Query<&MeshMaterial3d<StandardMaterial>, With<LegacySceneEntity>>,
 ) {
     let Some(next) = pending.0.take() else {
         return;
@@ -378,17 +383,17 @@ pub fn apply_scene_switch(
         context.commands.entity(entity).despawn();
     }
     // the source throws the whole `GameInstance` away, so the solver starts empty every switch
-    *context.solver = SolverRes::default();
+    *context.solver = LegacySolverRes::default();
 
     build_scene(&mut context, next);
     current.0 = next;
 }
 
 /// a scene's actor list, shared by `Scene::PopulateActors` and the switch entry point.
-fn build_scene(context: &mut SceneContext, id: SceneId) {
+fn build_scene(context: &mut LegacySceneContext, id: LegacySceneId) {
     // `onEnter`: the overrides must be in place *before* any cloth is added, so `AddCloth`'s
     // `maxSpeed = 2 * pd / dt * numSubsteps` sees the final `numSubsteps` (plan.org §4-6)
-    *context.params = SimParamsRes(scene_params(id));
+    *context.params = LegacySimParamsRes(legacy_scene_params(id));
 
     spawn_camera_and_light(context);
 
@@ -396,19 +401,21 @@ fn build_scene(context: &mut SceneContext, id: SceneId) {
 }
 
 /// Keep the CPU visuals and history initialization in the existing spawn helpers.
-fn spawn_comparison_scene(context: &mut SceneContext, id: SceneId) {
-    let scene = comparison_scene(id).expect("all seven scenes have shared descriptors");
+fn spawn_comparison_scene(context: &mut LegacySceneContext, id: LegacySceneId) {
+    let scene = legacy_comparison_scene(id).expect("all seven scenes have shared descriptors");
     for collider in scene.colliders {
         match collider.kind {
-            ColliderKind::Plane => spawn_ground(context),
-            ColliderKind::Sphere => spawn_sphere(
+            LegacyColliderKind::Plane => spawn_ground(context),
+            LegacyColliderKind::Sphere => spawn_sphere(
                 context,
                 collider.radius,
                 collider.position,
                 collider.motion,
                 collider.enabled,
             ),
-            ColliderKind::Cube => spawn_cube(context, collider.half_extents.x, collider.position),
+            LegacyColliderKind::Cube => {
+                spawn_cube(context, collider.half_extents.x, collider.position)
+            }
         }
     }
     for cloth in scene.cloths {
@@ -418,7 +425,7 @@ fn spawn_comparison_scene(context: &mut SceneContext, id: SceneId) {
 
 /// one `SpawnCloth` call.
 #[derive(Clone)]
-pub struct ClothSpec {
+pub struct LegacyClothSpec {
     pub resolution: u32,
     pub texture: u32,
     pub position: Vec3,
@@ -428,7 +435,7 @@ pub struct ClothSpec {
     pub attached: Vec<u32>,
 }
 
-impl ClothSpec {
+impl LegacyClothSpec {
     /// Pose baked into particle positions by both CPU and GPU scene construction.
     pub fn pose(&self) -> Mat4 {
         source_pose(self.position, self.rotation)
@@ -437,8 +444,8 @@ impl ClothSpec {
 
 /// `Scene.hpp::SpawnCloth` + `Actor::Initialize`: the pose is baked into the mesh by `add_cloth`,
 /// so the entity itself stays at `Transform::IDENTITY` (plan.org §4-1).
-fn spawn_cloth(context: &mut SceneContext, spec: ClothSpec) {
-    let cloth = generate_cloth_mesh(spec.resolution);
+fn spawn_cloth(context: &mut LegacySceneContext, spec: LegacyClothSpec) {
+    let cloth = legacy_generate_cloth_mesh(spec.resolution);
     let pose = spec.pose();
 
     let offset = context
@@ -449,21 +456,21 @@ fn spawn_cloth(context: &mut SceneContext, spec: ClothSpec) {
             &cloth,
             pose,
             &spec.attached,
-            FIXED_DELTA,
+            LEGACY_FIXED_DELTA,
         )
         .expect("generated meshes are source-layout grids");
 
-    let mesh = context.meshes.add(build_cloth_mesh(&cloth));
+    let mesh = context.meshes.add(legacy_build_cloth_mesh(&cloth));
     let material = context
         .materials
         .add(cloth_material(&context.asset_server, spec.texture));
 
     context.commands.spawn((
-        SceneEntity,
+        LegacySceneEntity,
         Mesh3d(mesh.clone()),
         MeshMaterial3d(material),
         Transform::IDENTITY,
-        ClothVisual {
+        LegacyClothVisual {
             mesh,
             offset: offset as usize,
             count: cloth.positions.len(),
@@ -489,19 +496,22 @@ pub(crate) fn cloth_material(asset_server: &AssetServer, texture: u32) -> Standa
 }
 
 /// `Scene.hpp::SpawnCameraAndLight`, rebuilt with every scene.
-fn spawn_camera_and_light(context: &mut SceneContext) {
-    // camera position (0.35, 3.3, 7.2) / euler (-21, 2.25, 0) in degrees. `OrbitCameraPlugin`
+fn spawn_camera_and_light(context: &mut LegacySceneContext) {
+    // camera position (0.35, 3.3, 7.2) / euler (-21, 2.25, 0) in degrees. `LegacyOrbitCameraPlugin`
     // takes over the transform when it is added; without it the camera stays at this pose.
-    let orbit = OrbitCamera::source();
-    context
-        .commands
-        .spawn((SceneEntity, Camera3d::default(), orbit.transform(), orbit));
+    let orbit = LegacyOrbitCamera::source();
+    context.commands.spawn((
+        LegacySceneEntity,
+        Camera3d::default(),
+        orbit.transform(),
+        orbit,
+    ));
 
     // spot light at (2.5, 5, 2.5). the source uses its own euler convention for the direction, so
     // we aim at the cloth instead.
     context
         .commands
-        .spawn((SceneEntity, comparison_spotlight()));
+        .spawn((LegacySceneEntity, comparison_spotlight()));
 }
 
 /// Shared CPU/GPU spotlight, including the CPU scene's aim and shadow settings.
@@ -540,25 +550,25 @@ pub(crate) fn comparison_ground_material() -> StandardMaterial {
 }
 
 /// `Scene.hpp::SpawnInfinitePlane`: a large quad for display, plus the `Plane` SDF at `y = 0`.
-fn spawn_ground(context: &mut SceneContext) {
+fn spawn_ground(context: &mut LegacySceneContext) {
     let mesh = context
         .meshes
         .add(Plane3d::default().mesh().size(50.0, 50.0));
     let material = context.materials.add(comparison_ground_material());
 
     context.commands.spawn((
-        SceneEntity,
+        LegacySceneEntity,
         Mesh3d(mesh),
         MeshMaterial3d(material),
         Transform::IDENTITY,
-        ClothCollider {
-            kind: ColliderKind::Plane,
+        LegacyClothCollider {
+            kind: LegacyColliderKind::Plane,
             radius: 0.0,
             half_extents: Vec3::ONE,
-            motion: ColliderMotion::Static,
+            motion: LegacyColliderMotion::Static,
             enabled: true,
         },
-        ColliderHistory(Mat4::IDENTITY),
+        LegacyColliderHistory(Mat4::IDENTITY),
     ));
 }
 
@@ -573,35 +583,35 @@ pub(crate) fn comparison_collider_material() -> StandardMaterial {
 
 /// `Scene.hpp::SpawnSphere` with the scene's radius, motion and `Collider::enabled`.
 fn spawn_sphere(
-    context: &mut SceneContext,
+    context: &mut LegacySceneContext,
     radius: f32,
     position: Vec3,
-    motion: ColliderMotion,
+    motion: LegacyColliderMotion,
     enabled: bool,
 ) {
     let mesh = context.meshes.add(Sphere::new(radius));
     let material = context.materials.add(comparison_collider_material());
 
     context.commands.spawn((
-        SceneEntity,
+        LegacySceneEntity,
         Mesh3d(mesh),
         MeshMaterial3d(material),
         Transform::from_translation(position),
-        ClothCollider {
-            kind: ColliderKind::Sphere,
+        LegacyClothCollider {
+            kind: LegacyColliderKind::Sphere,
             radius,
             half_extents: Vec3::ONE,
             motion,
             enabled,
         },
         // a fresh collider starts with zero relative velocity (`Collider::Start`)
-        ColliderHistory(Mat4::from_translation(position)),
+        LegacyColliderHistory(Mat4::from_translation(position)),
     ));
 }
 
 /// `Scene.hpp::SpawnColoredCube`. `half_extent` is the world half size; `size` doubles it back into
 /// the source's unit-cube `transform.scale`.
-fn spawn_cube(context: &mut SceneContext, half_extent: f32, position: Vec3) {
+fn spawn_cube(context: &mut LegacySceneContext, half_extent: f32, position: Vec3) {
     let mesh = context.meshes.add(Cuboid::new(
         half_extent * 2.0,
         half_extent * 2.0,
@@ -610,18 +620,18 @@ fn spawn_cube(context: &mut SceneContext, half_extent: f32, position: Vec3) {
     let material = context.materials.add(comparison_collider_material());
 
     context.commands.spawn((
-        SceneEntity,
+        LegacySceneEntity,
         Mesh3d(mesh),
         MeshMaterial3d(material),
         Transform::from_translation(position),
-        ClothCollider {
-            kind: ColliderKind::Cube,
+        LegacyClothCollider {
+            kind: LegacyColliderKind::Cube,
             radius: 0.0,
             half_extents: Vec3::splat(half_extent),
-            motion: ColliderMotion::Static,
+            motion: LegacyColliderMotion::Static,
             enabled: true,
         },
-        ColliderHistory(Mat4::from_translation(position)),
+        LegacyColliderHistory(Mat4::from_translation(position)),
     ));
 }
 

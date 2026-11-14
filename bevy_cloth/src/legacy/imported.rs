@@ -12,21 +12,21 @@ use bevy::{
 use std::{collections::HashMap, sync::Arc};
 
 use super::{
-    cloth::{ClothPreparation, ClothSim, PreparedCloth},
-    sim::{params::SimParams, solver::Solver},
+    cloth::{LegacyClothPreparation, LegacyClothSim, LegacyPreparedCloth},
+    sim::{params::LegacySimParams, solver::LegacySolver},
 };
-use crate::r#ref::{embed_solver_shader, pipeline::SolverPipeline, solver_gpu::LiveSolver};
+use crate::reference::{embed_solver_shader, pipeline::RefSolverPipeline, solver_gpu::LiveSolver};
 
 /// Per-entity solver settings. Distances/speed are explicit world-space values, not grid-derived.
 #[derive(Component, Clone, Debug)]
-pub struct ClothSolverConfig {
-    pub params: SimParams,
+pub struct LegacyClothSolverConfig {
+    pub params: LegacySimParams,
 }
 
-impl Default for ClothSolverConfig {
+impl Default for LegacyClothSolverConfig {
     fn default() -> Self {
         Self {
-            params: SimParams {
+            params: LegacySimParams {
                 particle_diameter: 0.15,
                 max_speed: 50.0,
                 ..default()
@@ -35,8 +35,8 @@ impl Default for ClothSolverConfig {
     }
 }
 
-impl ClothSolverConfig {
-    fn validate(&self, particle_count: usize, dt: f32) -> Result<SimParams, String> {
+impl LegacyClothSolverConfig {
+    fn validate(&self, particle_count: usize, dt: f32) -> Result<LegacySimParams, String> {
         let mut params = self.params.clone();
         params.num_particles =
             u32::try_from(particle_count).map_err(|_| "imported particle count exceeds u32")?;
@@ -91,16 +91,16 @@ impl ClothSolverConfig {
     }
 }
 
-/// Solver is used only as the existing upload container; no CPU stepping/grid builder is called.
+/// LegacySolver is used only as the existing upload container; no CPU stepping/grid builder is called.
 struct ImportedInitial {
-    solver: Solver,
-    params: SimParams,
+    solver: LegacySolver,
+    params: LegacySimParams,
     dt: f32,
 }
 
 fn imported_initial(
-    prepared: &PreparedCloth,
-    config: &ClothSolverConfig,
+    prepared: &LegacyPreparedCloth,
+    config: &LegacyClothSolverConfig,
     dt: f32,
 ) -> Result<ImportedInitial, String> {
     let count = prepared.positions.len();
@@ -137,7 +137,7 @@ fn imported_initial(
         return Err("imported position exceeds neighbor cell coordinate range".into());
     }
 
-    let mut solver = Solver::default();
+    let mut solver = LegacySolver::default();
     solver.positions = prepared.positions.clone();
     solver.predicted = prepared.positions.clone();
     solver.initial_positions = prepared.positions.clone();
@@ -192,7 +192,7 @@ fn imported_initial(
         }
     }
     // Existing GPU builders repack constraints into their own CSR layout during upload.
-    // PreparedCloth's generic CSR is retained, but is not uploaded directly in this batch.
+    // LegacyPreparedCloth's generic CSR is retained, but is not uploaded directly in this batch.
     Ok(ImportedInitial { solver, params, dt })
 }
 
@@ -234,7 +234,7 @@ impl Plugin for ImportedClothPlugin {
 
     fn finish(&self, app: &mut App) {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<SolverPipeline>();
+            render_app.init_resource::<RefSolverPipeline>();
         }
     }
 }
@@ -244,10 +244,10 @@ fn collect_imported_cloths(
     cloths: Query<
         (
             Entity,
-            Ref<ClothPreparation>,
-            Option<Ref<ClothSolverConfig>>,
+            Ref<LegacyClothPreparation>,
+            Option<Ref<LegacyClothSolverConfig>>,
         ),
-        (With<ClothSim>, With<Mesh3d>),
+        (With<LegacyClothSim>, With<Mesh3d>),
     >,
     mut imported: ResMut<ImportedCloths>,
 ) {
@@ -259,7 +259,7 @@ fn collect_imported_cloths(
         .filter(|&entity| {
             !cloths
                 .get(entity)
-                .is_ok_and(|(_, state, _)| matches!(&*state, ClothPreparation::Ready(_)))
+                .is_ok_and(|(_, state, _)| matches!(&*state, LegacyClothPreparation::Ready(_)))
         })
         .collect();
     for entity in removed {
@@ -267,7 +267,7 @@ fn collect_imported_cloths(
     }
     let dt = time.timestep().as_secs_f32();
     for (entity, state, config) in &cloths {
-        let ClothPreparation::Ready(prepared) = &*state else {
+        let LegacyClothPreparation::Ready(prepared) = &*state else {
             continue;
         };
         let preparation_tick = state.last_changed();
@@ -315,7 +315,7 @@ fn initialize_imported_cloths(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    pipeline: Res<SolverPipeline>,
+    pipeline: Res<RefSolverPipeline>,
 ) {
     let Some(imported) = imported else {
         return;
@@ -386,13 +386,13 @@ fn initialize_imported_cloths(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::legacy::cloth::prepare_mesh;
+    use crate::legacy::cloth::legacy_prepare_mesh;
     use bevy::{
         asset::RenderAssetUsages,
         mesh::{Indices, PrimitiveTopology},
     };
 
-    fn prepared_hinge() -> PreparedCloth {
+    fn prepared_hinge() -> LegacyPreparedCloth {
         let mesh = Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::default(),
@@ -407,7 +407,7 @@ mod tests {
             ],
         )
         .with_inserted_indices(Indices::U32(vec![2, 0, 1, 3, 1, 0]));
-        prepare_mesh(
+        legacy_prepare_mesh(
             &mesh,
             Mat4::from_translation(Vec3::new(3.0, 4.0, 5.0)),
             &[0, 1],
@@ -419,7 +419,7 @@ mod tests {
     fn imported_triangle_constraints_and_attachment_history_are_preserved() {
         let prepared = prepared_hinge();
         let initial =
-            imported_initial(&prepared, &ClothSolverConfig::default(), 1.0 / 60.0).unwrap();
+            imported_initial(&prepared, &LegacyClothSolverConfig::default(), 1.0 / 60.0).unwrap();
         let solver = &initial.solver;
         assert_eq!(solver.positions, prepared.positions);
         assert_eq!(solver.predicted, prepared.positions);
@@ -464,7 +464,7 @@ mod tests {
         let mut prepared = prepared_hinge();
         prepared.pinned_vertices.clear();
         prepared.inv_masses.fill(1.0);
-        let config = ClothSolverConfig::default();
+        let config = LegacyClothSolverConfig::default();
         let initial = imported_initial(&prepared, &config, 0.02).unwrap();
         assert!(initial.solver.constraints.attach.slot_positions.is_empty());
         assert!(initial.solver.constraints.attach.particle_ids.is_empty());
@@ -491,9 +491,9 @@ mod tests {
         let entity = app
             .world_mut()
             .spawn((
-                ClothSim::default(),
+                LegacyClothSim::default(),
                 Mesh3d::default(),
-                ClothPreparation::Ready(Box::new(prepared_hinge())),
+                LegacyClothPreparation::Ready(Box::new(prepared_hinge())),
             ))
             .id();
         let request = |app: &App| {
@@ -513,7 +513,7 @@ mod tests {
             "unchanged inputs must not be repacked"
         );
 
-        let mut config = ClothSolverConfig::default();
+        let mut config = LegacyClothSolverConfig::default();
         config.params.max_speed = 7.0;
         app.world_mut().entity_mut(entity).insert(config);
         app.update();
@@ -525,7 +525,7 @@ mod tests {
         );
         app.world_mut()
             .entity_mut(entity)
-            .remove::<ClothSolverConfig>();
+            .remove::<LegacyClothSolverConfig>();
         app.update();
         let restored = request(&app);
         assert_eq!(
@@ -538,12 +538,14 @@ mod tests {
             .set_timestep_seconds(0.02);
         app.update();
         assert_eq!(request(&app).dt, 0.02);
-        app.world_mut().entity_mut(entity).remove::<ClothSim>();
+        app.world_mut()
+            .entity_mut(entity)
+            .remove::<LegacyClothSim>();
         app.update();
         assert!(app.world().resource::<ImportedCloths>().entries.is_empty());
         app.world_mut()
             .entity_mut(entity)
-            .insert(ClothSim::default());
+            .insert(LegacyClothSim::default());
         app.update();
         let before_despawn = request(&app);
         assert!(!Arc::ptr_eq(&original, &before_despawn));

@@ -4,11 +4,13 @@ use std::time::{Duration, Instant};
 
 use glam::Vec3;
 
-use crate::legacy::sim::{constraints::StretchConstraints, hash::SpatialHash, params::SimParams};
+use crate::legacy::sim::{
+    constraints::LegacyStretchConstraints, hash::LegacySpatialHash, params::LegacySimParams,
+};
 
 /// one step's measurements.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct StepStats {
+pub struct LegacyStepStats {
     pub step_time: Duration,
     /// max particle speed after `Finalize`
     pub max_speed: f32,
@@ -21,7 +23,7 @@ pub struct StepStats {
     pub self_collision_candidates: usize,
 }
 
-pub fn max_speed(velocities: &[Vec3]) -> f32 {
+pub fn legacy_max_speed(velocities: &[Vec3]) -> f32 {
     velocities
         .iter()
         .map(|velocity| velocity.length())
@@ -29,7 +31,7 @@ pub fn max_speed(velocities: &[Vec3]) -> f32 {
 }
 
 /// `(max, avg)` of `|len - rest| / rest`; the source's `stats` panel uses the same ratio.
-pub fn stretch_error(positions: &[Vec3], stretch: &StretchConstraints) -> (f32, f32) {
+pub fn legacy_stretch_error(positions: &[Vec3], stretch: &LegacyStretchConstraints) -> (f32, f32) {
     if stretch.lengths.is_empty() {
         return (0.0, 0.0);
     }
@@ -47,7 +49,7 @@ pub fn stretch_error(positions: &[Vec3], stretch: &StretchConstraints) -> (f32, 
 }
 
 /// `Finalize` clamps `(predicted - positions) / dt`; this counts the particles it would clamp.
-pub fn clamped_count(
+pub fn legacy_clamped_count(
     predicted: &[Vec3],
     positions: &[Vec3],
     delta_time: f32,
@@ -63,35 +65,35 @@ pub fn clamped_count(
 }
 
 /// filled neighbour slots; every contact is stored once per particle.
-pub fn self_collision_candidates(hash: &SpatialHash) -> usize {
+pub fn legacy_self_collision_candidates(hash: &LegacySpatialHash) -> usize {
     (0..hash.num_particles)
         .map(|i| hash.neighbors_of(i).count())
         .sum()
 }
 
-/// collects one step's telemetry; `started` is taken before `Solver::step`.
-pub fn measure(
+/// collects one step's telemetry; `started` is taken before `LegacySolver::step`.
+pub fn legacy_measure(
     positions: &[Vec3],
     velocities: &[Vec3],
     predicted: &[Vec3],
-    stretch: &StretchConstraints,
-    hash: &SpatialHash,
-    params: &SimParams,
+    stretch: &LegacyStretchConstraints,
+    hash: &LegacySpatialHash,
+    params: &LegacySimParams,
     started: Instant,
-) -> StepStats {
-    let (max_stretch_error, avg_stretch_error) = stretch_error(positions, stretch);
+) -> LegacyStepStats {
+    let (max_stretch_error, avg_stretch_error) = legacy_stretch_error(positions, stretch);
 
-    StepStats {
+    LegacyStepStats {
         step_time: started.elapsed(),
-        max_speed: max_speed(velocities),
+        max_speed: legacy_max_speed(velocities),
         max_stretch_error,
         avg_stretch_error,
-        clamped: clamped_count(
+        clamped: legacy_clamped_count(
             predicted,
             positions,
             params.substep_time(params.delta_time),
             params.max_speed,
         ),
-        self_collision_candidates: self_collision_candidates(hash),
+        self_collision_candidates: legacy_self_collision_candidates(hash),
     }
 }

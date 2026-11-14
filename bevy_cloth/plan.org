@@ -52,7 +52,7 @@
    - 若声称性能改善：测量条件、前后数据和代价是否齐全？
 
 * next steps
-  Updated: 2026-11-13. Current work targets =src/xpbd/=, not the historical =src/ref/= Jacobi path.
+  Updated: 2026-11-13. Current work targets =src/xpbd/=, not the historical =src/reference/= Jacobi path.
   目标：CPU 建 BVH，GPU 查询三角网格接触并 refit；SDF 留作后期候选。
   以下十步按逻辑变化逐批审阅、实现和验证，不要求一次完成，也不自动执行 Git commit。
 

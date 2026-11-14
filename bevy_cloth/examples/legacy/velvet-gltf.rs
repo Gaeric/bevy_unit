@@ -9,8 +9,8 @@ use bevy::{
     world_serialization::WorldInstanceReady,
 };
 use bevy_cloth::legacy::{
-    ClothMeshCollider, ClothPreparation, ClothSim, ClothSolverConfig, GpuClothPlugin,
-    OrbitCameraPlugin, demo::OrbitCamera,
+    LegacyClothMeshCollider, LegacyClothPreparation, LegacyClothSim, LegacyClothSolverConfig,
+    LegacyGpuClothPlugin, LegacyOrbitCameraPlugin, demo::LegacyOrbitCamera,
 };
 use std::path::Path;
 
@@ -46,7 +46,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins((GpuClothPlugin, OrbitCameraPlugin))
+        .add_plugins((LegacyGpuClothPlugin, LegacyOrbitCameraPlugin))
         .add_observer(mark_instance_roles)
         .add_systems(Startup, setup)
         .add_systems(Update, draw_preparation)
@@ -83,7 +83,7 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
         }
     }
 
-    let mut orbit = OrbitCamera::source();
+    let mut orbit = LegacyOrbitCamera::source();
     orbit.target.x += 1.5;
     orbit.distance = 10.0;
 
@@ -139,9 +139,10 @@ fn mark_instance_roles(
 
                 match find_cloth_pins(mesh) {
                     Ok(pinned_vertices) => {
-                        commands
-                            .entity(entity)
-                            .insert((ClothSim { pinned_vertices }, ClothSolverConfig::default()));
+                        commands.entity(entity).insert((
+                            LegacyClothSim { pinned_vertices },
+                            LegacyClothSolverConfig::default(),
+                        ));
                     }
                     Err(error) => {
                         error!(?entity, %error, "test asset pin selection failed");
@@ -149,7 +150,7 @@ fn mark_instance_roles(
                 }
             }
             AssetRole::Sphere => {
-                commands.entity(entity).insert(ClothMeshCollider);
+                commands.entity(entity).insert(LegacyClothMeshCollider);
             }
         }
     }
@@ -259,9 +260,9 @@ mod tests {
     }
 }
 
-fn draw_preparation(mut gizmos: Gizmos, cloths: Query<&ClothPreparation>) {
+fn draw_preparation(mut gizmos: Gizmos, cloths: Query<&LegacyClothPreparation>) {
     for state in &cloths {
-        let ClothPreparation::Ready(data) = state else {
+        let LegacyClothPreparation::Ready(data) = state else {
             continue;
         };
         for edge in &data.topology.stretch {

@@ -30,15 +30,15 @@
   | =src/xpbd/= | 当前 XPBD 主线 | 当前工作与验证边界见 =plan.org= |
   | =src/legacy/sim/= | CPU 求解、网格与约束生成、碰撞和空间哈希 | 已有实现与测试，不是独立正确性标准 |
   | =src/legacy/demo/= | 场景、面板、相机、抓取和 Mesh 写回 | 交互演示仍调用 CPU 求解器 |
-  | =src/ref/= | 保留的 GPU 参考求解、动态邻居查找、诊断与 live 输出 | 七场景及呈现已实现；隔离all-targets检查通过，设备验收待运行 |
+  | =src/reference/= | 保留的 GPU 参考求解、动态邻居查找、诊断与 live 输出 | 七场景及呈现已实现；隔离all-targets检查通过，设备验收待运行 |
   | =src/legacy/cloth/=、=src/legacy/imported.rs= | 旧 GLB 布料支线及其导入准备 | cloth 依赖 imported，不是当前 XPBD 主线 |
-  | =examples/ref/= | GPU 参考入口 | =velvet-ref=、=velvet-ref-live=、=velvet-ref-scenes= |
+  | =examples/reference/= | GPU 参考入口 | =velvet-ref=、=velvet-ref-live=、=velvet-ref-scenes= |
   | =examples/legacy/= | 旧 CPU 演示与 GLB 入口 | 保留原 example 名称 |
   | =tests/legacy/= | 旧 CPU 与外围测试 | 测试存在或曾通过，不等于全部物理目标已验收 |
 
-  =src/ref/= 与 =src/legacy/= 并列；原 =src/gpu/imported.rs= 已移至 =src/legacy/imported.rs=。
-  ref 仍依赖 legacy 的 CPU 参考与共享场景，不能直接删除 legacy。
-  以下求解和演示细节描述保留的 ref/legacy 参考实现，不代表当前 XPBD 主线。
+  =src/reference/= 与 =src/legacy/= 并列；原 =src/gpu/imported.rs= 已移至 =src/legacy/imported.rs=。
+  reference 仍依赖 legacy 的 CPU 参考与共享场景，不能直接删除 legacy。
+  以下求解和演示细节描述保留的 reference/legacy 参考实现，不代表当前 XPBD 主线。
 
   =velvet-ref= 是一次性无窗口对照；=velvet-ref-live= 保留小型 fixture 实时入口。
   =velvet-ref-scenes= 是共享七场景的独立 GPU 入口；CPU =velvet-scenes= 保留七场景。
@@ -132,7 +132,7 @@
   启动参数：=--resolution= 2..128（默认16），=--layers= 1..8（2），=--substeps= 1..16（2），
   =--iterations= 1..64（4），=--neighbors= 1..256（64），=--hash-interval= 1..64（3），
   =--no-self-collision=、=--paused=、=--timing=（默认自碰撞开、运行中、计时关）。
-  代码接入可在 SolverLivePlugin 前插入 =LiveConfig=；仅启动生效，不能运行时改字段来调整已分配 Mesh/buffers。
+  代码接入可在 =RefSolverLivePlugin= 前插入 =RefLiveConfig=；仅启动生效，不能运行时改字段来调整已分配 Mesh/buffers。
   分辨率改变直径、总质量和速度上限，不是物理等价细化；允许范围也不保证设备容量/稳定性，超出 binding 限制会明确拒绝。
   静态碰撞器参照与求解共用 fixture 定义：地面有限网格、球体三个大圆、旋转盒体十二条边。
   参照只画本体，不含 collision_margin 或盒体圆角投影区域；不能据线框判定真实穿透深度。

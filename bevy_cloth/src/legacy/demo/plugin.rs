@@ -6,51 +6,51 @@ use bevy::prelude::*;
 use glam::{Mat4, Vec3};
 
 use crate::legacy::{
-    demo::{render::sync_cloth_mesh, scenes},
+    demo::{render::legacy_sync_cloth_mesh, scenes},
     sim::{
-        collide::{ColliderKind, SdfCollider},
-        params::{SimParams, SimState, SimTime},
-        solver::Solver,
-        stats::{StepStats, measure},
+        collide::{LegacyColliderKind, LegacySdfCollider},
+        params::{LegacySimParams, LegacySimState, LegacySimTime},
+        solver::LegacySolver,
+        stats::{LegacyStepStats, legacy_measure},
     },
 };
 
 /// the source's `Timer::fixedDeltaTime()`.
-pub const FIXED_HZ: f64 = 60.0;
+pub const LEGACY_FIXED_HZ: f64 = 60.0;
 
 /// `Timer::fixedDeltaTime()`, as a constant so that startup does not depend on when bevy fills
 /// `Time<Fixed>` in.
-pub const FIXED_DELTA: f32 = 1.0 / FIXED_HZ as f32;
+pub const LEGACY_FIXED_DELTA: f32 = 1.0 / LEGACY_FIXED_HZ as f32;
 
 /// every cloth in the scene shares one solver (`VtClothSolverGPU`).
 #[derive(Resource, Default)]
-pub struct SolverRes(pub Solver);
+pub struct LegacySolverRes(pub LegacySolver);
 
 /// `sim` stays bevy free, so `Global::simParams` is only wrapped here.
 #[derive(Resource, Default)]
-pub struct SimParamsRes(pub SimParams);
+pub struct LegacySimParamsRes(pub LegacySimParams);
 
 /// scene animation clock: the source uses `physicsFrameCount * fixedDeltaTime`, never wall time
 /// (plan.org §4-16).
 #[derive(Resource, Default, Deref, DerefMut)]
-pub struct SimClock(pub SimTime);
+pub struct LegacySimClock(pub LegacySimTime);
 
 /// the analytic colliders collected for the current fixed step.
 #[derive(Resource, Default, Deref, DerefMut)]
-pub struct Colliders(pub Vec<SdfCollider>);
+pub struct LegacyColliders(pub Vec<LegacySdfCollider>);
 
 /// `VtGameState`: pause / single step / debug view toggles.
 #[derive(Resource, Default, Deref, DerefMut)]
-pub struct SimStateRes(pub SimState);
+pub struct LegacySimStateRes(pub LegacySimState);
 
 /// the last fixed step's telemetry (`plan.org` §5.2).
 #[derive(Resource, Default, Deref, DerefMut)]
-pub struct StatsRes(pub StepStats);
+pub struct LegacyStatsRes(pub LegacyStepStats);
 
 /// CPU solve time per completed fixed tick, published in non-overlapping 64-tick windows.
 /// Each sample includes all substeps and normals, but excludes diagnostics and mesh writeback.
 #[derive(Resource, Default)]
-pub struct CpuStepTiming {
+pub struct LegacyCpuStepTiming {
     /// Mean milliseconds per tick in the last completed window; absent until 64 ticks finish.
     pub avg_ms: Option<f64>,
     /// Completed ticks accumulated toward the next published mean.
@@ -58,7 +58,7 @@ pub struct CpuStepTiming {
     elapsed: std::time::Duration,
 }
 
-impl CpuStepTiming {
+impl LegacyCpuStepTiming {
     pub const WINDOW_TICKS: u32 = 64;
 
     fn record(&mut self, elapsed: std::time::Duration) {
@@ -79,8 +79,8 @@ impl CpuStepTiming {
 /// `FixedUpdate` order. named so that a later move into another physics crate's schedule is one
 /// `.in_set(...)` (plan.org §8-5).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ClothSystems {
-    /// advance the clock, move the colliders, rebuild the `SdfCollider`s
+pub enum LegacyClothSystems {
+    /// advance the clock, move the colliders, rebuild the `LegacySdfCollider`s
     Collide,
     Step,
     Writeback,
@@ -88,43 +88,43 @@ pub enum ClothSystems {
 
 /// a cloth entity: the mesh that renders it, plus the slice of the solver it owns.
 #[derive(Component)]
-pub struct ClothVisual {
+pub struct LegacyClothVisual {
     pub mesh: Handle<Mesh>,
     pub offset: usize,
     pub count: usize,
 }
 
 /// analytic collider mirror. the shape size is stored explicitly and folded into the source's
-/// `scale` convention only when the `SdfCollider` is built (plan.org §8-3).
+/// `scale` convention only when the `LegacySdfCollider` is built (plan.org §8-3).
 #[derive(Component)]
-pub struct ClothCollider {
-    pub kind: ColliderKind,
+pub struct LegacyClothCollider {
+    pub kind: LegacyColliderKind,
     /// sphere radius
     pub radius: f32,
     /// cube half extents
     pub half_extents: Vec3,
-    pub motion: ColliderMotion,
+    pub motion: LegacyColliderMotion,
     /// `Collider::enabled`; a disabled collider still takes its slot (see `collect_colliders`)
     pub enabled: bool,
 }
 
-impl ClothCollider {
+impl LegacyClothCollider {
     /// the source's `transform->scale`.
     ///
     /// a sphere reads `scale.x` as its radius. a cube scales a *unit* cube (its mesh spans
     /// `[-0.5, 0.5]`), so `scale == 2 * half_extent`.
     pub fn size(&self) -> Vec3 {
         match self.kind {
-            ColliderKind::Sphere => Vec3::splat(self.radius),
-            ColliderKind::Cube => self.half_extents * 2.0,
-            ColliderKind::Plane => Vec3::ONE,
+            LegacyColliderKind::Sphere => Vec3::splat(self.radius),
+            LegacyColliderKind::Cube => self.half_extents * 2.0,
+            LegacyColliderKind::Plane => Vec3::ONE,
         }
     }
 }
 
 /// how a collider moves, as a function of the fixed clock (the source's `animationUpdate`).
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ColliderMotion {
+pub enum LegacyColliderMotion {
     /// `SceneClothAttach` / `Multiple` / `HighResolution`
     Static,
     /// `SceneClothCollision`: `z = -cos(2t)` at a constant height
@@ -135,34 +135,34 @@ pub enum ColliderMotion {
     SwirlSlot,
 }
 
-/// the model matrix of the previous fixed step. `SdfCollider::velocity_at` needs it to recover the
+/// the model matrix of the previous fixed step. `LegacySdfCollider::velocity_at` needs it to recover the
 /// surface velocity that the collision friction uses (`Collider::FixedUpdate`).
 #[derive(Component)]
-pub struct ColliderHistory(pub Mat4);
+pub struct LegacyColliderHistory(pub Mat4);
 
-pub struct ClothPlugin;
+pub struct LegacyClothPlugin;
 
-impl Plugin for ClothPlugin {
+impl Plugin for LegacyClothPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Time::<Fixed>::from_hz(FIXED_HZ))
+        app.insert_resource(Time::<Fixed>::from_hz(LEGACY_FIXED_HZ))
             // `AmbientLight` is a *camera* component in 0.20 (`#[require(Camera)]`); the global one
             // is this resource. spawning the component instead would add a spurious camera.
             .insert_resource(scenes::comparison_ambient_light())
-            .init_resource::<SolverRes>()
-            .init_resource::<SimParamsRes>()
-            .init_resource::<SimStateRes>()
-            .init_resource::<SimClock>()
-            .init_resource::<Colliders>()
-            .init_resource::<StatsRes>()
-            .init_resource::<CpuStepTiming>()
-            .init_resource::<scenes::CurrentScene>()
-            .init_resource::<scenes::PendingScene>()
+            .init_resource::<LegacySolverRes>()
+            .init_resource::<LegacySimParamsRes>()
+            .init_resource::<LegacySimStateRes>()
+            .init_resource::<LegacySimClock>()
+            .init_resource::<LegacyColliders>()
+            .init_resource::<LegacyStatsRes>()
+            .init_resource::<LegacyCpuStepTiming>()
+            .init_resource::<scenes::LegacyCurrentScene>()
+            .init_resource::<scenes::LegacyPendingScene>()
             .configure_sets(
                 FixedUpdate,
                 (
-                    ClothSystems::Collide,
-                    ClothSystems::Step,
-                    ClothSystems::Writeback,
+                    LegacyClothSystems::Collide,
+                    LegacyClothSystems::Step,
+                    LegacyClothSystems::Writeback,
                 )
                     .chain(),
             )
@@ -170,43 +170,43 @@ impl Plugin for ClothPlugin {
                 FixedUpdate,
                 (advance_clock, animate_colliders, collect_colliders)
                     .chain()
-                    .run_if(simulation_should_run)
-                    .in_set(ClothSystems::Collide),
+                    .run_if(legacy_simulation_should_run)
+                    .in_set(LegacyClothSystems::Collide),
             )
             .add_systems(
                 FixedUpdate,
                 step_solver
-                    .run_if(simulation_should_run)
-                    .in_set(ClothSystems::Step),
+                    .run_if(legacy_simulation_should_run)
+                    .in_set(LegacyClothSystems::Step),
             )
             .add_systems(
                 FixedUpdate,
                 (writeback_cloth_mesh, clear_step_request)
                     .chain()
-                    .in_set(ClothSystems::Writeback),
+                    .in_set(LegacyClothSystems::Writeback),
             )
             // the scene registry owns spawn / switch / reset; `Update` applies pending switches
-            .add_systems(Startup, scenes::setup_initial_scene)
+            .add_systems(Startup, scenes::legacy_setup_initial_scene)
             .add_systems(
                 Update,
-                reset_cpu_step_timing.before(scenes::apply_scene_switch),
+                reset_cpu_step_timing.before(scenes::legacy_apply_scene_switch),
             )
-            .add_systems(Update, scenes::apply_scene_switch);
+            .add_systems(Update, scenes::legacy_apply_scene_switch);
     }
 }
 
 /// Scene switching replaces the solver, including when reset reloads the same scene.
 /// Check the request before it is consumed, not solver change detection (every tick writes it).
 pub(super) fn reset_cpu_step_timing(
-    pending: Res<scenes::PendingScene>,
-    mut timing: ResMut<CpuStepTiming>,
+    pending: Res<scenes::LegacyPendingScene>,
+    mut timing: ResMut<LegacyCpuStepTiming>,
 ) {
     if pending.0.is_some() {
         timing.reset();
     }
 }
 
-fn advance_clock(mut clock: ResMut<SimClock>, time: Res<Time<Fixed>>) {
+fn advance_clock(mut clock: ResMut<LegacySimClock>, time: Res<Time<Fixed>>) {
     clock.0.advance(time.delta_secs());
 }
 
@@ -215,27 +215,27 @@ fn advance_clock(mut clock: ResMut<SimClock>, time: Res<Time<Fixed>>) {
 /// `SceneClothSwirl` animates the cloth's attachment slot from here, so the sphere and the slot
 /// always carry the same value (the source sets both in one callback).
 fn animate_colliders(
-    clock: Res<SimClock>,
-    mut solver: ResMut<SolverRes>,
-    mut colliders: Query<(&ClothCollider, &mut Transform)>,
+    clock: Res<LegacySimClock>,
+    mut solver: ResMut<LegacySolverRes>,
+    mut colliders: Query<(&LegacyClothCollider, &mut Transform)>,
 ) {
     let t = clock.0.seconds();
 
     for (collider, mut transform) in &mut colliders {
         match collider.motion {
-            ColliderMotion::Static => {}
-            ColliderMotion::SweepZ => {
-                transform.translation = scenes::sweep_z_position(collider.radius, t);
+            LegacyColliderMotion::Static => {}
+            LegacyColliderMotion::SweepZ => {
+                transform.translation = scenes::legacy_sweep_z_position(collider.radius, t);
             }
-            ColliderMotion::FrictionSweep => {
-                let (position, rotation) = scenes::friction_sweep_pose(collider.radius, t);
+            LegacyColliderMotion::FrictionSweep => {
+                let (position, rotation) = scenes::legacy_friction_sweep_pose(collider.radius, t);
                 if let Some(position) = position {
                     transform.translation = position;
                 }
                 transform.rotation = rotation;
             }
-            ColliderMotion::SwirlSlot => {
-                let position = scenes::swirl_slot_position(t);
+            LegacyColliderMotion::SwirlSlot => {
+                let position = scenes::legacy_swirl_slot_position(t);
 
                 if let Some(slot) = solver.0.constraints.attach.slot_positions.first_mut() {
                     *slot = position;
@@ -249,8 +249,8 @@ fn animate_colliders(
 /// `VtClothSolverGPU.hpp::UpdateColliders`: refresh every collider *before* the solver reads them.
 fn collect_colliders(
     time: Res<Time<Fixed>>,
-    mut colliders: ResMut<Colliders>,
-    mut query: Query<(&ClothCollider, &Transform, &mut ColliderHistory)>,
+    mut colliders: ResMut<LegacyColliders>,
+    mut query: Query<(&LegacyClothCollider, &Transform, &mut LegacyColliderHistory)>,
 ) {
     let delta_time = time.delta_secs();
     colliders.0.clear();
@@ -259,12 +259,12 @@ fn collect_colliders(
         // `UpdateColliders` `continue`s past disabled colliders, leaving their slots
         // zero-initialized; the kernel reads that as a tiny sphere at the origin (plan.org §6)
         if !collider.enabled {
-            colliders.0.push(SdfCollider::disabled());
+            colliders.0.push(LegacySdfCollider::disabled());
             continue;
         }
 
         let model = transform.to_matrix() * Mat4::from_scale(collider.size());
-        colliders.0.push(SdfCollider::with_history(
+        colliders.0.push(LegacySdfCollider::with_history(
             collider.kind,
             model,
             history.0,
@@ -276,11 +276,11 @@ fn collect_colliders(
 
 fn step_solver(
     time: Res<Time<Fixed>>,
-    params: Res<SimParamsRes>,
-    colliders: Res<Colliders>,
-    mut solver: ResMut<SolverRes>,
-    mut stats: ResMut<StatsRes>,
-    mut timing: ResMut<CpuStepTiming>,
+    params: Res<LegacySimParamsRes>,
+    colliders: Res<LegacyColliders>,
+    mut solver: ResMut<LegacySolverRes>,
+    mut stats: ResMut<LegacyStatsRes>,
+    mut timing: ResMut<LegacyCpuStepTiming>,
 ) {
     if solver.0.num_particles() == 0 {
         return;
@@ -291,7 +291,7 @@ fn step_solver(
     let elapsed = started.elapsed();
     timing.record(elapsed);
 
-    stats.0 = measure(
+    stats.0 = legacy_measure(
         &solver.0.positions,
         &solver.0.velocities,
         &solver.0.predicted,
@@ -303,24 +303,24 @@ fn step_solver(
 }
 
 /// `VtGameState`: a paused simulation only advances when a single step was requested.
-pub fn simulation_should_run(state: Res<SimStateRes>) -> bool {
+pub fn legacy_simulation_should_run(state: Res<LegacySimStateRes>) -> bool {
     !state.0.pause || state.0.step
 }
 
 /// consume the one-shot step request so the next fixed tick waits for another key press.
-fn clear_step_request(mut state: ResMut<SimStateRes>) {
+fn clear_step_request(mut state: ResMut<LegacySimStateRes>) {
     state.0.step = false;
 }
 
 #[cfg(test)]
 mod cpu_step_timing_tests {
-    use super::CpuStepTiming;
+    use super::LegacyCpuStepTiming;
     use std::time::Duration;
 
     #[test]
     fn publishes_only_after_64_completed_ticks() {
-        let mut timing = CpuStepTiming::default();
-        for sample in 1..CpuStepTiming::WINDOW_TICKS {
+        let mut timing = LegacyCpuStepTiming::default();
+        for sample in 1..LegacyCpuStepTiming::WINDOW_TICKS {
             timing.record(Duration::from_millis(2));
             assert_eq!(timing.samples, sample);
             assert_eq!(timing.avg_ms, None);
@@ -332,7 +332,7 @@ mod cpu_step_timing_tests {
 
     #[test]
     fn weights_ticks_equally_and_publishes_nonoverlapping_windows() {
-        let mut timing = CpuStepTiming::default();
+        let mut timing = LegacyCpuStepTiming::default();
         // Different frame groupings do not matter: each completed fixed tick has equal weight.
         for ticks_in_frame in [1, 3, 20, 40] {
             for _ in 0..ticks_in_frame {
@@ -352,7 +352,7 @@ mod cpu_step_timing_tests {
 
     #[test]
     fn reset_clears_published_and_partial_windows() {
-        let mut timing = CpuStepTiming::default();
+        let mut timing = LegacyCpuStepTiming::default();
         for _ in 0..70 {
             timing.record(Duration::from_millis(9));
         }
@@ -362,7 +362,7 @@ mod cpu_step_timing_tests {
         assert_eq!(timing.avg_ms, None);
         assert_eq!(timing.samples, 0);
         assert_eq!(timing.elapsed, Duration::ZERO);
-        for _ in 0..CpuStepTiming::WINDOW_TICKS {
+        for _ in 0..LegacyCpuStepTiming::WINDOW_TICKS {
             timing.record(Duration::from_millis(1));
         }
         assert_eq!(timing.avg_ms, Some(1.0));
@@ -371,8 +371,8 @@ mod cpu_step_timing_tests {
 
 fn writeback_cloth_mesh(
     mut meshes: ResMut<Assets<Mesh>>,
-    solver: Res<SolverRes>,
-    cloths: Query<&ClothVisual>,
+    solver: Res<LegacySolverRes>,
+    cloths: Query<&LegacyClothVisual>,
 ) {
     for cloth in &cloths {
         let Some(mut mesh) = meshes.get_mut(&cloth.mesh) else {
@@ -380,7 +380,7 @@ fn writeback_cloth_mesh(
         };
 
         let particles = cloth.offset..cloth.offset + cloth.count;
-        sync_cloth_mesh(
+        legacy_sync_cloth_mesh(
             &mut mesh,
             &solver.0.positions[particles.clone()],
             &solver.0.normals[particles],

@@ -6,6 +6,10 @@ pub(crate) mod imported;
 pub mod sim;
 
 pub use cloth::{
-    ClothMeshCollider, ClothPreparation, ClothSim, ClothSolverConfig, GpuClothPlugin, PreparedCloth,
+    LegacyClothMeshCollider, LegacyClothPreparation, LegacyClothSim, LegacyClothSolverConfig,
+    LegacyGpuClothPlugin, LegacyPreparedCloth,
 };
-pub use demo::{ClothInputPlugin, ClothPlugin, ClothUiPlugin, MouseGrabPlugin, OrbitCameraPlugin};
+pub use demo::{
+    LegacyClothInputPlugin, LegacyClothPlugin, LegacyClothUiPlugin, LegacyMouseGrabPlugin,
+    LegacyOrbitCameraPlugin,
+};

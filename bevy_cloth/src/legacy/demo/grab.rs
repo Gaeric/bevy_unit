@@ -13,13 +13,16 @@ use bevy::{
 use glam::Vec3;
 
 use crate::legacy::{
-    demo::plugin::{ClothSystems, FIXED_DELTA, SimParamsRes, SolverRes, simulation_should_run},
-    sim::solver::Solver,
+    demo::plugin::{
+        LEGACY_FIXED_DELTA, LegacyClothSystems, LegacySimParamsRes, LegacySolverRes,
+        legacy_simulation_should_run,
+    },
+    sim::solver::LegacySolver,
 };
 
 /// `MouseGrabber`'s private state (`m_isGrabbing` / `m_grabbedVertexMass` / `m_rayCollision`).
 #[derive(Resource, Default)]
-pub struct MouseGrab {
+pub struct LegacyMouseGrab {
     grabbed: Option<GrabbedParticle>,
 }
 
@@ -34,7 +37,7 @@ struct GrabbedParticle {
     distance: f32,
 }
 
-impl MouseGrab {
+impl LegacyMouseGrab {
     /// the particle currently held by the mouse, if any (`m_rayCollision.objectIndex`).
     pub fn index(&self) -> Option<usize> {
         self.grabbed.map(|grabbed| grabbed.index)
@@ -57,34 +60,34 @@ struct PickContext<'w, 's> {
     window: Single<'w, 's, &'static Window>,
 }
 
-pub struct MouseGrabPlugin;
+pub struct LegacyMouseGrabPlugin;
 
-impl Plugin for MouseGrabPlugin {
+impl Plugin for LegacyMouseGrabPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MouseGrab>()
+        app.init_resource::<LegacyMouseGrab>()
             // `VtClothSolverGPU::Update`: a click picks or releases, once per rendered frame. the
             // source skips every actor update while paused, so the pick pauses too.
             .add_systems(
                 Update,
-                handle_mouse_interaction.run_if(simulation_should_run),
+                handle_mouse_interaction.run_if(legacy_simulation_should_run),
             )
             // `VtClothSolverGPU::FixedUpdate`: the drag sits in the collide stage, so it lands
-            // before `ClothSystems::Step`.
+            // before `LegacyClothSystems::Step`.
             .add_systems(
                 FixedUpdate,
                 update_grabbed_vertex
-                    .run_if(simulation_should_run)
-                    .in_set(ClothSystems::Collide),
+                    .run_if(legacy_simulation_should_run)
+                    .in_set(LegacyClothSystems::Collide),
             );
     }
 }
 
 /// `MouseGrabber::HandleMouseInteraction`.
 fn handle_mouse_interaction(
-    mut grab: ResMut<MouseGrab>,
-    params: Res<SimParamsRes>,
+    mut grab: ResMut<LegacyMouseGrab>,
+    params: Res<LegacySimParamsRes>,
     context: PickContext,
-    mut solver: ResMut<SolverRes>,
+    mut solver: ResMut<LegacySolverRes>,
 ) {
     let (camera, camera_transform) = *context.camera;
 
@@ -119,9 +122,9 @@ fn handle_mouse_interaction(
 
 /// `MouseGrabber::UpdateGrappedVertex`.
 fn update_grabbed_vertex(
-    grab: Res<MouseGrab>,
+    grab: Res<LegacyMouseGrab>,
     context: PickContext,
-    mut solver: ResMut<SolverRes>,
+    mut solver: ResMut<LegacySolverRes>,
 ) {
     let Some(grabbed) = grab.grabbed else {
         return;
@@ -136,17 +139,17 @@ fn update_grabbed_vertex(
     };
 
     let mouse_position = origin + direction * grabbed.distance;
-    let target = grab_target(mouse_position, current);
+    let target = legacy_grab_target(mouse_position, current);
 
     // the source also back-computes the velocity the next `Finalize` would have derived, so the
     // particle keeps the drag's momentum after release
     solver.0.positions[grabbed.index] = target;
-    solver.0.velocities[grabbed.index] = (target - current) / FIXED_DELTA;
+    solver.0.velocities[grabbed.index] = (target - current) / LEGACY_FIXED_DELTA;
 }
 
 /// picks the particle under the cursor and remembers its inverse mass for the release.
 fn pick_particle(
-    solver: &Solver,
+    solver: &LegacySolver,
     particle_diameter: f32,
     camera: &Camera,
     camera_transform: &GlobalTransform,
@@ -154,7 +157,7 @@ fn pick_particle(
 ) -> Option<GrabbedParticle> {
     let (origin, direction) = mouse_ray(camera, camera_transform, window)?;
     let (index, distance) =
-        closest_particle_to_ray(&solver.positions, origin, direction, particle_diameter)?;
+        legacy_closest_particle_to_ray(&solver.positions, origin, direction, particle_diameter)?;
 
     Some(GrabbedParticle {
         index,
@@ -179,7 +182,7 @@ fn mouse_ray(
 /// `particle_diameter`, keyed on the distance along the ray.
 ///
 /// returns the particle index and `distanceToOrigin`.
-pub fn closest_particle_to_ray(
+pub fn legacy_closest_particle_to_ray(
     positions: &[Vec3],
     origin: Vec3,
     direction: Vec3,
@@ -204,7 +207,7 @@ pub fn closest_particle_to_ray(
 
 /// `Helper::Lerp(mousePosition, currentPosition, 0.8)`: the particle mostly stays put and drifts a
 /// fifth of the way toward the cursor each fixed step.
-pub fn grab_target(mouse_position: Vec3, current: Vec3) -> Vec3 {
+pub fn legacy_grab_target(mouse_position: Vec3, current: Vec3) -> Vec3 {
     mouse_position.lerp(current, 0.8)
 }
 

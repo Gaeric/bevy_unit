@@ -1,6 +1,6 @@
 //! spatial hash against brute force, plus the layout / sentinel / clamp rules (plan.org §5.1).
 
-use bevy_cloth::legacy::sim::{hash::SpatialHash, params::SimParams};
+use bevy_cloth::legacy::sim::{hash::LegacySpatialHash, params::LegacySimParams};
 use glam::Vec3;
 
 /// xorshift32, so the point sets repeat exactly without pulling in `rand`.
@@ -21,8 +21,8 @@ impl Rng {
     }
 }
 
-fn params(max_num_neighbors: u32, particle_diameter: f32, cell_scalar: f32) -> SimParams {
-    SimParams {
+fn params(max_num_neighbors: u32, particle_diameter: f32, cell_scalar: f32) -> LegacySimParams {
+    LegacySimParams {
         max_num_neighbors,
         particle_diameter,
         hash_cell_size_scalar: cell_scalar,
@@ -53,13 +53,13 @@ fn brute_force(
         .collect()
 }
 
-fn rebuild(positions: &[Vec3], originals: &[Vec3], params: &SimParams) -> SpatialHash {
-    let mut hash = SpatialHash::new(params.particle_diameter, positions.len(), params);
+fn rebuild(positions: &[Vec3], originals: &[Vec3], params: &LegacySimParams) -> LegacySpatialHash {
+    let mut hash = LegacySpatialHash::new(params.particle_diameter, positions.len(), params);
     hash.rebuild(positions, originals, params);
     hash
 }
 
-fn collected(hash: &SpatialHash, i: usize) -> Vec<u32> {
+fn collected(hash: &LegacySpatialHash, i: usize) -> Vec<u32> {
     let mut neighbors: Vec<u32> = hash.neighbors_of(i).collect();
     neighbors.sort_unstable();
     neighbors

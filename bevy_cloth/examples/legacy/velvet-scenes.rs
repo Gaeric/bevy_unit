@@ -8,7 +8,8 @@ use bevy::{
     prelude::*,
 };
 use bevy_cloth::legacy::{
-    ClothInputPlugin, ClothPlugin, ClothUiPlugin, MouseGrabPlugin, OrbitCameraPlugin,
+    LegacyClothInputPlugin, LegacyClothPlugin, LegacyClothUiPlugin, LegacyMouseGrabPlugin,
+    LegacyOrbitCameraPlugin,
 };
 
 fn main() {
@@ -27,11 +28,11 @@ fn main() {
             },
         })
         .add_plugins((
-            ClothPlugin,
-            ClothUiPlugin,
-            OrbitCameraPlugin,
-            MouseGrabPlugin,
-            ClothInputPlugin,
+            LegacyClothPlugin,
+            LegacyClothUiPlugin,
+            LegacyOrbitCameraPlugin,
+            LegacyMouseGrabPlugin,
+            LegacyClothInputPlugin,
         ))
         .run();
 }

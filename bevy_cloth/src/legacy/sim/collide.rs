@@ -2,10 +2,10 @@
 
 use glam::{Mat3, Mat4, Quat, Vec3};
 
-use crate::legacy::sim::params::SimParams;
+use crate::legacy::sim::params::LegacySimParams;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ColliderKind {
+pub enum LegacyColliderKind {
     #[default]
     Sphere,
     Plane,
@@ -15,10 +15,10 @@ pub enum ColliderKind {
 /// `VtClothSolverGPU.cuh:10`, `SDFCollider`.
 ///
 /// `cur_transform` is the upper-left 3x3 of the model matrix (glm truncates mat4 -> mat3),
-/// `inv_cur_transform` the inverse of the full mat4. both must be refreshed before `Solver::step`.
+/// `inv_cur_transform` the inverse of the full mat4. both must be refreshed before `LegacySolver::step`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SdfCollider {
-    pub kind: ColliderKind,
+pub struct LegacySdfCollider {
+    pub kind: LegacyColliderKind,
     pub position: Vec3,
     /// the source derives a sphere radius from `scale.x`
     pub scale: Vec3,
@@ -28,10 +28,10 @@ pub struct SdfCollider {
     pub last_transform: Mat4,
 }
 
-impl Default for SdfCollider {
+impl Default for LegacySdfCollider {
     fn default() -> Self {
         Self {
-            kind: ColliderKind::default(),
+            kind: LegacyColliderKind::default(),
             position: Vec3::ZERO,
             scale: Vec3::ONE,
             delta_time: 0.0,
@@ -42,9 +42,9 @@ impl Default for SdfCollider {
     }
 }
 
-impl SdfCollider {
+impl LegacySdfCollider {
     /// `VtClothSolverGPU.hpp:186`, `UpdateColliders`.
-    pub fn from_transform(kind: ColliderKind, transform: Mat4, delta_time: f32) -> Self {
+    pub fn from_transform(kind: LegacyColliderKind, transform: Mat4, delta_time: f32) -> Self {
         Self::with_history(kind, transform, transform, delta_time)
     }
 
@@ -52,7 +52,7 @@ impl SdfCollider {
     /// to recover the surface velocity (`Collider::FixedUpdate` shifts `lastTransform` forward once
     /// per step). a fresh collider passes its own matrix, so it starts with zero relative velocity.
     pub fn with_history(
-        kind: ColliderKind,
+        kind: LegacyColliderKind,
         transform: Mat4,
         last_transform: Mat4,
         delta_time: f32,
@@ -72,7 +72,7 @@ impl SdfCollider {
     /// plane at `y`, normal +Y (hardcoded in the source).
     pub fn plane(y: f32, delta_time: f32) -> Self {
         Self::from_transform(
-            ColliderKind::Plane,
+            LegacyColliderKind::Plane,
             Mat4::from_translation(Vec3::new(0.0, y, 0.0)),
             delta_time,
         )
@@ -81,7 +81,7 @@ impl SdfCollider {
     /// sphere; the demo side owns the conversion into the source's `scale.x` convention (§8-3).
     pub fn sphere(center: Vec3, radius: f32, delta_time: f32) -> Self {
         Self::from_transform(
-            ColliderKind::Sphere,
+            LegacyColliderKind::Sphere,
             Mat4::from_scale_rotation_translation(Vec3::splat(radius), Quat::IDENTITY, center),
             delta_time,
         )
@@ -91,7 +91,7 @@ impl SdfCollider {
     /// half extent is `scale * 0.5`.
     pub fn cube(center: Vec3, scale: Vec3, rotation: Quat, delta_time: f32) -> Self {
         Self::from_transform(
-            ColliderKind::Cube,
+            LegacyColliderKind::Cube,
             Mat4::from_scale_rotation_translation(scale, rotation, center),
             delta_time,
         )
@@ -105,7 +105,7 @@ impl SdfCollider {
     /// whose radius collapses to `collisionMargin`. replicated 1:1 (plan.org §6 risk table).
     pub fn disabled() -> Self {
         Self {
-            kind: ColliderKind::Sphere,
+            kind: LegacyColliderKind::Sphere,
             position: Vec3::ZERO,
             scale: Vec3::ZERO,
             delta_time: 0.0,
@@ -129,7 +129,7 @@ impl SdfCollider {
     /// `VtClothSolverGPU.cuh:22`, `ComputeSDF`. [USER] body (M2b).
     pub fn compute_sdf(&self, target: Vec3, collision_margin: f32) -> Vec3 {
         match self.kind {
-            ColliderKind::Plane => {
+            LegacyColliderKind::Plane => {
                 let offset = target.y - (self.position.y + collision_margin);
                 if offset < 0.0 {
                     Vec3::new(0.0, -offset, 0.0)
@@ -137,7 +137,7 @@ impl SdfCollider {
                     Vec3::ZERO
                 }
             }
-            ColliderKind::Sphere => {
+            LegacyColliderKind::Sphere => {
                 let radius = self.scale.x + collision_margin;
                 let diff = target - self.position;
                 let distance = diff.length();
@@ -151,7 +151,7 @@ impl SdfCollider {
                     Vec3::ZERO
                 }
             }
-            ColliderKind::Cube => {
+            LegacyColliderKind::Cube => {
                 let local = self.inv_cur_transform.transform_point3(target);
                 let cube_size = Vec3::splat(0.5) + collision_margin / self.scale;
                 let offset = local.abs() - cube_size;
@@ -218,7 +218,11 @@ impl SdfCollider {
 }
 
 /// `VtClothSolverGPU.cu:272`, `ComputeFriction`. [USER] body (M2b).
-pub fn compute_friction(correction: Vec3, relative_velocity: Vec3, params: &SimParams) -> Vec3 {
+pub fn legacy_compute_friction(
+    correction: Vec3,
+    relative_velocity: Vec3,
+    params: &LegacySimParams,
+) -> Vec3 {
     let mut friction = Vec3::ZERO;
     let correction_length = correction.length();
 

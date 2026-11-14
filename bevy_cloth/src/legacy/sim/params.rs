@@ -7,7 +7,7 @@ use glam::Vec3;
 /// the runtime tail lives here because the source keeps it in `Global::simParams`, which `AddCloth`
 /// writes and `SetSimulationParams` hands to the kernels.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SimParams {
+pub struct LegacySimParams {
     pub num_substeps: u32,
     pub num_iterations: u32,
     pub max_num_neighbors: u32,
@@ -37,7 +37,7 @@ pub struct SimParams {
     pub hash_cell_size_scalar: f32,
 }
 
-impl Default for SimParams {
+impl Default for LegacySimParams {
     fn default() -> Self {
         Self {
             num_substeps: 2,
@@ -62,7 +62,7 @@ impl Default for SimParams {
     }
 }
 
-impl SimParams {
+impl LegacySimParams {
     /// the gui range is 1..=10 and `substep % interleavedHash` would divide by zero on 0.
     pub fn effective_interleaved_hash(&self) -> u32 {
         self.interleaved_hash.max(1)
@@ -76,7 +76,7 @@ impl SimParams {
 
 /// `Common.hpp`, `VtGameState`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SimState {
+pub struct LegacySimState {
     pub step: bool,
     pub pause: bool,
     pub render_wireframe: bool,
@@ -87,12 +87,12 @@ pub struct SimState {
 
 /// fixed-step clock for scene animation: `frame * delta_time`, never wall time (§8-4).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct SimTime {
+pub struct LegacySimTime {
     pub frame: u64,
     pub delta_time: f32,
 }
 
-impl SimTime {
+impl LegacySimTime {
     pub fn advance(&mut self, delta_time: f32) -> f32 {
         self.frame += 1;
         self.delta_time = delta_time;

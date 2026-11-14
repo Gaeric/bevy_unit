@@ -4,20 +4,20 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 
 use crate::legacy::sim::{
-    collide::{ColliderKind, SdfCollider},
-    params::SimParams,
+    collide::{LegacyColliderKind, LegacySdfCollider},
+    params::LegacySimParams,
 };
 
 /// WGSL pads `array<vec3<f32>>` elements to a 16-byte stride, so the position-like buffers are
 /// packed as `vec4` and the shaders ignore the fourth lane.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-pub struct GpuVec3 {
+pub struct RefGpuVec3 {
     pub xyz: [f32; 3],
     pub pad: f32,
 }
 
-impl From<Vec3> for GpuVec3 {
+impl From<Vec3> for RefGpuVec3 {
     fn from(value: Vec3) -> Self {
         Self {
             xyz: value.to_array(),
@@ -26,17 +26,17 @@ impl From<Vec3> for GpuVec3 {
     }
 }
 
-impl From<GpuVec3> for Vec3 {
-    fn from(value: GpuVec3) -> Self {
+impl From<RefGpuVec3> for Vec3 {
+    fn from(value: RefGpuVec3) -> Self {
         Vec3::from_array(value.xyz)
     }
 }
 
-pub fn pack_vec3(values: &[Vec3]) -> Vec<GpuVec3> {
-    values.iter().copied().map(GpuVec3::from).collect()
+pub fn ref_pack_vec3(values: &[Vec3]) -> Vec<RefGpuVec3> {
+    values.iter().copied().map(RefGpuVec3::from).collect()
 }
 
-pub fn unpack_vec3(values: &[GpuVec3]) -> Vec<Vec3> {
+pub fn ref_unpack_vec3(values: &[RefGpuVec3]) -> Vec<Vec3> {
     values.iter().copied().map(Vec3::from).collect()
 }
 
@@ -44,7 +44,7 @@ pub fn unpack_vec3(values: &[GpuVec3]) -> Vec<Vec3> {
 /// The owning particle is implicit in the CSR offsets; slots keep their CPU table indices.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-pub struct GpuAttachEntry {
+pub struct RefGpuAttachEntry {
     pub slot: u32,
     pub rest: f32,
 }
@@ -53,7 +53,7 @@ pub struct GpuAttachEntry {
 /// Scalar padding avoids WGSL vec3 alignment moving the final three floats.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-pub struct GpuBendConstraint {
+pub struct RefGpuBendConstraint {
     pub indices: [u32; 4],
     pub rest_angle: f32,
     pub pad: [f32; 3],
@@ -62,7 +62,7 @@ pub struct GpuBendConstraint {
 /// Independent collision uniform; keeps the existing main uniform at 48 bytes.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-pub struct SdfParams {
+pub struct RefSdfParams {
     pub num_colliders: u32,
     pub collision_margin: f32,
     pub friction: f32,
@@ -72,7 +72,7 @@ pub struct SdfParams {
 /// Independent 16-byte particle-contact uniform; does not change Params or SdfParams.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-pub struct ParticleCollisionParams {
+pub struct RefParticleCollisionParams {
     pub max_num_neighbors: u32,
     pub particle_diameter: f32,
     pub friction: f32,
@@ -82,7 +82,7 @@ pub struct ParticleCollisionParams {
 /// Counting-hash configuration. Cell coordinates are guarded before conversion to i32.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-pub struct NeighborParams {
+pub struct RefNeighborParams {
     pub num_particles: u32,
     pub num_buckets: u32,
     pub capacity: u32,
@@ -94,7 +94,7 @@ pub struct NeighborParams {
 /// Cumulative since buffer creation; every rebuild contributes (not just the final cache).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-pub struct NeighborStats {
+pub struct RefNeighborStats {
     pub overflow_rows: u32,
     pub max_required: u32,
     pub stored_entries: u32,
@@ -105,25 +105,25 @@ pub struct NeighborStats {
 /// inverse mat4 96, previous mat4 160; 224-byte array stride.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-pub struct GpuSdfCollider {
+pub struct RefGpuSdfCollider {
     pub kind: u32,
     pub delta_time: f32,
     pub pad: [u32; 2],
-    pub position: GpuVec3,
-    pub scale: GpuVec3,
-    pub cur_transform: [GpuVec3; 3],
+    pub position: RefGpuVec3,
+    pub scale: RefGpuVec3,
+    pub cur_transform: [RefGpuVec3; 3],
     pub inv_cur_transform: [[f32; 4]; 4],
     pub last_transform: [[f32; 4]; 4],
 }
 
-impl From<&SdfCollider> for GpuSdfCollider {
-    fn from(value: &SdfCollider) -> Self {
+impl From<&LegacySdfCollider> for RefGpuSdfCollider {
+    fn from(value: &LegacySdfCollider) -> Self {
         Self {
             // Deliberate wire values, independent of Rust enum discriminants.
             kind: match value.kind {
-                ColliderKind::Plane => 0,
-                ColliderKind::Sphere => 1,
-                ColliderKind::Cube => 2,
+                LegacyColliderKind::Plane => 0,
+                LegacyColliderKind::Sphere => 1,
+                LegacyColliderKind::Cube => 2,
             },
             delta_time: value.delta_time,
             pad: [0; 2],
@@ -141,18 +141,18 @@ impl From<&SdfCollider> for GpuSdfCollider {
 }
 
 /// Empty runtime arrays still require one complete 224-byte element at binding time.
-pub fn pack_colliders(colliders: &[SdfCollider]) -> Vec<GpuSdfCollider> {
+pub fn ref_pack_colliders(colliders: &[LegacySdfCollider]) -> Vec<RefGpuSdfCollider> {
     if colliders.is_empty() {
-        vec![GpuSdfCollider::default()]
+        vec![RefGpuSdfCollider::default()]
     } else {
-        colliders.iter().map(GpuSdfCollider::from).collect()
+        colliders.iter().map(RefGpuSdfCollider::from).collect()
     }
 }
 
 /// the uniform the kernels read; field order follows WGSL uniform alignment, not `SimParams`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-pub struct GpuParams {
+pub struct RefGpuParams {
     pub gravity: [f32; 4],
     pub num_particles: u32,
     pub substep_time: f32,
@@ -164,8 +164,8 @@ pub struct GpuParams {
     pub pad: [f32; 1],
 }
 
-impl GpuParams {
-    pub fn new(params: &SimParams, substep_time: f32) -> Self {
+impl RefGpuParams {
+    pub fn new(params: &LegacySimParams, substep_time: f32) -> Self {
         Self {
             gravity: [params.gravity.x, params.gravity.y, params.gravity.z, 0.0],
             num_particles: params.num_particles,
@@ -186,34 +186,43 @@ mod tests {
 
     #[test]
     fn neighbor_uniform_and_atomic_stats_match_wgsl() {
-        assert_eq!(size_of::<NeighborParams>(), 32);
-        assert_eq!(std::mem::offset_of!(NeighborParams, num_particles), 0);
-        assert_eq!(std::mem::offset_of!(NeighborParams, num_buckets), 4);
-        assert_eq!(std::mem::offset_of!(NeighborParams, capacity), 8);
-        assert_eq!(std::mem::offset_of!(NeighborParams, spacing), 12);
-        assert_eq!(std::mem::offset_of!(NeighborParams, diameter_squared), 16);
-        assert_eq!(std::mem::offset_of!(NeighborParams, pad), 20);
-        assert_eq!(size_of::<NeighborStats>(), 16);
-        assert_eq!(std::mem::offset_of!(NeighborStats, overflow_rows), 0);
-        assert_eq!(std::mem::offset_of!(NeighborStats, max_required), 4);
-        assert_eq!(std::mem::offset_of!(NeighborStats, stored_entries), 8);
-        assert_eq!(std::mem::offset_of!(NeighborStats, invalid_coordinates), 12);
+        assert_eq!(size_of::<RefNeighborParams>(), 32);
+        assert_eq!(std::mem::offset_of!(RefNeighborParams, num_particles), 0);
+        assert_eq!(std::mem::offset_of!(RefNeighborParams, num_buckets), 4);
+        assert_eq!(std::mem::offset_of!(RefNeighborParams, capacity), 8);
+        assert_eq!(std::mem::offset_of!(RefNeighborParams, spacing), 12);
+        assert_eq!(
+            std::mem::offset_of!(RefNeighborParams, diameter_squared),
+            16
+        );
+        assert_eq!(std::mem::offset_of!(RefNeighborParams, pad), 20);
+        assert_eq!(size_of::<RefNeighborStats>(), 16);
+        assert_eq!(std::mem::offset_of!(RefNeighborStats, overflow_rows), 0);
+        assert_eq!(std::mem::offset_of!(RefNeighborStats, max_required), 4);
+        assert_eq!(std::mem::offset_of!(RefNeighborStats, stored_entries), 8);
+        assert_eq!(
+            std::mem::offset_of!(RefNeighborStats, invalid_coordinates),
+            12
+        );
     }
 
     #[test]
     fn particle_collision_params_match_wgsl() {
-        assert_eq!(size_of::<ParticleCollisionParams>(), 16);
+        assert_eq!(size_of::<RefParticleCollisionParams>(), 16);
         assert_eq!(
-            std::mem::offset_of!(ParticleCollisionParams, max_num_neighbors),
+            std::mem::offset_of!(RefParticleCollisionParams, max_num_neighbors),
             0
         );
         assert_eq!(
-            std::mem::offset_of!(ParticleCollisionParams, particle_diameter),
+            std::mem::offset_of!(RefParticleCollisionParams, particle_diameter),
             4
         );
-        assert_eq!(std::mem::offset_of!(ParticleCollisionParams, friction), 8);
-        assert_eq!(std::mem::offset_of!(ParticleCollisionParams, pad), 12);
-        let params = ParticleCollisionParams {
+        assert_eq!(
+            std::mem::offset_of!(RefParticleCollisionParams, friction),
+            8
+        );
+        assert_eq!(std::mem::offset_of!(RefParticleCollisionParams, pad), 12);
+        let params = RefParticleCollisionParams {
             max_num_neighbors: 2,
             particle_diameter: 1.0,
             friction: 0.5,
@@ -225,21 +234,24 @@ mod tests {
 
     #[test]
     fn sdf_uniform_and_collider_match_shader_offsets() {
-        assert_eq!(size_of::<SdfParams>(), 16);
-        assert_eq!(std::mem::offset_of!(SdfParams, num_colliders), 0);
-        assert_eq!(std::mem::offset_of!(SdfParams, collision_margin), 4);
-        assert_eq!(std::mem::offset_of!(SdfParams, friction), 8);
-        assert_eq!(std::mem::offset_of!(SdfParams, step_time), 12);
-        assert_eq!(size_of::<GpuSdfCollider>(), 224);
-        assert_eq!(std::mem::offset_of!(GpuSdfCollider, kind), 0);
-        assert_eq!(std::mem::offset_of!(GpuSdfCollider, delta_time), 4);
-        assert_eq!(std::mem::offset_of!(GpuSdfCollider, position), 16);
-        assert_eq!(std::mem::offset_of!(GpuSdfCollider, scale), 32);
-        assert_eq!(std::mem::offset_of!(GpuSdfCollider, cur_transform), 48);
-        assert_eq!(std::mem::offset_of!(GpuSdfCollider, inv_cur_transform), 96);
-        assert_eq!(std::mem::offset_of!(GpuSdfCollider, last_transform), 160);
+        assert_eq!(size_of::<RefSdfParams>(), 16);
+        assert_eq!(std::mem::offset_of!(RefSdfParams, num_colliders), 0);
+        assert_eq!(std::mem::offset_of!(RefSdfParams, collision_margin), 4);
+        assert_eq!(std::mem::offset_of!(RefSdfParams, friction), 8);
+        assert_eq!(std::mem::offset_of!(RefSdfParams, step_time), 12);
+        assert_eq!(size_of::<RefGpuSdfCollider>(), 224);
+        assert_eq!(std::mem::offset_of!(RefGpuSdfCollider, kind), 0);
+        assert_eq!(std::mem::offset_of!(RefGpuSdfCollider, delta_time), 4);
+        assert_eq!(std::mem::offset_of!(RefGpuSdfCollider, position), 16);
+        assert_eq!(std::mem::offset_of!(RefGpuSdfCollider, scale), 32);
+        assert_eq!(std::mem::offset_of!(RefGpuSdfCollider, cur_transform), 48);
         assert_eq!(
-            bytemuck::cast_slice::<_, u8>(&pack_colliders(&[])).len(),
+            std::mem::offset_of!(RefGpuSdfCollider, inv_cur_transform),
+            96
+        );
+        assert_eq!(std::mem::offset_of!(RefGpuSdfCollider, last_transform), 160);
+        assert_eq!(
+            bytemuck::cast_slice::<_, u8>(&ref_pack_colliders(&[])).len(),
             224
         );
     }
@@ -259,12 +271,12 @@ mod tests {
             Vec3::new(-1.0, 0.5, 2.0),
         );
         for (kind, wire) in [
-            (ColliderKind::Plane, 0),
-            (ColliderKind::Sphere, 1),
-            (ColliderKind::Cube, 2),
+            (LegacyColliderKind::Plane, 0),
+            (LegacyColliderKind::Sphere, 1),
+            (LegacyColliderKind::Cube, 2),
         ] {
-            let source = SdfCollider::with_history(kind, current, last, 0.02);
-            let packed = GpuSdfCollider::from(&source);
+            let source = LegacySdfCollider::with_history(kind, current, last, 0.02);
+            let packed = RefGpuSdfCollider::from(&source);
             assert_eq!(packed.kind, wire);
             assert_eq!(packed.delta_time, 0.02);
             assert_eq!(packed.pad, [0; 2]);
@@ -294,35 +306,38 @@ mod tests {
 
     #[test]
     fn gpu_vec3_has_the_wgsl_vec3_stride() {
-        assert_eq!(size_of::<GpuVec3>(), 16);
+        assert_eq!(size_of::<RefGpuVec3>(), 16);
     }
 
     #[test]
     fn gpu_attach_entry_matches_shader_stride() {
-        assert_eq!(size_of::<GpuAttachEntry>(), 8);
-        assert_eq!(align_of::<GpuAttachEntry>(), 4);
-        assert_eq!(std::mem::offset_of!(GpuAttachEntry, slot), 0);
-        assert_eq!(std::mem::offset_of!(GpuAttachEntry, rest), 4);
+        assert_eq!(size_of::<RefGpuAttachEntry>(), 8);
+        assert_eq!(align_of::<RefGpuAttachEntry>(), 4);
+        assert_eq!(std::mem::offset_of!(RefGpuAttachEntry, slot), 0);
+        assert_eq!(std::mem::offset_of!(RefGpuAttachEntry, rest), 4);
     }
 
     #[test]
     fn gpu_params_matches_shader_offsets() {
-        assert_eq!(size_of::<GpuParams>(), 48);
-        assert_eq!(std::mem::offset_of!(GpuParams, num_particles), 16);
-        assert_eq!(std::mem::offset_of!(GpuParams, substep_time), 20);
-        assert_eq!(std::mem::offset_of!(GpuParams, relaxation_factor), 32);
-        assert_eq!(std::mem::offset_of!(GpuParams, long_range_stretchiness), 36);
-        assert_eq!(std::mem::offset_of!(GpuParams, bend_compliance), 40);
-        assert_eq!(std::mem::offset_of!(GpuParams, pad), 44);
+        assert_eq!(size_of::<RefGpuParams>(), 48);
+        assert_eq!(std::mem::offset_of!(RefGpuParams, num_particles), 16);
+        assert_eq!(std::mem::offset_of!(RefGpuParams, substep_time), 20);
+        assert_eq!(std::mem::offset_of!(RefGpuParams, relaxation_factor), 32);
+        assert_eq!(
+            std::mem::offset_of!(RefGpuParams, long_range_stretchiness),
+            36
+        );
+        assert_eq!(std::mem::offset_of!(RefGpuParams, bend_compliance), 40);
+        assert_eq!(std::mem::offset_of!(RefGpuParams, pad), 44);
     }
 
     #[test]
     fn gpu_bend_constraint_matches_shader_stride() {
-        assert_eq!(size_of::<GpuBendConstraint>(), 32);
-        assert_eq!(std::mem::offset_of!(GpuBendConstraint, indices), 0);
-        assert_eq!(std::mem::offset_of!(GpuBendConstraint, rest_angle), 16);
-        assert_eq!(std::mem::offset_of!(GpuBendConstraint, pad), 20);
-        let packed = GpuBendConstraint {
+        assert_eq!(size_of::<RefGpuBendConstraint>(), 32);
+        assert_eq!(std::mem::offset_of!(RefGpuBendConstraint, indices), 0);
+        assert_eq!(std::mem::offset_of!(RefGpuBendConstraint, rest_angle), 16);
+        assert_eq!(std::mem::offset_of!(RefGpuBendConstraint, pad), 20);
+        let packed = RefGpuBendConstraint {
             indices: [3, 1, 4, 2],
             rest_angle: 0.375,
             ..Default::default()
@@ -335,12 +350,12 @@ mod tests {
 
     #[test]
     fn gpu_params_preserves_constraint_scales_and_substep_time() {
-        let params = SimParams {
+        let params = LegacySimParams {
             long_range_stretchiness: 1.25,
             bend_compliance: 1e-4,
             ..Default::default()
         };
-        let packed = GpuParams::new(&params, 1.0 / 128.0);
+        let packed = RefGpuParams::new(&params, 1.0 / 128.0);
         assert_eq!(packed.long_range_stretchiness, 1.25);
         assert_eq!(packed.bend_compliance, 1e-4);
         assert_eq!(packed.substep_time, 1.0 / 128.0);

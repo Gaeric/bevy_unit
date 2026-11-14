@@ -7,13 +7,13 @@ use bevy::{
 };
 use glam::Vec3;
 
-use crate::legacy::sim::mesh_gen::ClothMesh;
+use crate::legacy::sim::mesh_gen::LegacyClothMesh;
 
 /// the rest-pose grid as a bevy mesh.
 ///
 /// `RenderAssetUsages::default()` keeps the vertex data in the main world, which is what
 /// `Mesh::attribute_mut` needs on the writeback path.
-pub fn build_cloth_mesh(cloth: &ClothMesh) -> Mesh {
+pub fn legacy_build_cloth_mesh(cloth: &LegacyClothMesh) -> Mesh {
     let positions: Vec<[f32; 3]> = cloth
         .positions
         .iter()
@@ -40,13 +40,13 @@ pub fn build_cloth_mesh(cloth: &ClothMesh) -> Mesh {
 ///
 /// the solver stores world positions, and the cloth entity stays at `Transform::IDENTITY`, so no
 /// entity transform is involved on either side.
-pub fn sync_cloth_mesh(mesh: &mut Mesh, positions: &[Vec3], normals: &[Vec3]) {
+pub fn legacy_sync_cloth_mesh(mesh: &mut Mesh, positions: &[Vec3], normals: &[Vec3]) {
     write_vec3s(mesh, Mesh::ATTRIBUTE_POSITION, positions);
     write_vec3s(mesh, Mesh::ATTRIBUTE_NORMAL, normals);
 }
 
 fn write_vec3s(mesh: &mut Mesh, attribute: MeshVertexAttribute, values: &[Vec3]) {
-    // this panics instead of returning when the asset usage lacks `MAIN_WORLD`; `build_cloth_mesh`
+    // this panics instead of returning when the asset usage lacks `MAIN_WORLD`; `legacy_build_cloth_mesh`
     // is the only place that creates the attribute, and it inserts `Float32x3`
     let Some(VertexAttributeValues::Float32x3(target)) = mesh.attribute_mut(attribute) else {
         return;

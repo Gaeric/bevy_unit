@@ -5,15 +5,15 @@ edition = "2024"
 
 [[example]]
 name = "velvet-ref"
-path = "examples/ref/velvet-ref.rs"
+path = "examples/reference/velvet-ref.rs"
 
 [[example]]
 name = "velvet-ref-live"
-path = "examples/ref/velvet-ref-live.rs"
+path = "examples/reference/velvet-ref-live.rs"
 
 [[example]]
 name = "velvet-ref-scenes"
-path = "examples/ref/velvet-ref-scenes.rs"
+path = "examples/reference/velvet-ref-scenes.rs"
 
 [[example]]
 name = "01-cannonball2d"

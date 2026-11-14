@@ -1,19 +1,19 @@
 //! collider mirroring (plan.org M5). headless: glam only, no app needed.
 
 use bevy_cloth::legacy::{
-    demo::{ClothCollider, ColliderMotion},
-    sim::collide::{ColliderKind, SdfCollider},
+    demo::{LegacyClothCollider, LegacyColliderMotion},
+    sim::collide::{LegacyColliderKind, LegacySdfCollider},
 };
 use glam::Vec3;
 
 /// a sphere reads `transform.scale.x` as its radius, so `size()` is the radius on every axis.
 #[test]
 fn a_sphere_mirrors_its_radius_into_scale() {
-    let collider = ClothCollider {
-        kind: ColliderKind::Sphere,
+    let collider = LegacyClothCollider {
+        kind: LegacyColliderKind::Sphere,
         radius: 0.6,
         half_extents: Vec3::ONE,
-        motion: ColliderMotion::Static,
+        motion: LegacyColliderMotion::Static,
         enabled: true,
     };
 
@@ -23,11 +23,11 @@ fn a_sphere_mirrors_its_radius_into_scale() {
 /// the source scales a *unit* cube, so a 0.5 world half extent is `scale = 1.0`.
 #[test]
 fn a_cube_doubles_its_half_extent_into_scale() {
-    let collider = ClothCollider {
-        kind: ColliderKind::Cube,
+    let collider = LegacyClothCollider {
+        kind: LegacyColliderKind::Cube,
         radius: 0.0,
         half_extents: Vec3::splat(0.5),
-        motion: ColliderMotion::Static,
+        motion: LegacyColliderMotion::Static,
         enabled: true,
     };
 
@@ -39,9 +39,9 @@ fn a_cube_doubles_its_half_extent_into_scale() {
 /// collision margin, and leaves a distant one alone.
 #[test]
 fn a_disabled_slot_is_a_margin_sphere_at_the_origin() {
-    let slot = SdfCollider::disabled();
+    let slot = LegacySdfCollider::disabled();
 
-    assert_eq!(slot.kind, ColliderKind::Sphere);
+    assert_eq!(slot.kind, LegacyColliderKind::Sphere);
     assert_eq!(slot.position, Vec3::ZERO);
     assert_eq!(slot.scale, Vec3::ZERO);
 

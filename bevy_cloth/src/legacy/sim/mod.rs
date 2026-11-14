@@ -12,7 +12,7 @@ use std::fmt;
 
 /// errors raised when turning a rest-pose mesh into solver tables.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ClothError {
+pub enum LegacyClothError {
     NotGrid {
         vertex_count: usize,
     },
@@ -36,7 +36,7 @@ pub enum ClothError {
     },
 }
 
-impl fmt::Display for ClothError {
+impl fmt::Display for LegacyClothError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotGrid { vertex_count } => {

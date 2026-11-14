@@ -21,12 +21,12 @@ use bevy::{
 use crate::legacy::{
     demo::{
         plugin::{
-            CpuStepTiming, SimClock, SimParamsRes, SimStateRes, SolverRes, StatsRes,
-            reset_cpu_step_timing,
+            LegacyCpuStepTiming, LegacySimClock, LegacySimParamsRes, LegacySimStateRes,
+            LegacySolverRes, LegacyStatsRes, reset_cpu_step_timing,
         },
-        scenes::{self, CurrentScene},
+        scenes::{self, LegacyCurrentScene},
     },
-    sim::params::SimParams,
+    sim::params::LegacySimParams,
 };
 
 /// the telemetry readout the panel keeps updated.
@@ -43,9 +43,9 @@ struct ParamList;
 #[derive(Component, Clone, Default)]
 struct PanelRoot;
 
-/// the `SimState` / `SimParams` flag a toggle checkbox mirrors.
+/// the `LegacySimState` / `LegacySimParams` flag a toggle checkbox mirrors.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ToggleFlag {
+pub enum LegacyToggleFlag {
     #[default]
     Pause,
     HideGui,
@@ -60,19 +60,22 @@ pub enum ToggleFlag {
 /// `bsn!` builds components from `Default` + `Clone`, so the marker derives `Default` even though
 /// every spawn site passes a flag.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ToggleKind(pub ToggleFlag);
+pub struct LegacyToggleKind(pub LegacyToggleFlag);
 
 /// feathers ui: theme, panel widgets, and the per-frame readouts.
-pub struct ClothUiPlugin;
+pub struct LegacyClothUiPlugin;
 
-impl Plugin for ClothUiPlugin {
+impl Plugin for LegacyClothUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((FeathersPlugins, WireframePlugin::default()))
             .insert_resource(UiTheme(create_dark_theme()))
             // keeps each checkbox's own `Checked` state in sync with its `ValueChange`
             .add_observer(checkbox_self_update)
             // the panel reads the current scene's parameters, so build it after the scene writes them
-            .add_systems(Startup, spawn_panel.after(scenes::setup_initial_scene))
+            .add_systems(
+                Startup,
+                spawn_panel.after(scenes::legacy_setup_initial_scene),
+            )
             .add_systems(
                 Update,
                 (
@@ -81,15 +84,15 @@ impl Plugin for ClothUiPlugin {
                     apply_wireframe,
                     draw_particles,
                     sync_toggle_checked,
-                    // `apply_scene_switch` writes the new scene's parameters; rebuilding before it
+                    // `legacy_apply_scene_switch` writes the new scene's parameters; rebuilding before it
                     // runs would show the outgoing scene's values
-                    rebuild_panel_on_scene_change.after(scenes::apply_scene_switch),
+                    rebuild_panel_on_scene_change.after(scenes::legacy_apply_scene_switch),
                 ),
             );
     }
 }
 
-fn spawn_panel(mut commands: Commands, params: Res<SimParamsRes>) {
+fn spawn_panel(mut commands: Commands, params: Res<LegacySimParamsRes>) {
     build_panel(&mut commands, &params.0);
 }
 
@@ -97,12 +100,12 @@ fn spawn_panel(mut commands: Commands, params: Res<SimParamsRes>) {
 /// values.
 fn rebuild_panel_on_scene_change(
     mut first_run: Local<bool>,
-    current: Res<CurrentScene>,
-    params: Res<SimParamsRes>,
+    current: Res<LegacyCurrentScene>,
+    params: Res<LegacySimParamsRes>,
     roots: Query<Entity, With<PanelRoot>>,
     mut commands: Commands,
 ) {
-    // `CurrentScene` is *added* at startup, so `is_changed()` is true on the first `Update` even
+    // `LegacyCurrentScene` is *added* at startup, so `is_changed()` is true on the first `Update` even
     // though the scene never switched. `spawn_panel` already built the panel from this scene, so
     // rebuilding here would despawn that fresh panel while `sync_toggle_checked` still holds its
     // checkboxes and panic on the stale entities.
@@ -120,7 +123,7 @@ fn rebuild_panel_on_scene_change(
     build_panel(&mut commands, &params.0);
 }
 
-fn build_panel(commands: &mut Commands, p: &SimParams) {
+fn build_panel(commands: &mut Commands, p: &LegacySimParams) {
     // slider positions are captured once at spawn; the widgets own their value afterwards
     let substeps = p.num_substeps as f32;
     let iterations = p.num_iterations as f32;
@@ -156,26 +159,26 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
             @caption("") StatsText
             --
             @FeathersCheckbox { @caption: bsn! { @caption("pause") } }
-            ToggleKind(ToggleFlag::Pause)
-            on(|change: On<ValueChange<bool>>, mut state: ResMut<SimStateRes>| {
+            LegacyToggleKind(LegacyToggleFlag::Pause)
+            on(|change: On<ValueChange<bool>>, mut state: ResMut<LegacySimStateRes>| {
                 state.0.pause = change.value;
             })
             --
             @FeathersCheckbox { @caption: bsn! { @caption("hide gui") } }
-            ToggleKind(ToggleFlag::HideGui)
-            on(|change: On<ValueChange<bool>>, mut state: ResMut<SimStateRes>| {
+            LegacyToggleKind(LegacyToggleFlag::HideGui)
+            on(|change: On<ValueChange<bool>>, mut state: ResMut<LegacySimStateRes>| {
                 state.0.hide_gui = change.value;
             })
             --
             @FeathersCheckbox { @caption: bsn! { @caption("wireframe") } }
-            ToggleKind(ToggleFlag::Wireframe)
-            on(|change: On<ValueChange<bool>>, mut state: ResMut<SimStateRes>| {
+            LegacyToggleKind(LegacyToggleFlag::Wireframe)
+            on(|change: On<ValueChange<bool>>, mut state: ResMut<LegacySimStateRes>| {
                 state.0.render_wireframe = change.value;
             })
             --
             @FeathersCheckbox { @caption: bsn! { @caption("draw particles") } }
-            ToggleKind(ToggleFlag::DrawParticles)
-            on(|change: On<ValueChange<bool>>, mut state: ResMut<SimStateRes>| {
+            LegacyToggleKind(LegacyToggleFlag::DrawParticles)
+            on(|change: On<ValueChange<bool>>, mut state: ResMut<LegacySimStateRes>| {
                 state.0.draw_particles = change.value;
             })
             --
@@ -193,7 +196,7 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     SliderValue(substeps)
                     SliderStep(1.0)
                     SliderPrecision(0)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.num_substeps = change.value.round() as u32;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
@@ -207,7 +210,7 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     SliderValue(iterations)
                     SliderStep(1.0)
                     SliderPrecision(0)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.num_iterations = change.value.round() as u32;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
@@ -221,7 +224,7 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     SliderValue(interleaved)
                     SliderStep(1.0)
                     SliderPrecision(0)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.interleaved_hash = change.value.round() as u32;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
@@ -234,7 +237,7 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     @FeathersSlider { @max: 100.0, @min: 0.01 }
                     SliderValue(max_speed)
                     SliderPrecision(2)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.max_speed = change.value;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
@@ -247,7 +250,7 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     @FeathersSlider { @max: 10.0, @min: 0.0 }
                     SliderValue(damping)
                     SliderPrecision(3)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.damping = change.value;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
@@ -260,7 +263,7 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     @FeathersSlider { @max: 3.0, @min: 0.0 }
                     SliderValue(relaxation)
                     SliderPrecision(3)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.relaxation_factor = change.value;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
@@ -273,7 +276,7 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     @FeathersSlider { @max: 2.0, @min: 1.0 }
                     SliderValue(stretchiness)
                     SliderPrecision(3)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.long_range_stretchiness = change.value;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
@@ -286,7 +289,7 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     @FeathersSlider { @max: 0.5, @min: 0.0 }
                     SliderValue(margin)
                     SliderPrecision(3)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.collision_margin = change.value;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
@@ -299,7 +302,7 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     @FeathersSlider { @max: 1.0, @min: 0.0 }
                     SliderValue(friction)
                     SliderPrecision(3)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.friction = change.value;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
@@ -312,7 +315,7 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     @FeathersSlider { @max: 100.0, @min: 0.0 }
                     SliderValue(bend)
                     SliderPrecision(1)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.bend_compliance = 10f32.powf(change.value / 50.0) - 1.0;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
@@ -325,7 +328,7 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     @FeathersSlider { @max: 50.0, @min: -50.0 }
                     SliderValue(gravity_x)
                     SliderPrecision(2)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.gravity.x = change.value;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
@@ -338,7 +341,7 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     @FeathersSlider { @max: 50.0, @min: -50.0 }
                     SliderValue(gravity_y)
                     SliderPrecision(2)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.gravity.y = change.value;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
@@ -351,15 +354,15 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
                     @FeathersSlider { @max: 50.0, @min: -50.0 }
                     SliderValue(gravity_z)
                     SliderPrecision(2)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SimParamsRes>, mut commands: Commands| {
+                    on(|change: On<ValueChange<f32>>, mut params: ResMut<LegacySimParamsRes>, mut commands: Commands| {
                         params.0.gravity.z = change.value;
                         commands.entity(change.source).insert(SliderValue(change.value));
                     })
                 ]
                 --
                 @FeathersCheckbox { @caption: bsn! { @caption("self collision") } }
-                ToggleKind(ToggleFlag::SelfCollision)
-                on(|change: On<ValueChange<bool>>, mut params: ResMut<SimParamsRes>| {
+                LegacyToggleKind(LegacyToggleFlag::SelfCollision)
+                on(|change: On<ValueChange<bool>>, mut params: ResMut<LegacySimParamsRes>| {
                     params.0.enable_self_collision = change.value;
                 })
             ]
@@ -368,10 +371,10 @@ fn build_panel(commands: &mut Commands, p: &SimParams) {
 }
 
 fn update_stats_text(
-    solver: Res<SolverRes>,
-    clock: Res<SimClock>,
-    stats: Res<StatsRes>,
-    timing: Res<CpuStepTiming>,
+    solver: Res<LegacySolverRes>,
+    clock: Res<LegacySimClock>,
+    stats: Res<LegacyStatsRes>,
+    timing: Res<LegacyCpuStepTiming>,
     mut text: Single<&mut Text, With<StatsText>>,
 ) {
     let solve_time = match timing.avg_ms {
@@ -391,7 +394,7 @@ fn update_stats_text(
     );
 }
 
-fn apply_hide_gui(state: Res<SimStateRes>, mut list: Query<&mut Node, With<ParamList>>) {
+fn apply_hide_gui(state: Res<LegacySimStateRes>, mut list: Query<&mut Node, With<ParamList>>) {
     let display = if state.0.hide_gui {
         Display::None
     } else {
@@ -405,29 +408,29 @@ fn apply_hide_gui(state: Res<SimStateRes>, mut list: Query<&mut Node, With<Param
     }
 }
 
-fn apply_wireframe(state: Res<SimStateRes>, mut config: ResMut<WireframeConfig>) {
+fn apply_wireframe(state: Res<LegacySimStateRes>, mut config: ResMut<WireframeConfig>) {
     if config.global != state.0.render_wireframe {
         config.global = state.0.render_wireframe;
     }
 }
 
-/// pushes `SimState` / `SimParams` back into the toggle widgets.
+/// pushes `LegacySimState` / `LegacySimParams` back into the toggle widgets.
 ///
 /// clicking a checkbox keeps `Checked` in sync through `checkbox_self_update`, but a keyboard
 /// toggle (`input.rs`) only writes the resource, so the box has to be corrected here.
 fn sync_toggle_checked(
-    state: Res<SimStateRes>,
-    params: Res<SimParamsRes>,
+    state: Res<LegacySimStateRes>,
+    params: Res<LegacySimParamsRes>,
     mut commands: Commands,
-    toggles: Query<(Entity, &ToggleKind, Has<Checked>)>,
+    toggles: Query<(Entity, &LegacyToggleKind, Has<Checked>)>,
 ) {
     for (entity, kind, checked) in &toggles {
         let want = match kind.0 {
-            ToggleFlag::Pause => state.0.pause,
-            ToggleFlag::HideGui => state.0.hide_gui,
-            ToggleFlag::Wireframe => state.0.render_wireframe,
-            ToggleFlag::DrawParticles => state.0.draw_particles,
-            ToggleFlag::SelfCollision => params.0.enable_self_collision,
+            LegacyToggleFlag::Pause => state.0.pause,
+            LegacyToggleFlag::HideGui => state.0.hide_gui,
+            LegacyToggleFlag::Wireframe => state.0.render_wireframe,
+            LegacyToggleFlag::DrawParticles => state.0.draw_particles,
+            LegacyToggleFlag::SelfCollision => params.0.enable_self_collision,
         };
 
         if want == checked {
@@ -444,7 +447,7 @@ fn sync_toggle_checked(
 }
 
 /// `VtGameState::drawParticles`: a small cross per particle, drawn with gizmos.
-fn draw_particles(state: Res<SimStateRes>, solver: Res<SolverRes>, mut gizmos: Gizmos) {
+fn draw_particles(state: Res<LegacySimStateRes>, solver: Res<LegacySolverRes>, mut gizmos: Gizmos) {
     if !state.0.draw_particles {
         return;
     }

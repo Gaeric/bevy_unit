@@ -23,7 +23,7 @@ const SOURCE_DISTANCE: f32 = 7.0;
 
 /// an orbit camera anchored on `target`.
 #[derive(Component, Clone, Copy, Debug)]
-pub struct OrbitCamera {
+pub struct LegacyOrbitCamera {
     pub target: Vec3,
     pub distance: f32,
     /// radians around `+Y`
@@ -32,7 +32,7 @@ pub struct OrbitCamera {
     pub pitch: f32,
 }
 
-impl OrbitCamera {
+impl LegacyOrbitCamera {
     /// the source camera pose: position (0.35, 3.3, 7.2) / euler (-21, 2.25, 0) degrees.
     ///
     /// the target is derived from the position so the initial transform matches the source.
@@ -72,9 +72,9 @@ fn orbit_offset(yaw: f32, pitch: f32, distance: f32) -> Vec3 {
         )
 }
 
-pub struct OrbitCameraPlugin;
+pub struct LegacyOrbitCameraPlugin;
 
-impl Plugin for OrbitCameraPlugin {
+impl Plugin for LegacyOrbitCameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, (orbit_input, apply_orbit_camera).chain());
     }
@@ -84,7 +84,7 @@ fn orbit_input(
     buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     mut wheel: MessageReader<MouseWheel>,
-    mut cameras: Query<&mut OrbitCamera>,
+    mut cameras: Query<&mut LegacyOrbitCamera>,
 ) {
     let dragging = buttons.pressed(MouseButton::Middle);
     // reading consumes the messages, so this keeps the reader from lagging behind
@@ -109,7 +109,7 @@ fn orbit_input(
     }
 }
 
-fn apply_orbit_camera(mut cameras: Query<(&OrbitCamera, &mut Transform)>) {
+fn apply_orbit_camera(mut cameras: Query<(&LegacyOrbitCamera, &mut Transform)>) {
     for (camera, mut transform) in &mut cameras {
         *transform = camera.transform();
     }

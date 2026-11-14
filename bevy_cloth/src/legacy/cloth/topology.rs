@@ -5,44 +5,44 @@ use std::{collections::BTreeMap, fmt};
 
 /// Constraint incidence grouped by particle. Entries encode `constraint * arity + role`.
 #[derive(Clone, Debug)]
-pub struct ConstraintCsr {
+pub struct LegacyConstraintCsr {
     pub offsets: Vec<u32>,
     pub entries: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
-pub struct StretchConstraint {
+pub struct LegacyStretchConstraint {
     pub indices: [u32; 2],
     pub rest_length: f32,
 }
 
 /// Matches the existing GPU kernel: opposite vertices first, shared edge last.
 #[derive(Clone, Debug)]
-pub struct BendConstraint {
+pub struct LegacyBendConstraint {
     pub indices: [u32; 4],
     /// Unsigned normal angle, in radians, matching `solve_bending`.
     pub rest_angle: f32,
 }
 
 #[derive(Clone, Debug)]
-pub struct TriangleTopology {
-    pub stretch: Vec<StretchConstraint>,
-    pub bend: Vec<BendConstraint>,
-    pub stretch_csr: ConstraintCsr,
-    pub bend_csr: ConstraintCsr,
+pub struct LegacyTriangleTopology {
+    pub stretch: Vec<LegacyStretchConstraint>,
+    pub bend: Vec<LegacyBendConstraint>,
+    pub stretch_csr: LegacyConstraintCsr,
+    pub bend_csr: LegacyConstraintCsr,
     pub boundary_edges: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TopologyError(pub String);
+pub struct LegacyTopologyError(pub String);
 
-impl fmt::Display for TopologyError {
+impl fmt::Display for LegacyTopologyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-impl std::error::Error for TopologyError {}
+impl std::error::Error for LegacyTopologyError {}
 
 #[derive(Clone, Copy)]
 struct HalfEdge {
@@ -51,7 +51,7 @@ struct HalfEdge {
     opposite: u32,
 }
 
-fn incidence<const N: usize>(particles: usize, constraints: &[[u32; N]]) -> ConstraintCsr {
+fn incidence<const N: usize>(particles: usize, constraints: &[[u32; N]]) -> LegacyConstraintCsr {
     let mut offsets = vec![0; particles + 1];
     for ids in constraints {
         for &id in ids {
@@ -70,16 +70,16 @@ fn incidence<const N: usize>(particles: usize, constraints: &[[u32; N]]) -> Cons
             *slot += 1;
         }
     }
-    ConstraintCsr { offsets, entries }
+    LegacyConstraintCsr { offsets, entries }
 }
 
 /// Input positions are in solver/world space. No welding or particle reduction is performed.
 /// Rejects degenerate/duplicate faces, non-manifold edges and inconsistent face winding.
-pub fn build_triangle_topology(
+pub fn legacy_build_triangle_topology(
     positions: &[Vec3],
     indices: &[u32],
-) -> Result<TriangleTopology, TopologyError> {
-    let fail = |message: &str| TopologyError(message.to_owned());
+) -> Result<LegacyTriangleTopology, LegacyTopologyError> {
+    let fail = |message: &str| LegacyTopologyError(message.to_owned());
     if positions.is_empty() || indices.is_empty() || !indices.len().is_multiple_of(3) {
         return Err(fail("expected nonempty indexed triangles"));
     }
@@ -95,7 +95,7 @@ pub fn build_triangle_topology(
     for (face, tri) in indices.chunks_exact(3).enumerate() {
         let [a, b, c] = [tri[0], tri[1], tri[2]];
         if [a, b, c].iter().any(|&id| id as usize >= positions.len()) {
-            return Err(TopologyError(format!(
+            return Err(LegacyTopologyError(format!(
                 "triangle {face}: index out of range"
             )));
         }
@@ -104,7 +104,9 @@ pub fn build_triangle_topology(
         let mut key = [a, b, c];
         key.sort_unstable();
         if !faces.insert(key) {
-            return Err(TopologyError(format!("triangle {face}: duplicate face")));
+            return Err(LegacyTopologyError(format!(
+                "triangle {face}: duplicate face"
+            )));
         }
 
         // check length and area
@@ -117,7 +119,7 @@ pub fn build_triangle_topology(
             || scale <= 0.0
             || area_squared <= scale * 1e-12
         {
-            return Err(TopologyError(format!(
+            return Err(LegacyTopologyError(format!(
                 "triangle {face}: degenerate geometry"
             )));
         }
@@ -136,7 +138,7 @@ pub fn build_triangle_topology(
     let mut bend = Vec::new();
     let mut boundary_edges = 0;
     for (edge, adjacent) in edges {
-        stretch.push(StretchConstraint {
+        stretch.push(LegacyStretchConstraint {
             indices: edge,
             rest_length: positions[edge[0] as usize].distance(positions[edge[1] as usize]),
         });
@@ -144,7 +146,7 @@ pub fn build_triangle_topology(
             [_] => boundary_edges += 1,
             [first, second] => {
                 if first.from != second.to || first.to != second.from {
-                    return Err(TopologyError(format!(
+                    return Err(LegacyTopologyError(format!(
                         "edge {edge:?}: inconsistent winding"
                     )));
                 }
@@ -158,17 +160,17 @@ pub fn build_triangle_topology(
                 let [p0, p1, p2, p3] = ids.map(|id| positions[id as usize]);
                 let n1 = (p2 - p0).cross(p3 - p0).normalize();
                 let n2 = (p3 - p1).cross(p2 - p1).normalize();
-                bend.push(BendConstraint {
+                bend.push(LegacyBendConstraint {
                     indices: ids,
                     rest_angle: n1.dot(n2).clamp(-1.0, 1.0).acos(),
                 });
             }
-            _ => return Err(TopologyError(format!("edge {edge:?}: non-manifold"))),
+            _ => return Err(LegacyTopologyError(format!("edge {edge:?}: non-manifold"))),
         }
     }
     let stretch_ids: Vec<_> = stretch.iter().map(|c| c.indices).collect();
     let bend_ids: Vec<_> = bend.iter().map(|c| c.indices).collect();
-    Ok(TriangleTopology {
+    Ok(LegacyTriangleTopology {
         stretch_csr: incidence(positions.len(), &stretch_ids),
         bend_csr: incidence(positions.len(), &bend_ids),
         stretch,
@@ -187,7 +189,7 @@ mod tests {
 
     #[test]
     fn flat_hinge_and_csr_roles() {
-        let mesh = build_triangle_topology(&hinge(), &[2, 0, 1, 3, 1, 0]).unwrap();
+        let mesh = legacy_build_triangle_topology(&hinge(), &[2, 0, 1, 3, 1, 0]).unwrap();
         assert_eq!(
             (mesh.stretch.len(), mesh.bend.len(), mesh.boundary_edges),
             (5, 1, 4)
@@ -231,7 +233,7 @@ mod tests {
     fn folded_hinge_rest_angle() {
         let mut p = hinge();
         p[3] = Vec3::Z;
-        let mesh = build_triangle_topology(&p, &[2, 0, 1, 3, 1, 0]).unwrap();
+        let mesh = legacy_build_triangle_topology(&p, &[2, 0, 1, 3, 1, 0]).unwrap();
         assert!((mesh.bend[0].rest_angle - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
     }
 
@@ -246,10 +248,10 @@ mod tests {
         for (old, &new) in old_to_new.iter().enumerate() {
             reordered[new as usize] = p[old];
         }
-        let a = build_triangle_topology(&p, &[2, 0, 1, 3, 1, 0]).unwrap();
+        let a = legacy_build_triangle_topology(&p, &[2, 0, 1, 3, 1, 0]).unwrap();
         // Face order and each triangle's cyclic starting index also change.
         let idx = [1, 0, 3, 0, 1, 2].map(|i| old_to_new[i]);
-        let b = build_triangle_topology(&reordered, &idx).unwrap();
+        let b = legacy_build_triangle_topology(&reordered, &idx).unwrap();
         let new_to_old = [1, 3, 0, 2];
         let mut mapped: Vec<_> = b
             .stretch
@@ -280,8 +282,8 @@ mod tests {
     fn face_order_and_cyclic_rotations_preserve_bend_roles() {
         let mut p = hinge();
         p[3] = Vec3::new(0.0, -0.6, 0.8);
-        let a = build_triangle_topology(&p, &[2, 0, 1, 3, 1, 0]).unwrap();
-        let b = build_triangle_topology(&p, &[1, 0, 3, 0, 1, 2]).unwrap();
+        let a = legacy_build_triangle_topology(&p, &[2, 0, 1, 3, 1, 0]).unwrap();
+        let b = legacy_build_triangle_topology(&p, &[1, 0, 3, 0, 1, 2]).unwrap();
         assert_eq!(a.bend[0].indices, b.bend[0].indices);
         assert!((a.bend[0].rest_angle - 0.8_f32.atan2(0.6)).abs() < 1e-6);
         assert_eq!(a.bend[0].rest_angle, b.bend[0].rest_angle);
@@ -301,7 +303,7 @@ mod tests {
             Vec3::Y,
             Vec3::ZERO,
         ];
-        let mesh = build_triangle_topology(&p, &[1, 2, 4]).unwrap();
+        let mesh = legacy_build_triangle_topology(&p, &[1, 2, 4]).unwrap();
         assert_eq!(
             (mesh.stretch.len(), mesh.bend.len(), mesh.boundary_edges),
             (3, 0, 3)
@@ -314,8 +316,8 @@ mod tests {
 
     #[test]
     fn grid_counts_without_grid_assumptions() {
-        let grid = crate::legacy::sim::mesh_gen::generate_cloth_mesh(16);
-        let mesh = build_triangle_topology(&grid.positions, &grid.indices).unwrap();
+        let grid = crate::legacy::sim::mesh_gen::legacy_generate_cloth_mesh(16);
+        let mesh = legacy_build_triangle_topology(&grid.positions, &grid.indices).unwrap();
         assert_eq!(
             (mesh.stretch.len(), mesh.bend.len(), mesh.boundary_edges),
             (800, 736, 64)
@@ -333,20 +335,20 @@ mod tests {
             vec![2, 0, 1, 3, 0, 1],
         ] {
             assert!(
-                build_triangle_topology(&p, &indices).is_err(),
+                legacy_build_triangle_topology(&p, &indices).is_err(),
                 "{indices:?}"
             );
         }
         let mut extra = p.clone();
         extra.push(Vec3::new(0.0, 0.0, -1.0));
         assert!(
-            build_triangle_topology(&extra, &[2, 0, 1, 3, 1, 0, 4, 0, 1])
+            legacy_build_triangle_topology(&extra, &[2, 0, 1, 3, 1, 0, 4, 0, 1])
                 .unwrap_err()
                 .0
                 .contains("non-manifold")
         );
         let mut nan = p;
         nan[0].x = f32::NAN;
-        assert!(build_triangle_topology(&nan, &[2, 0, 1]).is_err());
+        assert!(legacy_build_triangle_topology(&nan, &[2, 0, 1]).is_err());
     }
 }

@@ -58,8 +58,8 @@ mod tests {
     use glam::{Mat4, Quat, Vec3};
 
     use crate::legacy::sim::{
-        mesh_gen::{bake_transform, generate_cloth_mesh},
-        solver::compute_normals,
+        mesh_gen::{legacy_bake_transform, legacy_generate_cloth_mesh},
+        solver::legacy_compute_normals,
     };
 
     use super::{NormalCsr, build_normal_csr};
@@ -93,7 +93,7 @@ mod tests {
         assert!(csr.offsets.windows(2).all(|pair| pair[0] <= pair[1]));
         let actual = gather_normals(&csr, positions);
         let mut expected = vec![Vec3::ZERO; positions.len()];
-        compute_normals(&mut expected, positions, indices);
+        legacy_compute_normals(&mut expected, positions, indices);
         for (vertex, (&actual, &expected)) in actual.iter().zip(&expected).enumerate() {
             assert!(actual.is_finite() && expected.is_finite());
             assert!(
@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn source_grid_counts_cyclic_orientation_and_encounter_order() {
-        let mesh = generate_cloth_mesh(2);
+        let mesh = legacy_generate_cloth_mesh(2);
         let csr = build_normal_csr(mesh.positions.len(), &mesh.indices);
         assert_eq!(csr.offsets, [0, 1, 4, 6, 9, 15, 18, 20, 23, 24]);
         let counts: Vec<_> = csr.offsets.windows(2).map(|row| row[1] - row[0]).collect();
@@ -147,9 +147,9 @@ mod tests {
 
     #[test]
     fn transformed_flat_grid_matches_cpu_and_plane_orientation() {
-        let mut mesh = generate_cloth_mesh(4);
+        let mut mesh = legacy_generate_cloth_mesh(4);
         let rotation = Quat::from_rotation_y(0.7) * Quat::from_rotation_x(-0.4);
-        bake_transform(
+        legacy_bake_transform(
             &mut mesh.positions,
             Mat4::from_scale_rotation_translation(
                 Vec3::new(1.7, 0.6, 1.2),
@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn bent_nonplanar_grid_matches_cpu() {
-        let mut mesh = generate_cloth_mesh(5);
+        let mut mesh = legacy_generate_cloth_mesh(5);
         for position in &mut mesh.positions {
             position.z = 0.35 * (position.x * 1.8).sin() + 0.2 * position.x * position.y;
         }

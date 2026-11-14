@@ -40,41 +40,43 @@ use std::{
 };
 
 use super::{
-    layout::NeighborStats,
+    layout::RefNeighborStats,
     normals::build_normal_csr,
-    pipeline::{GpuTimingReadout, GpuTimingStatus, GpuTimings, SolverPipeline, WORKGROUP_SIZE},
+    pipeline::{
+        GpuTimingReadout, GpuTimingStatus, GpuTimings, REF_WORKGROUP_SIZE, RefSolverPipeline,
+    },
     solver_gpu::{
-        LiveConfig, LiveSolver, configured_fixture, fixture_colliders, scene_fixture,
+        LiveSolver, RefLiveConfig, configured_fixture, fixture_colliders, scene_fixture,
         scene_live_config,
     },
 };
 use crate::legacy::{
     demo::{
-        OrbitCamera, OrbitCameraPlugin,
-        plugin::FIXED_HZ,
+        LegacyOrbitCamera, LegacyOrbitCameraPlugin,
+        plugin::LEGACY_FIXED_HZ,
         scenes::{
-            SceneId, cloth_material, comparison_ambient_light, comparison_collider_material,
-            comparison_ground_material, comparison_scene, comparison_spotlight,
+            LegacySceneId, cloth_material, comparison_ambient_light, comparison_collider_material,
+            comparison_ground_material, comparison_spotlight, legacy_comparison_scene,
         },
     },
     sim::{
-        collide::{ColliderKind, SdfCollider},
-        mesh_gen::generate_cloth_mesh,
+        collide::{LegacyColliderKind, LegacySdfCollider},
+        mesh_gen::legacy_generate_cloth_mesh,
     },
 };
 
 /// Startup choice for the shared scene comparison; solver parameters come from the scene.
 #[derive(Resource, Clone, Debug)]
-pub struct GpuSceneConfig {
-    pub scene: SceneId,
+pub struct RefGpuSceneConfig {
+    pub scene: LegacySceneId,
     pub start_paused: bool,
     pub gpu_timing: bool,
 }
 
-impl Default for GpuSceneConfig {
+impl Default for RefGpuSceneConfig {
     fn default() -> Self {
         Self {
-            scene: SceneId::Attach,
+            scene: LegacySceneId::Attach,
             start_paused: false,
             gpu_timing: false,
         }
@@ -82,29 +84,29 @@ impl Default for GpuSceneConfig {
 }
 
 /// Separate CPU/GPU comparison entry point for all seven shared scenes.
-pub struct SolverScenesPlugin;
+pub struct RefSolverScenesPlugin;
 
-impl Plugin for SolverScenesPlugin {
+impl Plugin for RefSolverScenesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GpuSceneConfig>();
-        let config = app.world().resource::<GpuSceneConfig>().clone();
+        app.init_resource::<RefGpuSceneConfig>();
+        let config = app.world().resource::<RefGpuSceneConfig>().clone();
         assert!(
-            comparison_scene(config.scene).is_some(),
+            legacy_comparison_scene(config.scene).is_some(),
             "unsupported GPU scene"
         );
-        let live = LiveConfig {
+        let live = RefLiveConfig {
             start_paused: config.start_paused,
             gpu_timing: config.gpu_timing,
             ..scene_live_config(config.scene)
         };
         app.insert_resource(live)
-            .insert_resource(Time::<Fixed>::from_hz(FIXED_HZ))
+            .insert_resource(Time::<Fixed>::from_hz(LEGACY_FIXED_HZ))
             .insert_resource(LiveTicks(Arc::new(Mutex::new(TickQueue {
                 scene: Some(config.scene),
                 ..default()
             }))))
             .insert_resource(comparison_ambient_light())
-            .add_plugins((SolverLivePlugin, OrbitCameraPlugin))
+            .add_plugins((RefSolverLivePlugin, LegacyOrbitCameraPlugin))
             .add_systems(PreUpdate, rebuild_scene_visuals.after(controls))
             .add_systems(
                 PostUpdate,
@@ -120,7 +122,7 @@ struct TickQueue {
     ready: bool,
     generation: u64,
     pending: VecDeque<f32>,
-    scene: Option<SceneId>,
+    scene: Option<LegacySceneId>,
     submitted_ticks: u64,
     timing: Option<(u64, u64, GpuTimingReadout)>,
 }
@@ -219,7 +221,7 @@ fn controls(
         KeyCode::Digit7,
     ]
     .into_iter()
-    .zip(SceneId::ALL)
+    .zip(LegacySceneId::ALL)
     .find_map(|(key, scene)| keys.just_pressed(key).then_some(scene));
     if let Some(scene) = next_scene {
         let mut requests = ticks.0.lock().expect("live cloth ticks");
@@ -276,7 +278,7 @@ const TIMING_WARMUP_TICKS: u64 = 64;
 
 /// Leave 4x counter headroom for multi-tick frames / delayed collection; no guarantee
 /// against an indefinitely stalled readback. Default workload still uses 64 ticks.
-fn stats_interval(config: &LiveConfig) -> u64 {
+fn stats_interval(config: &RefLiveConfig) -> u64 {
     let rebuilds = u64::from(config.substeps.div_ceil(config.hash_interval));
     let max_entries_per_tick =
         u64::from(config.particle_count()) * u64::from(config.neighbor_capacity) * rebuilds;
@@ -358,7 +360,7 @@ impl LiveStats {
             let data = slice
                 .get_mapped_range()
                 .map_err(|error| error.to_string())?;
-            Ok(bytemuck::pod_read_unaligned::<NeighborStats>(&data))
+            Ok(bytemuck::pod_read_unaligned::<RefNeighborStats>(&data))
         });
         staging.unmap();
         match stats {
@@ -402,7 +404,7 @@ impl LiveStats {
         let Some(window) = self.clock.take_window_at(self.pending.is_some(), interval) else {
             return;
         };
-        let byte_len = size_of::<NeighborStats>() as u64;
+        let byte_len = size_of::<RefNeighborStats>() as u64;
         let staging = self.staging.get_or_insert_with(|| {
             device.create_buffer(&BufferDescriptor {
                 label: Some("cloth asynchronous neighbor stats"),
@@ -441,7 +443,7 @@ struct LiveMeshes {
     layers: Vec<(Handle<Mesh>, u32, u32)>,
     wire_layers: Vec<(Handle<Mesh>, u32, u32)>,
     generation: u64,
-    scene: Option<SceneId>,
+    scene: Option<LegacySceneId>,
     /// Main-world tick boundary used to draw moving collider guides for this extraction.
     tick_limit: u64,
 }
@@ -514,14 +516,14 @@ impl NormalBuffers {
 
 /// CPU animation uses frame * fixed dt, with translation-only initial collider history.
 struct SceneMotion {
-    scene: SceneId,
+    scene: LegacySceneId,
     frame: u64,
     previous: Vec<Mat4>,
 }
 
 impl SceneMotion {
-    fn new(scene: SceneId) -> Self {
-        let definition = comparison_scene(scene).expect("supported comparison scene");
+    fn new(scene: LegacySceneId) -> Self {
+        let definition = legacy_comparison_scene(scene).expect("supported comparison scene");
         Self {
             scene,
             frame: 0,
@@ -534,27 +536,27 @@ impl SceneMotion {
     }
 
     fn moving_attachment_slots(&self, dt: f32) -> Option<[Vec3; 1]> {
-        (self.scene == SceneId::Swirl).then(|| {
-            [crate::legacy::demo::scenes::swirl_slot_position(
+        (self.scene == LegacySceneId::Swirl).then(|| {
+            [crate::legacy::demo::scenes::legacy_swirl_slot_position(
                 self.frame as f32 * dt,
             )]
         })
     }
 
-    fn advance(&mut self, dt: f32) -> Vec<SdfCollider> {
+    fn advance(&mut self, dt: f32) -> Vec<LegacySdfCollider> {
         self.frame += 1;
         let seconds = self.frame as f32 * dt;
-        let definition = comparison_scene(self.scene).expect("supported comparison scene");
+        let definition = legacy_comparison_scene(self.scene).expect("supported comparison scene");
         definition
             .colliders
             .iter()
             .zip(&mut self.previous)
             .map(|(spec, previous)| {
                 if !spec.enabled {
-                    return SdfCollider::disabled();
+                    return LegacySdfCollider::disabled();
                 }
                 let model = spec.transform_at(seconds);
-                let collider = SdfCollider::with_history(spec.kind, model, *previous, dt);
+                let collider = LegacySdfCollider::with_history(spec.kind, model, *previous, dt);
                 *previous = model;
                 collider
             })
@@ -563,16 +565,16 @@ impl SceneMotion {
 }
 
 /// Separate from the headless plugin: never installs its one-shot diagnostic system.
-pub struct SolverLivePlugin;
+pub struct RefSolverLivePlugin;
 
-impl Plugin for SolverLivePlugin {
+impl Plugin for RefSolverLivePlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "solver.wesl");
         embedded_asset!(app, "output.wesl");
         embedded_asset!(app, "live_material.wesl");
-        app.init_resource::<LiveConfig>();
-        let config = app.world().resource::<LiveConfig>();
-        let validation = match app.world().get_resource::<GpuSceneConfig>() {
+        app.init_resource::<RefLiveConfig>();
+        let config = app.world().resource::<RefLiveConfig>();
+        let validation = match app.world().get_resource::<RefGpuSceneConfig>() {
             Some(scene) => config.validate_scene(scene.scene),
             None => config.validate(),
         };
@@ -604,7 +606,7 @@ impl Plugin for SolverLivePlugin {
             .add_systems(PreUpdate, controls.after(bevy::input::InputSystems))
             .add_systems(FixedUpdate, request_tick);
         let ticks = app.world().resource::<LiveTicks>().clone();
-        let config = app.world().resource::<LiveConfig>().clone();
+        let config = app.world().resource::<RefLiveConfig>().clone();
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .insert_resource(config)
@@ -633,7 +635,7 @@ impl Plugin for SolverLivePlugin {
             .extra_buffer_usages |= BufferUsages::STORAGE;
         render_app
             .insert_resource(InitialDt(dt))
-            .init_resource::<SolverPipeline>()
+            .init_resource::<RefSolverPipeline>()
             .init_resource::<OutputPipeline>();
     }
 }
@@ -668,7 +670,7 @@ fn timing_hud_text(requested: bool, snapshot: Option<(u64, GpuTimingReadout)>) -
     }
 }
 
-fn setup_timing_hud(mut commands: Commands, config: Res<LiveConfig>) {
+fn setup_timing_hud(mut commands: Commands, config: Res<RefLiveConfig>) {
     commands.spawn((
         GpuTimingHud,
         Text::new(timing_hud_text(config.gpu_timing, None)),
@@ -684,7 +686,7 @@ fn setup_timing_hud(mut commands: Commands, config: Res<LiveConfig>) {
 
 fn update_timing_hud(
     ticks: Res<LiveTicks>,
-    config: Res<LiveConfig>,
+    config: Res<RefLiveConfig>,
     mut text: Single<&mut Text, With<GpuTimingHud>>,
 ) {
     let snapshot = ticks.0.lock().expect("live cloth ticks").timing_snapshot();
@@ -849,12 +851,12 @@ fn simulate_and_output(
     allocator: Res<MeshAllocator>,
     render_meshes: Res<RenderAssets<RenderMesh>>,
     cache: Res<PipelineCache>,
-    pipeline: Res<SolverPipeline>,
+    pipeline: Res<RefSolverPipeline>,
     output: Res<OutputPipeline>,
     queue: Res<RenderQueue>,
     ticks: Res<LiveTicks>,
     dt: Res<InitialDt>,
-    config: Res<LiveConfig>,
+    config: Res<RefLiveConfig>,
     mut solver: Local<Option<LiveSolver>>,
     mut stats: Local<LiveStats>,
     mut timings: Local<Option<GpuTimings>>,
@@ -948,12 +950,12 @@ fn simulate_and_output(
         let device = context.render_device();
         scene_state.dummy_normals = Some(NormalBuffers::new(device, &queue, &[0, 0], &[[0, 0]]));
         scene_state.normal_topologies = meshes.scene.map_or_else(Vec::new, |scene| {
-            comparison_scene(scene)
+            legacy_comparison_scene(scene)
                 .expect("supported comparison scene")
                 .cloths
                 .iter()
                 .map(|cloth| {
-                    let source = generate_cloth_mesh(cloth.resolution);
+                    let source = legacy_generate_cloth_mesh(cloth.resolution);
                     let csr = build_normal_csr(source.positions.len(), &source.indices);
                     NormalBuffers::new(device, &queue, &csr.offsets, &csr.pairs)
                 })
@@ -1071,7 +1073,7 @@ fn simulate_and_output(
             });
         pass.set_pipeline(output_pipeline);
         pass.set_bind_group(0, &group, &[]);
-        pass.dispatch_workgroups(range.count.div_ceil(WORKGROUP_SIZE), 1, 1);
+        pass.dispatch_workgroups(range.count.div_ceil(REF_WORKGROUP_SIZE), 1, 1);
     }
     if let Some(sample) = output_sample {
         sample.resolve(context.command_encoder());
@@ -1125,14 +1127,14 @@ impl Material for LiveMaterial {
 
 /// Body outlines only: no collision margin or rounded-cube projection envelope.
 /// World-space endpoints deliberately stay outside LiveMeshes and GPU output dispatches.
-fn collider_guide_lines(collider: &SdfCollider) -> Vec<[f32; 3]> {
+fn collider_guide_lines(collider: &LegacySdfCollider) -> Vec<[f32; 3]> {
     let mut vertices = Vec::new();
     let mut line = |a: Vec3, b: Vec3| {
         vertices.push(a.to_array());
         vertices.push(b.to_array());
     };
     match collider.kind {
-        ColliderKind::Plane => {
+        LegacyColliderKind::Plane => {
             // Solver planes are horizontal and infinite, regardless of rotation/scale.
             const EXTENT: f32 = 3.0;
             let y = collider.position.y;
@@ -1142,7 +1144,7 @@ fn collider_guide_lines(collider: &SdfCollider) -> Vec<[f32; 3]> {
                 line(Vec3::new(offset, y, -EXTENT), Vec3::new(offset, y, EXTENT));
             }
         }
-        ColliderKind::Sphere => {
+        LegacyColliderKind::Sphere => {
             const SEGMENTS: u32 = 48;
             for (u, v) in [(Vec3::X, Vec3::Y), (Vec3::Y, Vec3::Z), (Vec3::Z, Vec3::X)] {
                 let point = |i: u32| {
@@ -1154,7 +1156,7 @@ fn collider_guide_lines(collider: &SdfCollider) -> Vec<[f32; 3]> {
                 }
             }
         }
-        ColliderKind::Cube => {
+        LegacyColliderKind::Cube => {
             for corner in 0u32..8 {
                 let local = Vec3::new(
                     if corner & 1 == 0 { -0.5 } else { 0.5 },
@@ -1230,7 +1232,7 @@ fn rebuild_scene_visuals(
 
 /// UV/index data stay static; fused GPU output updates POSITION and NORMAL each frame.
 fn textured_cloth_mesh(
-    source: &crate::legacy::sim::mesh_gen::ClothMesh,
+    source: &crate::legacy::sim::mesh_gen::LegacyClothMesh,
     initial: Vec<[f32; 3]>,
 ) -> Mesh {
     assert_eq!(initial.len(), source.positions.len());
@@ -1238,7 +1240,7 @@ fn textured_cloth_mesh(
     // actual transformed geometry once; all dynamic normal updates remain on the GPU.
     let positions: Vec<Vec3> = initial.iter().copied().map(Vec3::from_array).collect();
     let mut normals = vec![Vec3::ZERO; positions.len()];
-    crate::legacy::sim::solver::compute_normals(&mut normals, &positions, &source.indices);
+    crate::legacy::sim::solver::legacy_compute_normals(&mut normals, &positions, &source.indices);
     Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::RENDER_WORLD,
@@ -1268,17 +1270,17 @@ fn spawn_scene_visuals(
     materials: &mut Assets<LiveMaterial>,
     cloth_materials: &mut Assets<StandardMaterial>,
     asset_server: &AssetServer,
-    scene: SceneId,
+    scene: LegacySceneId,
     generation: u64,
     dt: f32,
 ) {
-    let definition = comparison_scene(scene).expect("supported GPU comparison scene");
+    let definition = legacy_comparison_scene(scene).expect("supported GPU comparison scene");
     let (fixture, _) = scene_fixture(dt, scene);
     let mut layers = Vec::new();
     let mut wire_layers = Vec::new();
     let mut offset = 0u32;
     for cloth in &definition.cloths {
-        let source = generate_cloth_mesh(cloth.resolution);
+        let source = legacy_generate_cloth_mesh(cloth.resolution);
         let count = source.positions.len() as u32;
         let initial: Vec<[f32; 3]> = fixture.positions[offset as usize..(offset + count) as usize]
             .iter()
@@ -1317,11 +1319,11 @@ fn spawn_scene_visuals(
         // Collision enablement does not hide the CPU scene's decorative Swirl slot actor.
         // Unit bodies: the fixture model includes sphere radius / cube extent exactly once.
         let mesh = match spec.kind {
-            ColliderKind::Plane => Mesh::from(Plane3d::default().mesh().size(50.0, 50.0)),
-            ColliderKind::Sphere => Mesh::from(Sphere::new(1.0)),
-            ColliderKind::Cube => Mesh::from(Cuboid::new(1.0, 1.0, 1.0)),
+            LegacyColliderKind::Plane => Mesh::from(Plane3d::default().mesh().size(50.0, 50.0)),
+            LegacyColliderKind::Sphere => Mesh::from(Sphere::new(1.0)),
+            LegacyColliderKind::Cube => Mesh::from(Cuboid::new(1.0, 1.0, 1.0)),
         };
-        let material = if spec.kind == ColliderKind::Plane {
+        let material = if spec.kind == LegacyColliderKind::Plane {
             comparison_ground_material()
         } else {
             comparison_collider_material()
@@ -1336,7 +1338,7 @@ fn spawn_scene_visuals(
         ));
     }
     commands.spawn((SceneVisual, comparison_spotlight()));
-    let orbit = OrbitCamera::source();
+    let orbit = LegacyOrbitCamera::source();
     commands.spawn((SceneVisual, Camera3d::default(), orbit.transform(), orbit));
     commands.insert_resource(LiveMeshes {
         layers,
@@ -1370,8 +1372,8 @@ fn triangle_edges(indices: &[u32]) -> Vec<u32> {
         .collect()
 }
 
-fn collider_body_transform(kind: ColliderKind, model: Mat4) -> Transform {
-    if kind == ColliderKind::Plane {
+fn collider_body_transform(kind: LegacyColliderKind, model: Mat4) -> Transform {
+    if kind == LegacyColliderKind::Plane {
         // Solver planes are horizontal: ignore model rotation and scale, like the CPU fixture.
         Transform::from_translation(model.w_axis.truncate())
     } else {
@@ -1397,7 +1399,7 @@ fn sync_scene_guides(
         return;
     }
     current.tick_limit = requests.submitted_ticks + requests.pending.len() as u64;
-    let definition = comparison_scene(scene).expect("supported GPU comparison scene");
+    let definition = legacy_comparison_scene(scene).expect("supported GPU comparison scene");
     let seconds = current.tick_limit as f32 * time.timestep().as_secs_f32();
     for (guide, mut transform) in &mut guides {
         let spec = &definition.colliders[guide.0];
@@ -1415,8 +1417,8 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<LiveMaterial>>,
     time: Res<Time<Fixed>>,
-    config: Res<LiveConfig>,
-    scene_config: Option<Res<GpuSceneConfig>>,
+    config: Res<RefLiveConfig>,
+    scene_config: Option<Res<RefGpuSceneConfig>>,
     mut cloth_materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
@@ -1434,7 +1436,7 @@ fn setup(
         return;
     }
     let (fixture, _) = configured_fixture(time.timestep().as_secs_f32(), &config);
-    let source = generate_cloth_mesh(config.resolution);
+    let source = legacy_generate_cloth_mesh(config.resolution);
     // Indexed lines keep vertex/particle identity, unlike expanding each line endpoint.
     let mut edges = Vec::new();
     for triangle in source.indices.chunks_exact(3) {
@@ -1533,15 +1535,15 @@ mod tests {
 
     #[test]
     fn collider_bodies_apply_fixture_scale_once_and_planes_only_translate() {
-        for scene in SceneId::ALL {
-            for spec in comparison_scene(scene).unwrap().colliders {
+        for scene in LegacySceneId::ALL {
+            for spec in legacy_comparison_scene(scene).unwrap().colliders {
                 let model = spec.initial_transform();
                 let body = collider_body_transform(spec.kind, model);
                 assert_eq!(body.translation, spec.position);
                 match spec.kind {
-                    ColliderKind::Sphere => assert_eq!(body.scale, Vec3::splat(spec.radius)),
-                    ColliderKind::Plane => assert_eq!(body.scale, Vec3::ONE),
-                    ColliderKind::Cube => assert_eq!(body.scale, spec.half_extents * 2.0),
+                    LegacyColliderKind::Sphere => assert_eq!(body.scale, Vec3::splat(spec.radius)),
+                    LegacyColliderKind::Plane => assert_eq!(body.scale, Vec3::ONE),
+                    LegacyColliderKind::Cube => assert_eq!(body.scale, spec.half_extents * 2.0),
                 }
             }
         }
@@ -1551,7 +1553,7 @@ mod tests {
             Vec3::new(1.0, 2.0, 3.0),
         );
         assert_eq!(
-            collider_body_transform(ColliderKind::Plane, model),
+            collider_body_transform(LegacyColliderKind::Plane, model),
             Transform::from_xyz(1.0, 2.0, 3.0)
         );
     }
@@ -1600,7 +1602,7 @@ mod tests {
     fn scene_frontier_leaves_later_ticks_for_the_next_extraction() {
         let mut queue = TickQueue {
             ready: true,
-            scene: Some(SceneId::Collision),
+            scene: Some(LegacySceneId::Collision),
             ..default()
         };
         let mut steps = 0;
@@ -1614,7 +1616,7 @@ mod tests {
         assert!(queue.take_until(2).is_empty());
         assert_eq!(queue.take_until(3).len(), 1);
         queue.reset();
-        assert_eq!(queue.scene, Some(SceneId::Collision));
+        assert_eq!(queue.scene, Some(LegacySceneId::Collision));
         assert_eq!(queue.submitted_ticks, 0);
         assert_eq!(queue.generation, 1);
         assert!(!queue.ready);
@@ -1624,24 +1626,28 @@ mod tests {
     #[test]
     fn swirl_upload_tracks_each_tick_and_reset_without_enabling_collision() {
         let dt = 1.0 / 60.0;
-        let mut motion = SceneMotion::new(SceneId::Swirl);
+        let mut motion = SceneMotion::new(LegacySceneId::Swirl);
         for frame in 1..=360 {
             let colliders = motion.advance(dt);
-            let expected = crate::legacy::demo::scenes::swirl_slot_position(frame as f32 * dt);
+            let expected =
+                crate::legacy::demo::scenes::legacy_swirl_slot_position(frame as f32 * dt);
             assert_eq!(motion.moving_attachment_slots(dt), Some([expected]));
-            assert_eq!(colliders[1], SdfCollider::disabled());
+            assert_eq!(colliders[1], LegacySdfCollider::disabled());
             assert_eq!(
                 motion.previous[1],
                 Mat4::from_translation(Vec3::new(0.0, 0.1, 0.0))
             );
         }
-        let mut reset = SceneMotion::new(SceneId::Swirl);
+        let mut reset = SceneMotion::new(LegacySceneId::Swirl);
         reset.advance(dt);
         assert_eq!(
             reset.moving_attachment_slots(dt),
-            Some([crate::legacy::demo::scenes::swirl_slot_position(dt)])
+            Some([crate::legacy::demo::scenes::legacy_swirl_slot_position(dt)])
         );
-        for scene in SceneId::ALL.into_iter().filter(|id| *id != SceneId::Swirl) {
+        for scene in LegacySceneId::ALL
+            .into_iter()
+            .filter(|id| *id != LegacySceneId::Swirl)
+        {
             assert_eq!(SceneMotion::new(scene).moving_attachment_slots(dt), None);
         }
     }
@@ -1649,13 +1655,13 @@ mod tests {
     #[test]
     fn scene_motion_preserves_cpu_first_history_and_each_previous_tick() {
         let dt = 1.0 / 60.0;
-        for scene in SceneId::ALL {
-            let definition = comparison_scene(scene).unwrap();
+        for scene in LegacySceneId::ALL {
+            let definition = legacy_comparison_scene(scene).unwrap();
             let mut motion = SceneMotion::new(scene);
             let first = motion.advance(dt);
             for (spec, collider) in definition.colliders.iter().zip(&first) {
                 if !spec.enabled {
-                    assert_eq!(*collider, SdfCollider::disabled());
+                    assert_eq!(*collider, LegacySdfCollider::disabled());
                     continue;
                 }
                 assert_eq!(
@@ -1664,7 +1670,7 @@ mod tests {
                 );
                 assert_eq!(
                     *collider,
-                    SdfCollider::with_history(
+                    LegacySdfCollider::with_history(
                         spec.kind,
                         spec.transform_at(dt),
                         Mat4::from_translation(spec.position),
@@ -1675,12 +1681,12 @@ mod tests {
             let second = motion.advance(dt);
             for (spec, collider) in definition.colliders.iter().zip(&second) {
                 if !spec.enabled {
-                    assert_eq!(*collider, SdfCollider::disabled());
+                    assert_eq!(*collider, LegacySdfCollider::disabled());
                     continue;
                 }
                 assert_eq!(
                     *collider,
-                    SdfCollider::with_history(
+                    LegacySdfCollider::with_history(
                         spec.kind,
                         spec.transform_at(2.0 * dt),
                         spec.transform_at(dt),
@@ -1696,7 +1702,7 @@ mod tests {
     #[test]
     fn scene_motion_uses_simulation_ticks_not_render_frames() {
         let dt = 1.0 / 60.0;
-        let mut motion = SceneMotion::new(SceneId::Collision);
+        let mut motion = SceneMotion::new(LegacySceneId::Collision);
         let mut colliders = Vec::new();
         for _ in 0..60 {
             colliders = motion.advance(dt);
@@ -1704,7 +1710,7 @@ mod tests {
         assert_eq!(motion.frame, 60);
         assert_eq!(
             colliders[1].position,
-            crate::legacy::demo::scenes::sweep_z_position(0.6, 1.0)
+            crate::legacy::demo::scenes::legacy_sweep_z_position(0.6, 1.0)
         );
         let history = motion.previous.clone();
         // No advance call while paused: neither frame nor history changes.
@@ -1714,8 +1720,8 @@ mod tests {
 
     #[test]
     fn stats_interval_bounds_normal_window_at_largest_workload() {
-        assert_eq!(stats_interval(&LiveConfig::default()), 64);
-        let config = LiveConfig {
+        assert_eq!(stats_interval(&RefLiveConfig::default()), 64);
+        let config = RefLiveConfig {
             resolution: 128,
             layers: 8,
             substeps: 16,
@@ -1778,8 +1784,8 @@ mod tests {
 
     #[test]
     fn plane_guide_is_a_finite_patch_at_solver_height() {
-        let collider = SdfCollider::from_transform(
-            ColliderKind::Plane,
+        let collider = LegacySdfCollider::from_transform(
+            LegacyColliderKind::Plane,
             Mat4::from_scale_rotation_translation(
                 Vec3::splat(2.0),
                 Quat::from_rotation_z(0.7),
@@ -1798,8 +1804,8 @@ mod tests {
 
     #[test]
     fn sphere_guide_uses_scale_x_as_radius_without_margin() {
-        let collider = SdfCollider::from_transform(
-            ColliderKind::Sphere,
+        let collider = LegacySdfCollider::from_transform(
+            LegacyColliderKind::Sphere,
             Mat4::from_scale_rotation_translation(
                 Vec3::new(0.35, 0.6, 0.8),
                 Quat::from_rotation_y(0.4),
@@ -1820,7 +1826,7 @@ mod tests {
 
     #[test]
     fn cube_guide_has_twelve_transformed_unit_cube_edges() {
-        let collider = SdfCollider::cube(
+        let collider = LegacySdfCollider::cube(
             Vec3::new(0.65, -1.0, 0.1),
             Vec3::new(0.4, 0.6, 0.4),
             Quat::from_rotation_z(0.35) * Quat::from_rotation_y(0.25),
@@ -2222,7 +2228,7 @@ mod tests {
     fn textured_mesh_keeps_source_grid_uv_indices_and_initial_world_positions() {
         use bevy::mesh::VertexAttributeValues;
 
-        let source = generate_cloth_mesh(2);
+        let source = legacy_generate_cloth_mesh(2);
         let transform =
             Mat4::from_rotation_translation(Quat::from_rotation_y(0.7), Vec3::new(3.0, 4.0, 5.0));
         let initial: Vec<[f32; 3]> = source

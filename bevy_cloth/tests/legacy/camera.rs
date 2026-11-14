@@ -1,11 +1,11 @@
 //! orbit camera math (plan.org M4). headless: glam only, no app needed.
 
-use bevy_cloth::legacy::demo::camera::OrbitCamera;
+use bevy_cloth::legacy::demo::camera::LegacyOrbitCamera;
 use glam::Vec3;
 
 #[test]
 fn source_reproduces_the_source_camera_position() {
-    let orbit = OrbitCamera::source();
+    let orbit = LegacyOrbitCamera::source();
     let position = orbit.position();
     let want = Vec3::new(0.35, 3.3, 7.2);
     assert!((position - want).length() < 1e-4, "{position} vs {want}");
@@ -13,7 +13,7 @@ fn source_reproduces_the_source_camera_position() {
 
 #[test]
 fn the_camera_looks_at_its_target() {
-    let orbit = OrbitCamera::source();
+    let orbit = LegacyOrbitCamera::source();
     let transform = orbit.transform();
 
     let forward = *transform.forward();

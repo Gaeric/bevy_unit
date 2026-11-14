@@ -8,7 +8,7 @@ use bevy::{
     window::{ExitCondition, WindowPlugin},
     winit::WinitPlugin,
 };
-use bevy_cloth::r#ref::{SolverGpuPlugin, SolverResultSlot};
+use bevy_cloth::reference::{RefSolverGpuPlugin, RefSolverResultSlot};
 
 fn main() -> AppExit {
     App::new()
@@ -25,12 +25,12 @@ fn main() -> AppExit {
         .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
             1.0 / 60.0,
         )))
-        .add_plugins(SolverGpuPlugin)
+        .add_plugins(RefSolverGpuPlugin)
         .add_systems(Update, report_and_exit)
         .run()
 }
 
-fn report_and_exit(slot: Res<SolverResultSlot>, mut exit: MessageWriter<AppExit>) {
+fn report_and_exit(slot: Res<RefSolverResultSlot>, mut exit: MessageWriter<AppExit>) {
     let Some(report) = *slot.0.lock().expect("solver result slot") else {
         return;
     };

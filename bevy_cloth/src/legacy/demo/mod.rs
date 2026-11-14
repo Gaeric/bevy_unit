@@ -11,13 +11,16 @@ pub mod render;
 pub mod scenes;
 pub mod ui;
 
-pub use camera::{OrbitCamera, OrbitCameraPlugin};
-pub use grab::{MouseGrab, MouseGrabPlugin};
-pub use input::ClothInputPlugin;
+pub use camera::{LegacyOrbitCamera, LegacyOrbitCameraPlugin};
+pub use grab::{LegacyMouseGrab, LegacyMouseGrabPlugin};
+pub use input::LegacyClothInputPlugin;
 pub use plugin::{
-    ClothCollider, ClothPlugin, ClothSystems, ClothVisual, ColliderHistory, ColliderMotion,
-    Colliders, FIXED_DELTA, FIXED_HZ, SimClock, SimParamsRes, SimStateRes, SolverRes, StatsRes,
-    simulation_should_run,
+    LEGACY_FIXED_DELTA, LEGACY_FIXED_HZ, LegacyClothCollider, LegacyClothPlugin,
+    LegacyClothSystems, LegacyClothVisual, LegacyColliderHistory, LegacyColliderMotion,
+    LegacyColliders, LegacySimClock, LegacySimParamsRes, LegacySimStateRes, LegacySolverRes,
+    LegacyStatsRes, legacy_simulation_should_run,
 };
-pub use scenes::{CurrentScene, PendingScene, SceneEntity, SceneId, scene_params};
-pub use ui::ClothUiPlugin;
+pub use scenes::{
+    LegacyCurrentScene, LegacyPendingScene, LegacySceneEntity, LegacySceneId, legacy_scene_params,
+};
+pub use ui::LegacyClothUiPlugin;

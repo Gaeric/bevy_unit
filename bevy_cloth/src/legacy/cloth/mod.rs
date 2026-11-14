@@ -9,43 +9,43 @@ use bevy::{
     transform::TransformSystems,
 };
 
-use topology::{TriangleTopology, build_triangle_topology};
+use topology::{LegacyTriangleTopology, legacy_build_triangle_topology};
 
-pub use crate::legacy::imported::ClothSolverConfig;
 use crate::legacy::imported::ImportedClothPlugin;
+pub use crate::legacy::imported::LegacyClothSolverConfig;
 
 /// Application-selected cloth primitive. IDs refer to this Mesh's loaded vertices.
 /// All render vertices remain particles; this stage does not weld UV splits.
 #[derive(Component, Clone, Debug, Default)]
-pub struct ClothSim {
+pub struct LegacyClothSim {
     pub pinned_vertices: Vec<u32>,
 }
 
 /// Application-selected triangle-mesh collider. No BVH/contact work in stage A.
 #[derive(Component, Clone, Copy, Debug)]
-pub struct ClothMeshCollider;
+pub struct LegacyClothMeshCollider;
 
 /// Immutable world-space initial data. Source Mesh/material/hierarchy are not modified.
 #[derive(Debug)]
-pub struct PreparedCloth {
+pub struct LegacyPreparedCloth {
     pub positions: Vec<Vec3>,
     pub indices: Vec<u32>,
-    pub topology: TriangleTopology,
+    pub topology: LegacyTriangleTopology,
     pub pinned_vertices: Vec<u32>,
     pub inv_masses: Vec<f32>,
     pub initial_transform: Mat4,
 }
 
 #[derive(Component, Debug)]
-pub enum ClothPreparation {
+pub enum LegacyClothPreparation {
     WaitingForMesh,
-    Ready(Box<PreparedCloth>),
+    Ready(Box<LegacyPreparedCloth>),
     Failed(String),
 }
 
-pub struct GpuClothPlugin;
+pub struct LegacyGpuClothPlugin;
 
-impl Plugin for GpuClothPlugin {
+impl Plugin for LegacyGpuClothPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(ImportedClothPlugin);
         app.add_systems(
@@ -60,14 +60,14 @@ impl Plugin for GpuClothPlugin {
 
 fn clear_removed_cloth(
     mut commands: Commands,
-    mut removed_cloth: RemovedComponents<ClothSim>,
+    mut removed_cloth: RemovedComponents<LegacyClothSim>,
     mut removed_mesh: RemovedComponents<Mesh3d>,
-    remaining: Query<(), (With<ClothSim>, With<Mesh3d>)>,
+    remaining: Query<(), (With<LegacyClothSim>, With<Mesh3d>)>,
 ) {
     for entity in removed_cloth.read().chain(removed_mesh.read()) {
         if !remaining.contains(entity) {
             if let Ok(mut entity) = commands.get_entity(entity) {
-                entity.remove::<ClothPreparation>();
+                entity.remove::<LegacyClothPreparation>();
             }
         }
     }
@@ -78,27 +78,28 @@ fn prepare_cloth(
     meshes: Res<Assets<Mesh>>,
     cloths: Query<(
         Entity,
-        Ref<ClothSim>,
+        Ref<LegacyClothSim>,
         Ref<Mesh3d>,
         Ref<GlobalTransform>,
-        Option<&ClothPreparation>,
+        Option<&LegacyClothPreparation>,
     )>,
 ) {
     for (entity, config, mesh_handle, transform, state) in &cloths {
-        let retry = state.is_none() || matches!(state, Some(ClothPreparation::WaitingForMesh));
+        let retry =
+            state.is_none() || matches!(state, Some(LegacyClothPreparation::WaitingForMesh));
         if !retry && !config.is_changed() && !mesh_handle.is_changed() && !transform.is_changed() {
             continue;
         }
         let Some(mesh) = meshes.get(&mesh_handle.0) else {
-            if !matches!(state, Some(ClothPreparation::WaitingForMesh)) {
+            if !matches!(state, Some(LegacyClothPreparation::WaitingForMesh)) {
                 info!(?entity, "cloth waiting for CPU-readable Mesh");
                 commands
                     .entity(entity)
-                    .insert(ClothPreparation::WaitingForMesh);
+                    .insert(LegacyClothPreparation::WaitingForMesh);
             }
             continue;
         };
-        let result = prepare_mesh(mesh, transform.to_matrix(), &config.pinned_vertices);
+        let result = legacy_prepare_mesh(mesh, transform.to_matrix(), &config.pinned_vertices);
         let state = match result {
             Ok(prepared) => {
                 info!(?entity, particles = prepared.positions.len(),
@@ -107,11 +108,11 @@ fn prepare_cloth(
                     boundary_edges = prepared.topology.boundary_edges,
                     pins = ?prepared.pinned_vertices, transform = ?prepared.initial_transform,
                     "cloth prepared (no GPU simulation yet)");
-                ClothPreparation::Ready(Box::new(prepared))
+                LegacyClothPreparation::Ready(Box::new(prepared))
             }
             Err(error) => {
                 warn!(?entity, %error, "cloth preparation failed");
-                ClothPreparation::Failed(error)
+                LegacyClothPreparation::Failed(error)
             }
         };
         commands.entity(entity).insert(state);
@@ -120,7 +121,11 @@ fn prepare_cloth(
 
 /// Convert a loaded triangle Mesh into initial solver data without grid assumptions.
 /// Non-indexed triangle lists are supported with sequential indices.
-pub fn prepare_mesh(mesh: &Mesh, transform: Mat4, pins: &[u32]) -> Result<PreparedCloth, String> {
+pub fn legacy_prepare_mesh(
+    mesh: &Mesh,
+    transform: Mat4,
+    pins: &[u32],
+) -> Result<LegacyPreparedCloth, String> {
     if !mesh.asset_usage.contains(RenderAssetUsages::MAIN_WORLD) {
         return Err("cloth source Mesh must retain MAIN_WORLD data".into());
     }
@@ -147,7 +152,8 @@ pub fn prepare_mesh(mesh: &Mesh, transform: Mat4, pins: &[u32]) -> Result<Prepar
         Some(Indices::U32(values)) => values.clone(),
         None => (0..positions.len() as u32).collect(),
     };
-    let topology = build_triangle_topology(&positions, &indices).map_err(|e| e.to_string())?;
+    let topology =
+        legacy_build_triangle_topology(&positions, &indices).map_err(|e| e.to_string())?;
     let mut pinned_vertices = pins.to_vec();
     pinned_vertices.sort_unstable();
     pinned_vertices.dedup();
@@ -158,7 +164,7 @@ pub fn prepare_mesh(mesh: &Mesh, transform: Mat4, pins: &[u32]) -> Result<Prepar
         };
         *mass = 0.0;
     }
-    Ok(PreparedCloth {
+    Ok(LegacyPreparedCloth {
         positions,
         indices,
         topology,
@@ -188,12 +194,13 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default(), TransformPlugin))
             .init_asset::<Mesh>()
-            .add_plugins(GpuClothPlugin);
+            .add_plugins(LegacyGpuClothPlugin);
         app
     }
 
-    fn prepared(app: &App, entity: Entity) -> &PreparedCloth {
-        let Some(ClothPreparation::Ready(data)) = app.world().get::<ClothPreparation>(entity)
+    fn prepared(app: &App, entity: Entity) -> &LegacyPreparedCloth {
+        let Some(LegacyClothPreparation::Ready(data)) =
+            app.world().get::<LegacyClothPreparation>(entity)
         else {
             panic!("expected ready cloth {entity:?}");
         };
@@ -203,7 +210,7 @@ mod tests {
     fn preparation_tick(app: &App, entity: Entity) -> bevy::ecs::change_detection::Tick {
         app.world()
             .entity(entity)
-            .get_ref::<ClothPreparation>()
+            .get_ref::<LegacyClothPreparation>()
             .unwrap()
             .last_changed()
     }
@@ -220,7 +227,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Mesh3d(original.clone()),
-                ClothSim::default(),
+                LegacyClothSim::default(),
                 Transform::IDENTITY,
             ))
             .id();
@@ -239,8 +246,8 @@ mod tests {
             .insert(Mesh3d(replacement.clone()));
         app.update();
         assert!(matches!(
-            app.world().get::<ClothPreparation>(entity),
-            Some(ClothPreparation::WaitingForMesh)
+            app.world().get::<LegacyClothPreparation>(entity),
+            Some(LegacyClothPreparation::WaitingForMesh)
         ));
         let shifted = triangle().with_inserted_attribute(
             Mesh::ATTRIBUTE_POSITION,
@@ -255,7 +262,7 @@ mod tests {
 
         app.world_mut().entity_mut(entity).remove::<Mesh3d>();
         app.update();
-        assert!(app.world().get::<ClothPreparation>(entity).is_none());
+        assert!(app.world().get::<LegacyClothPreparation>(entity).is_none());
         app.world_mut()
             .entity_mut(entity)
             .insert(Mesh3d(original.clone()));
@@ -284,7 +291,11 @@ mod tests {
             .add(triangle());
         let spawn = |app: &mut App, handle| {
             app.world_mut()
-                .spawn((Mesh3d(handle), ClothSim::default(), Transform::IDENTITY))
+                .spawn((
+                    Mesh3d(handle),
+                    LegacyClothSim::default(),
+                    Transform::IDENTITY,
+                ))
                 .id()
         };
         let first = spawn(&mut app, shared.clone());
@@ -312,7 +323,7 @@ mod tests {
         // An explicit application input change opts this instance into a new initial state.
         app.world_mut()
             .entity_mut(first)
-            .insert(ClothSim::default());
+            .insert(LegacyClothSim::default());
         app.update();
         assert_eq!(prepared(&app, first).positions[1], Vec3::X * 2.0);
         assert_ne!(preparation_tick(&app, first), first_tick);
@@ -339,7 +350,7 @@ mod tests {
             app.world_mut()
                 .spawn((
                     Mesh3d(handle.clone()),
-                    ClothSim::default(),
+                    LegacyClothSim::default(),
                     Transform::from_xyz(0.0, 0.0, 1.0),
                     ChildOf(parent),
                 ))
@@ -385,16 +396,16 @@ mod tests {
             Quat::IDENTITY,
             Vec3::new(3.0, 4.0, 5.0),
         );
-        let data = prepare_mesh(&triangle(), transform, &[2, 2]).unwrap();
+        let data = legacy_prepare_mesh(&triangle(), transform, &[2, 2]).unwrap();
         assert_eq!(data.positions[1], Vec3::new(5.0, 4.0, 5.0));
         assert_eq!(data.indices, [0, 1, 2]);
         assert_eq!(data.pinned_vertices, [2]);
         assert_eq!(data.inv_masses, [1.0, 1.0, 0.0]);
-        assert!(prepare_mesh(&triangle(), transform, &[3]).is_err());
-        assert!(prepare_mesh(&triangle(), Mat4::ZERO, &[]).is_err());
+        assert!(legacy_prepare_mesh(&triangle(), transform, &[3]).is_err());
+        assert!(legacy_prepare_mesh(&triangle(), Mat4::ZERO, &[]).is_err());
         let mut render_only = triangle();
         render_only.asset_usage = RenderAssetUsages::RENDER_WORLD;
-        assert!(prepare_mesh(&render_only, transform, &[]).is_err());
+        assert!(legacy_prepare_mesh(&render_only, transform, &[]).is_err());
     }
 
     #[test]
@@ -402,20 +413,20 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default(), TransformPlugin))
             .init_asset::<Mesh>()
-            .add_plugins(GpuClothPlugin);
+            .add_plugins(LegacyGpuClothPlugin);
         let handle = app.world().resource::<Assets<Mesh>>().reserve_handle();
         let entity = app
             .world_mut()
             .spawn((
                 Mesh3d(handle.clone()),
-                ClothSim::default(),
+                LegacyClothSim::default(),
                 Transform::IDENTITY,
             ))
             .id();
         app.update();
         assert!(matches!(
-            app.world().get::<ClothPreparation>(entity),
-            Some(ClothPreparation::WaitingForMesh)
+            app.world().get::<LegacyClothPreparation>(entity),
+            Some(LegacyClothPreparation::WaitingForMesh)
         ));
         app.world_mut()
             .resource_mut::<Assets<Mesh>>()
@@ -423,20 +434,20 @@ mod tests {
             .unwrap();
         app.update();
         assert!(matches!(
-            app.world().get::<ClothPreparation>(entity),
-            Some(ClothPreparation::Ready(_))
+            app.world().get::<LegacyClothPreparation>(entity),
+            Some(LegacyClothPreparation::Ready(_))
         ));
         app.world_mut()
-            .get_mut::<ClothSim>(entity)
+            .get_mut::<LegacyClothSim>(entity)
             .unwrap()
             .pinned_vertices = vec![9];
         app.update();
         assert!(matches!(
-            app.world().get::<ClothPreparation>(entity),
-            Some(ClothPreparation::Failed(_))
+            app.world().get::<LegacyClothPreparation>(entity),
+            Some(LegacyClothPreparation::Failed(_))
         ));
         app.world_mut()
-            .get_mut::<ClothSim>(entity)
+            .get_mut::<LegacyClothSim>(entity)
             .unwrap()
             .pinned_vertices = vec![0];
         app.world_mut()
@@ -444,14 +455,17 @@ mod tests {
             .unwrap()
             .translation = Vec3::X;
         app.update();
-        let Some(ClothPreparation::Ready(data)) = app.world().get::<ClothPreparation>(entity)
+        let Some(LegacyClothPreparation::Ready(data)) =
+            app.world().get::<LegacyClothPreparation>(entity)
         else {
             panic!("expected ready");
         };
         assert_eq!(data.positions[0], Vec3::X);
         assert_eq!(data.inv_masses[0], 0.0);
-        app.world_mut().entity_mut(entity).remove::<ClothSim>();
+        app.world_mut()
+            .entity_mut(entity)
+            .remove::<LegacyClothSim>();
         app.update();
-        assert!(app.world().get::<ClothPreparation>(entity).is_none());
+        assert!(app.world().get::<LegacyClothPreparation>(entity).is_none());
     }
 }
