@@ -48,7 +48,6 @@ impl BvhNode {
 /// This record is CPU scheduling metadata, not a GPU buffer payload.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct BvhRefitLayer {
-    pub depth: u32,
     pub first: u32,
     pub count: u32,
 }
