@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 use super::{
     StretchCloth,
+    bending::prepare_bending,
     layout::{ConstraintGroup, FixedAttachment, Particle, PreparedCloth, StepParams, Stretch},
     tick::ClothStepSettings,
 };
@@ -55,6 +56,8 @@ pub(super) fn prepare_added_cloths(
             particles = prepared.particles.len(),
             stretch = prepared.stretch.len(),
             colors = prepared.groups.len(),
+            bend = prepared.bend.len(),
+            bend_colors = prepared.bend_groups.len(),
             substeps = settings.substeps,
             iterations = settings.iterations,
             "XPBD cloth prepared"
@@ -82,6 +85,10 @@ fn validate_inputs<'a>(
 
     if !config.stretch_compliance.is_finite() || config.stretch_compliance < 0.0 {
         return Err("stretch_compliance must be nonnegative and finite".into());
+    }
+
+    if !config.bend_compliance.is_finite() || config.bend_compliance < 0.0 {
+        return Err("bend_compliance must be nonnegative and finite".into());
     }
 
     if !config.collision_margin.is_finite() || config.collision_margin < 0.0 {
@@ -291,6 +298,9 @@ pub(super) fn prepare_mesh(
     // Reorder constraints by color and record each group's range.
     let (stretch, groups) = color_stretch(particles.len(), stretch)?;
 
+    // Rest angles, like rest lengths, use geometry before attachment targets.
+    let (bend, bend_groups) = prepare_bending(&particles, &indices, config.bend_compliance)?;
+
     // Fixed targets affect the initial state, not the rest geometry.
     let mut attachments = Vec::with_capacity(config.attachments.len());
 
@@ -313,6 +323,8 @@ pub(super) fn prepare_mesh(
         particles,
         velocities,
         stretch,
+        bend,
+        bend_groups,
         attachments,
         groups,
         normal_offsets,
@@ -322,7 +334,78 @@ pub(super) fn prepare_mesh(
 
 #[cfg(test)]
 mod tests {
-    use super::build_normal_adjacency;
+    use super::*;
+    use crate::xpbd::Attachment;
+    use bevy::{asset::RenderAssetUsages, mesh::Indices};
+
+    fn hinge_mesh() -> Mesh {
+        Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD,
+        )
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0],
+            ],
+        )
+        .with_inserted_indices(Indices::U32(vec![2, 0, 1, 3, 1, 0]))
+    }
+
+    fn config() -> StretchCloth {
+        StretchCloth {
+            particle_mass: 1.0,
+            stretch_compliance: 0.0,
+            bend_compliance: 0.125,
+            attachments: Vec::new(),
+            collision_margin: 0.02,
+            double_sided: false,
+        }
+    }
+
+    #[test]
+    fn bend_rest_angle_uses_world_geometry_before_attachment_targets() {
+        let mesh = hinge_mesh();
+        let transform = GlobalTransform::from(Transform {
+            translation: Vec3::new(2.0, 3.0, 4.0),
+            rotation: Quat::from_rotation_y(0.7),
+            scale: Vec3::splat(2.0),
+        });
+        let mut config = config();
+        config.attachments.push(Attachment {
+            particle: 2,
+            position: transform.transform_point(Vec3::new(0.0, 1.0, 1.0)),
+        });
+        let prepared = prepare_mesh(&mesh, &transform, &config).unwrap();
+        assert_eq!(prepared.bend.len(), 1);
+        assert!(prepared.bend[0].rest_angle.abs() < 1e-6);
+        assert_eq!(prepared.bend[0].compliance, 0.125);
+        assert_eq!(prepared.bend_groups[0].count, 1);
+        assert_eq!(
+            prepared.particles[2].position,
+            config.attachments[0].position.to_array()
+        );
+        assert_eq!(prepared.particles[2].inv_mass, 0.0);
+
+        // Preparing this changed shape as rest geometry yields a nonzero fold.
+        let (changed, _) =
+            prepare_bending(&prepared.particles, &[2, 0, 1, 3, 1, 0], 0.125).unwrap();
+        assert!(changed[0].rest_angle.abs() > 0.1);
+    }
+
+    #[test]
+    fn invalid_bend_compliance_is_rejected() {
+        let mesh = hinge_mesh();
+        for compliance in [-1.0, f32::NAN, f32::INFINITY] {
+            let mut config = config();
+            config.bend_compliance = compliance;
+            let error = prepare_mesh(&mesh, &GlobalTransform::IDENTITY, &config).unwrap_err();
+            assert!(error.contains("bend_compliance"));
+        }
+    }
 
     #[test]
     fn normal_adjacency_groups_oriented_pairs_by_vertex() {

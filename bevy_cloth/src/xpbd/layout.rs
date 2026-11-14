@@ -64,6 +64,18 @@ pub(super) struct Stretch {
     pub compliance: f32,
 }
 
+/// Dihedral constraint: [opposite0, opposite1, edge_start, edge_end].
+///
+/// Array element stride: 32 bytes. Angle is signed around edge_start -> edge_end.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub(super) struct Bend {
+    pub particles: [u32; 4],
+    pub rest_angle: f32,
+    pub compliance: f32,
+    pub padding: [u32; 2],
+}
+
 /// A fixed attachment holds one particle at a world-space target.
 ///
 /// WGSL equivalent:
@@ -164,6 +176,12 @@ pub(super) struct PreparedCloth {
     /// Complete stretch constraints, arranged contiguously by color.
     pub stretch: Vec<Stretch>,
 
+    /// Initial dihedral constraints, arranged contiguously by their own colors.
+    pub bend: Vec<Bend>,
+
+    /// Bend color groups; currently CPU preparation only, not dispatched.
+    pub bend_groups: Vec<ConstraintGroup>,
+
     /// Fixed particles and their world-space targets.
     pub attachments: Vec<FixedAttachment>,
 
@@ -192,6 +210,12 @@ mod tests {
         assert_eq!(offset_of!(Stretch, particles), 0);
         assert_eq!(offset_of!(Stretch, rest_length), 8);
         assert_eq!(offset_of!(Stretch, compliance), 12);
+
+        assert_eq!(size_of::<Bend>(), 32);
+        assert_eq!(offset_of!(Bend, particles), 0);
+        assert_eq!(offset_of!(Bend, rest_angle), 16);
+        assert_eq!(offset_of!(Bend, compliance), 20);
+        assert_eq!(offset_of!(Bend, padding), 24);
 
         assert_eq!(size_of::<FixedAttachment>(), 16);
         assert_eq!(offset_of!(FixedAttachment, target), 0);

@@ -66,6 +66,7 @@ fn setup(
         StretchCloth {
             particle_mass: 1.0,
             stretch_compliance: 0.0001,
+            bend_compliance: 0.0, // CPU preparation only; bending is not dispatched yet.
             attachments,
             collision_margin: 0.02,
             double_sided: false,

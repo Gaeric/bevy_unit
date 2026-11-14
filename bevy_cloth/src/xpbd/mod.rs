@@ -1,6 +1,7 @@
 //! New GPU XPBD implementation, independent of the historical solvers.
 //! CPU preparation and GPU data/binding.
 
+mod bending;
 mod bindings;
 mod bvh;
 mod collider;
@@ -143,6 +144,8 @@ pub struct StretchCloth {
     pub particle_mass: f32,
     /// XPBD distance-constraint compliance, in m/N; zero means inextensible.
     pub stretch_compliance: f32,
+    /// Dihedral-angle compliance; currently prepared on CPU only, not solved.
+    pub bend_compliance: f32,
     pub attachments: Vec<Attachment>,
     /// World-space contact thickness, in meters.
     pub collision_margin: f32,
