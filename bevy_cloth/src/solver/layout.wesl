@@ -1,6 +1,6 @@
 // GPU data layouts, resource interfaces and XPBD solver entry points.
 
-import super::bvh_query::{closest_hit, QueryHit, QUERY_OK, INVALID_TRIANGLE};
+import super::super::collision::bvh_query::{closest_hit, QueryHit, QUERY_OK, INVALID_TRIANGLE};
 
 struct Particle {
     position: vec3<f32>,

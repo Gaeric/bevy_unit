@@ -10,14 +10,13 @@ use bevy::{
     },
 };
 
-use super::{
-    bindings::ContactBindGroupLayout, collider::PreparedCollider, collider_refit::ColliderRefit,
-    collider_transform::ColliderTransformBindGroup,
-};
+use crate::solver::bindings::ContactBindGroupLayout;
+
+use super::{PreparedCollider, refit::ColliderRefit, transform::ColliderTransformBindGroup};
 
 /// Buffers owned by one collider entity. Initial local bounds are refitted in place.
 #[derive(Component)]
-pub(super) struct GpuCollider {
+pub(crate) struct GpuCollider {
     pub local_positions: Buffer,
     /// World-space points, valid after the transform dispatch has been recorded.
     pub positions: Buffer,
@@ -74,7 +73,7 @@ impl GpuCollider {
 }
 
 /// Upload only on preparation/replacement, not on transform or group changes.
-pub(super) fn upload_colliders(
+pub(crate) fn upload_colliders(
     mut commands: Commands,
     device: Res<RenderDevice>,
     cache: Res<PipelineCache>,

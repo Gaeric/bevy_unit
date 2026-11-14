@@ -15,7 +15,7 @@
   =SpatialHashGPU.hpp/.cu/.cuh=、=Common.cuh/.hpp=、=VtBuffer.hpp=。本任务不修改该参考仓库。
 
 * 保留的 GPU 参考实现（2026-10-29；headless 已测，新增 live 待主机验证）
-  以下实现与验证描述保留旧记录，指 =src/reference/= 参考实现，不是当前 =src/xpbd/= 主线状态。
+  以下实现与验证描述保留旧记录，指 =src/reference/= 参考实现，不是当前 =src/solver/=、=src/collision/=、=src/output/= 等 XPBD 主线模块的状态。
   - =src/reference/solver.wesl= 有九个求解入口：SDF 预稳定、预测、粒子碰撞、SDF 碰撞、拉伸 gather、挂点/LRA gather、弯曲 gather、统一应用修正、更新位置与速度；另有动态邻居 kernel。
   - =src/reference/solver_gpu.rs= 建立约束查询表并共享 =record_step=；headless 一次提交 60 步，读回位置/速度作诊断。
     独立 =RefSolverLivePlugin=（=live.rs=）按 fixed tick 逐请求提交，共用求解 kernel，不运行 CPU 参考或专项读回。
@@ -144,6 +144,7 @@
   当前原型不依赖浮点原子扩展。这是现状，不预先替未来所有硬件和算法作决定。
 
 * 6. 当前工作边界
+  本节保留 =src/reference/= 的历史工作边界；当前 =src/solver/= 等 XPBD 主线的工作与验证状态见 =plan.org=。
   完整 GPU 求解及动态邻居 headless 批次已通过用户对照；最新新增独立 live 路径，尚待用户主机验证。
   继续现有 Jacobi 路径；graph-colored GS/完整累计乘子 XPBD 的讨论不构成当前切换决定。
   live 保留初始化 max-speed 上限和静态碰撞器；无 GPU 溢出监控/live 遥测，不作性能或长期容量安全声明。

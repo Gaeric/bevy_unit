@@ -1,36 +1,24 @@
 //! Prepare local-space collider data on its entity for GPU upload.
 
+mod bvh;
+pub(crate) mod gpu;
+pub(crate) mod refit;
+pub(crate) mod transform;
+
 use bevy::{
     mesh::PrimitiveTopology,
     prelude::*,
     render::{RenderApp, extract_component::ExtractComponent},
 };
 
-use super::{
-    bindings::ColliderContactBindGroup,
+use crate::{components::MeshCollider, solver::bindings::ColliderContactBindGroup};
+
+use self::{
     bvh::{TriangleBvh, build_triangle_bvh},
-    collider_gpu::GpuCollider,
-    collider_refit::ColliderRefit,
-    collider_transform::{ColliderTransform, ColliderTransformBindGroup},
+    gpu::GpuCollider,
+    refit::ColliderRefit,
+    transform::{ColliderTransform, ColliderTransformBindGroup},
 };
-
-/// Triangle-mesh collider input, placed on the actual Mesh3d entity.
-///
-/// Add only after the Mesh is loaded and CPU-readable. Replacing Mesh3d prepares
-/// new source geometry, independent of the entity transform. In-place Mesh edits
-/// are not tracked. Failed inputs are not retried; fix the input and re-add this
-/// marker or replace the Mesh handle to prepare again.
-#[derive(Component, Debug)]
-pub struct MeshCollider;
-
-/// Cloth and collider match by exact group equality, not a bit mask.
-///
-/// Absence of this component means group 0. Matching will be consumed when
-/// contact solving is connected; changing groups does not rebuild geometry.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, ExtractComponent)]
-#[extract_app(RenderApp)]
-#[extract_component_filter(Changed<CollisionGroup>)]
-pub struct CollisionGroup(pub u32);
 
 /// CPU-prepared collider data, extracted only when added or replaced.
 #[derive(Component, Clone, Debug, ExtractComponent)]
@@ -44,7 +32,7 @@ pub struct CollisionGroup(pub u32);
     ColliderRefit,
     ColliderContactBindGroup
 ))]
-pub(super) struct PreparedCollider {
+pub(crate) struct PreparedCollider {
     /// Local-space points in homogeneous coordinates; w is always one.
     pub positions: Vec<[f32; 4]>,
     /// Original triangle indices, three entries per triangle.
@@ -93,7 +81,7 @@ fn prepare_collider(mesh: &Mesh) -> Result<PreparedCollider, String> {
 }
 
 /// Prepare on marker addition or Mesh handle replacement, without retrying.
-pub(super) fn prepare_colliders(
+pub(crate) fn prepare_colliders(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
     colliders: Query<
@@ -139,7 +127,7 @@ pub(super) fn prepare_colliders(
 }
 
 /// Remove prepared data when the entity no longer has both required inputs.
-pub(super) fn clear_removed_colliders(
+pub(crate) fn clear_removed_colliders(
     mut commands: Commands,
     mut removed_colliders: RemovedComponents<MeshCollider>,
     mut removed_meshes: RemovedComponents<Mesh3d>,
@@ -160,6 +148,8 @@ pub(super) fn clear_removed_colliders(
 mod tests {
     use super::*;
     use bevy::{asset::RenderAssetUsages, mesh::Indices};
+
+    use crate::components::CollisionGroup;
 
     fn triangle() -> Mesh {
         Mesh::new(

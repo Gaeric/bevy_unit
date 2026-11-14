@@ -52,7 +52,11 @@
    - 若声称性能改善：测量条件、前后数据和代价是否齐全？
 
 * next steps
-  Updated: 2026-11-13. Current work targets =src/xpbd/=, not the historical =src/reference/= Jacobi path.
+  路径同步：2026-11-14。当前主线为 =src/components.rs=（公开输入）、=src/plugin.rs=（装配）、
+  =src/prepare/=（CPU 准备）、=src/solver/=（GPU 求解）、=src/collision/=（网格碰撞）和 =src/output/=（输出），
+  公共入口由 =src/lib.rs= 根导出；不是历史 =src/reference/= Jacobi 路径。
+  本次职责拆分仅调整代码组织，不改算法、字段、默认值或调度；=ClothStepSettings= 仍是 per-cloth Component。
+  公共 Resource 的设计待讨论，当前没有 =resources.rs=。以下 stop、步数与验证记录保留原批次口径，不代表本次新验证。
   目标：CPU 建 BVH，GPU 查询三角网格接触并 refit；SDF 留作后期候选。
   以下十步按逻辑变化逐批审阅、实现和验证，不要求一次完成，也不自动执行 Git commit。
 

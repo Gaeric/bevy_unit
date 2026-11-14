@@ -19,11 +19,12 @@ use bevy::{
 use bytemuck::{Pod, Zeroable};
 use std::num::NonZeroU64;
 
+use crate::solver::pipeline::WORKGROUP_SIZE;
+
 use super::{
-    collider::PreparedCollider,
-    collider_gpu::GpuCollider,
-    collider_transform::{ColliderTransform, ColliderTransformBindGroup},
-    pipeline::WORKGROUP_SIZE,
+    PreparedCollider,
+    gpu::GpuCollider,
+    transform::{ColliderTransform, ColliderTransformBindGroup},
 };
 
 /// One immutable uniform slot per dispatch: leaves first, then each internal depth.
@@ -41,13 +42,13 @@ fn refit_param_stride(device: &RenderDevice) -> u32 {
 }
 
 #[derive(Resource)]
-pub(super) struct ColliderRefitPipeline {
+pub(crate) struct ColliderRefitPipeline {
     layout: BindGroupLayoutDescriptor,
-    pub(super) leaves: CachedComputePipelineId,
-    pub(super) internal: CachedComputePipelineId,
+    pub(crate) leaves: CachedComputePipelineId,
+    pub(crate) internal: CachedComputePipelineId,
 }
 
-pub(super) fn init_refit_pipeline(
+pub(crate) fn init_refit_pipeline(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     cache: Res<PipelineCache>,
@@ -85,7 +86,7 @@ pub(super) fn init_refit_pipeline(
 
 /// Per-collider refit resources and progress, recreated with geometry buffers.
 #[derive(Component)]
-pub(super) struct ColliderRefit {
+pub(crate) struct ColliderRefit {
     /// Retains the refit node-list and parameter buffers as well as geometry bindings.
     bind_group: BindGroup,
     /// Leaves first, then one dispatch per internal depth.
@@ -94,7 +95,7 @@ pub(super) struct ColliderRefit {
     submitted: Option<Mat4>,
 }
 
-pub(super) fn prepare_refits(
+pub(crate) fn prepare_refits(
     mut commands: Commands,
     device: Res<RenderDevice>,
     cache: Res<PipelineCache>,
@@ -161,7 +162,7 @@ pub(super) fn prepare_refits(
 }
 
 /// Run after vertex transformation and before any contact queries.
-pub(super) fn refit_colliders(
+pub(crate) fn refit_colliders(
     mut context: RenderContext,
     cache: Res<PipelineCache>,
     pipeline: Res<ColliderRefitPipeline>,

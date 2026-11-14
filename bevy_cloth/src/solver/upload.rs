@@ -5,16 +5,18 @@ use bevy::{
     render::{render_resource::PipelineCache, renderer::RenderDevice},
 };
 
+use crate::prepare::PreparedCloth;
+
 use super::{
     bindings::{
         ClothBendBindGroupLayout, ClothBindGroup, ClothBindGroupLayout, ContactBindGroupLayout,
     },
     gpu::GpuCloth,
-    layout::{PreparedCloth, StepParams},
+    layout::StepParams,
     tick::ClothSimulation,
 };
 
-pub(super) fn upload_cloths(
+pub(crate) fn upload_cloths(
     mut commands: Commands,
     device: Res<RenderDevice>,
     cache: Res<PipelineCache>,

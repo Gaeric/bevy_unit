@@ -4,7 +4,6 @@ use bevy::{
     prelude::*,
     render::{
         RenderApp,
-        extract_component::ExtractComponent,
         extract_resource::ExtractResource,
         render_resource::{
             BindGroup, ComputePass, ComputePassDescriptor, ComputePipeline, PipelineCache,
@@ -13,15 +12,18 @@ use bevy::{
     },
 };
 
+use crate::{
+    collision::{refit::ColliderRefitPipeline, transform::ColliderTransformPipeline},
+    components::{ClothStepSettings, CollisionGroup},
+    prepare::PreparedCloth,
+};
+
 use super::{
     bindings::{
         ClothBendBindGroup, ClothBindGroup, ClothContactBindGroup, ColliderContactBindGroup,
     },
-    collider::CollisionGroup,
-    collider_refit::ColliderRefitPipeline,
-    collider_transform::ColliderTransformPipeline,
     gpu::{GpuCloth, group_param_stride},
-    layout::{PreparedCloth, StepParams},
+    layout::StepParams,
     pipeline::{ClothBendPipeline, ClothContactPipeline, ClothPipelines, WORKGROUP_SIZE},
 };
 
@@ -29,41 +31,17 @@ use super::{
 /// Render World reads this value without modifying it.
 #[derive(Resource, Clone, Default, ExtractResource)]
 #[extract_app(RenderApp)]
-pub(super) struct ClothTicks {
+pub(crate) struct ClothTicks {
     pub requested: u64,
 }
 
-pub(super) fn request_tick(mut ticks: ResMut<ClothTicks>) {
+pub(crate) fn request_tick(mut ticks: ResMut<ClothTicks>) {
     ticks.requested += 1;
-}
-
-/// Per-cloth simulation settings, read at initialization; runtime edits are not applied.
-/// Gravity is copied into GPU StepParams; substeps and iterations control dispatches.
-#[derive(Component, Clone, Copy, Debug, ExtractComponent)]
-#[extract_app(RenderApp)]
-#[extract_component_filter(Added<ClothStepSettings>)]
-pub struct ClothStepSettings {
-    /// World-space acceleration, in m/s².
-    pub gravity: Vec3,
-    /// Number of time subdivisions per fixed tick; must be nonzero.
-    pub substeps: u32,
-    /// Complete constraint sweeps per substep; must be nonzero.
-    pub iterations: u32,
-}
-
-impl Default for ClothStepSettings {
-    fn default() -> Self {
-        Self {
-            gravity: Vec3::new(0.0, -9.8, 0.0),
-            substeps: 6,
-            iterations: 2,
-        }
-    }
 }
 
 /// Per-instance command-recording progress, not GPU completion progress.
 #[derive(Component, Default)]
-pub(super) struct ClothSimulation {
+pub(crate) struct ClothSimulation {
     /// None until the GPU data and all pipelines are ready.
     pub submitted: Option<u64>,
 }
@@ -90,7 +68,7 @@ fn record_contacts(
 }
 
 /// Record pending ticks after collider transformation/refit and before rendering.
-pub(super) fn simulate_cloths(
+pub(crate) fn simulate_cloths(
     mut context: RenderContext,
     ticks: Res<ClothTicks>,
     cache: Res<PipelineCache>,

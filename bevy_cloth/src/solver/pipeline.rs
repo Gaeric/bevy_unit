@@ -1,4 +1,4 @@
-//! Compute pipelines for XPBD simulation and mesh output.
+//! Compute pipelines for XPBD simulation.
 
 use bevy::{
     asset::load_embedded_asset,
@@ -6,53 +6,26 @@ use bevy::{
     render::render_resource::{CachedComputePipelineId, ComputePipelineDescriptor, PipelineCache},
 };
 
-use super::bindings::{
-    ClothBendBindGroupLayout, ClothBindGroupLayout, ClothOutputBindGroupLayout,
-    ContactBindGroupLayout,
-};
+use super::bindings::{ClothBendBindGroupLayout, ClothBindGroupLayout, ContactBindGroupLayout};
 
 /// Must match the workgroup size of the simulation and output entry points.
-pub(super) const WORKGROUP_SIZE: u32 = 64;
-
-/// Separate from solver pipelines: output readiness does not gate simulation.
-#[derive(Resource)]
-pub(super) struct ClothOutputPipeline {
-    pub output_mesh: CachedComputePipelineId,
-}
-
-pub(super) fn init_output_pipeline(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    cache: Res<PipelineCache>,
-    layout: Res<ClothOutputBindGroupLayout>,
-) {
-    let shader = load_embedded_asset!(asset_server.as_ref(), "output.wesl");
-    let output_mesh = cache.queue_compute_pipeline(ComputePipelineDescriptor {
-        label: Some("xpbd output_mesh".into()),
-        layout: vec![layout.descriptor.clone()],
-        shader,
-        entry_point: Some("output_mesh".into()),
-        ..default()
-    });
-
-    commands.insert_resource(ClothOutputPipeline { output_mesh });
-}
+pub(crate) const WORKGROUP_SIZE: u32 = 64;
 
 /// Contact readiness is separate until contact dispatch is connected.
 #[derive(Resource)]
-pub(super) struct ClothContactPipeline {
+pub(crate) struct ClothContactPipeline {
     pub solve_contact: CachedComputePipelineId,
     /// Embedded WESL custom imports must be loaded explicitly and kept alive.
     _query_shader: Handle<Shader>,
 }
 
-pub(super) fn init_contact_pipeline(
+pub(crate) fn init_contact_pipeline(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     cache: Res<PipelineCache>,
     layout: Res<ContactBindGroupLayout>,
 ) {
-    let query_shader = load_embedded_asset!(asset_server.as_ref(), "bvh_query.wesl");
+    let query_shader = asset_server.load("embedded://bevy_cloth/collision/bvh_query.wesl");
     let solve_contact = cache.queue_compute_pipeline(ComputePipelineDescriptor {
         label: Some("xpbd solve_contact".into()),
         layout: vec![layout.cloth.clone(), layout.collider.clone()],
@@ -69,11 +42,11 @@ pub(super) fn init_contact_pipeline(
 
 /// Only cloths with dihedral constraints wait for this pipeline.
 #[derive(Resource)]
-pub(super) struct ClothBendPipeline {
+pub(crate) struct ClothBendPipeline {
     pub solve_bending: CachedComputePipelineId,
 }
 
-pub(super) fn init_bend_pipeline(
+pub(crate) fn init_bend_pipeline(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     cache: Res<PipelineCache>,
@@ -90,13 +63,13 @@ pub(super) fn init_bend_pipeline(
 }
 
 #[derive(Resource)]
-pub(super) struct ClothPipelines {
+pub(crate) struct ClothPipelines {
     pub predict: CachedComputePipelineId,
     pub solve_stretch: CachedComputePipelineId,
     pub update_velocity: CachedComputePipelineId,
 }
 
-pub(super) fn init_pipelines(
+pub(crate) fn init_pipelines(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     cache: Res<PipelineCache>,

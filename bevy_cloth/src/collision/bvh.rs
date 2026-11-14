@@ -28,7 +28,7 @@ use std::time::Duration;
 /// GPU refit updates only min/max; tree connections and leaf ranges stay fixed.
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub(super) struct BvhNode {
+pub(crate) struct BvhNode {
     pub min: [f32; 3],
     pub first_index: u32,
     pub max: [f32; 3],
@@ -47,7 +47,7 @@ impl BvhNode {
 /// deepest first, after all leaves, so children finish before their parents.
 /// This record is CPU scheduling metadata, not a GPU buffer payload.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct BvhRefitLayer {
+pub(crate) struct BvhRefitLayer {
     pub depth: u32,
     pub first: u32,
     pub count: u32,
@@ -58,7 +58,7 @@ pub(super) struct BvhRefitLayer {
 /// The tree does not own positions or triangle indices. Keep the matching
 /// geometry separately; original vertex and triangle numbering is preserved.
 #[derive(Clone, Debug)]
-pub(super) struct TriangleBvh {
+pub(crate) struct TriangleBvh {
     /// All nodes; the root is nodes[0]. Upload as array<BvhNode>.
     pub nodes: Vec<BvhNode>,
 

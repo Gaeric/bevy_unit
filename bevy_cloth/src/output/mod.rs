@@ -17,17 +17,23 @@ use bevy::{
 };
 use bytemuck::{Pod, Zeroable};
 
-use super::{
+pub(crate) mod bindings;
+pub(crate) mod pipeline;
+
+use crate::{
+    prepare::PreparedCloth,
+    solver::{gpu::GpuCloth, layout::StepParams, pipeline::WORKGROUP_SIZE},
+};
+
+use self::{
     bindings::{ClothOutputBindGroup, ClothOutputBindGroupLayout},
-    gpu::GpuCloth,
-    layout::{PreparedCloth, StepParams},
-    pipeline::{ClothOutputPipeline, WORKGROUP_SIZE},
+    pipeline::ClothOutputPipeline,
 };
 
 /// Mesh output addressing; offsets and stride are in four-byte words.
 #[repr(C)]
 #[derive(Component, Clone, Copy, Pod, Zeroable)]
-pub(super) struct OutputVertexParams {
+pub(crate) struct OutputVertexParams {
     pub vertex_start: u32,
     pub stride_words: u32,
     pub position_offset_words: u32,
@@ -70,7 +76,7 @@ impl OutputVertexParams {
 
 /// Output data buffers only; bindings and pipelines are managed separately.
 #[derive(Component)]
-pub(super) struct GpuClothOutput {
+pub(crate) struct GpuClothOutput {
     pub normal_offsets: Buffer,
     pub normal_pairs: Buffer,
     pub world_to_local: Buffer,
@@ -111,12 +117,12 @@ impl GpuClothOutput {
 
 /// Output inputs derived from Bevy's main-world components.
 #[derive(Component)]
-pub(super) struct ClothOutputInput {
+pub(crate) struct ClothOutputInput {
     pub mesh: AssetId<Mesh>,
     pub world_to_local: Mat4,
 }
 
-pub(super) fn extract_output_inputs(
+pub(crate) fn extract_output_inputs(
     mut commands: Commands,
     cloths: Extract<Query<(RenderEntity, &Mesh3d, &GlobalTransform), With<PreparedCloth>>>,
 ) {
@@ -128,7 +134,7 @@ pub(super) fn extract_output_inputs(
     }
 }
 
-pub(super) fn prepare_output_data(
+pub(crate) fn prepare_output_data(
     mut commands: Commands,
     device: Res<RenderDevice>,
     allocator: Res<MeshAllocator>,
@@ -162,7 +168,7 @@ pub(super) fn prepare_output_data(
     }
 }
 
-pub(super) fn update_output_params(
+pub(crate) fn update_output_params(
     queue: Res<RenderQueue>,
     allocator: Res<MeshAllocator>,
     mut cloths: Query<(&ClothOutputInput, &GpuClothOutput, &mut OutputVertexParams)>,
@@ -187,7 +193,7 @@ pub(super) fn update_output_params(
 }
 
 /// Create output bindings once and rebuild them when the allocator replaces a buffer.
-pub(super) fn prepare_output_bind_groups(
+pub(crate) fn prepare_output_bind_groups(
     mut commands: Commands,
     device: Res<RenderDevice>,
     cache: Res<PipelineCache>,
@@ -228,7 +234,7 @@ pub(super) fn prepare_output_bind_groups(
 }
 
 /// Write the final particle state into the current mesh allocation once per frame.
-pub(super) fn output_cloths(
+pub(crate) fn output_cloths(
     mut context: RenderContext,
     cache: Res<PipelineCache>,
     pipeline: Res<ClothOutputPipeline>,

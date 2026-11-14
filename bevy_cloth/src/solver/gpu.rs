@@ -9,12 +9,14 @@ use bevy::{
 };
 use std::mem::size_of;
 
-use super::layout::{ConstraintGroup, GroupParams, PreparedCloth, StepParams};
+use crate::prepare::{ConstraintGroup, PreparedCloth};
+
+use super::layout::{GroupParams, StepParams};
 
 /// Present only when the prepared cloth has dihedral constraints.
 /// Lambda indices follow the color-reordered bend array, not the source edges.
 /// Cleared at each substep start, accumulated across colored bend iterations.
-pub(super) struct GpuBending {
+pub(crate) struct GpuBending {
     pub constraints: Buffer,
     pub lambdas: Buffer,
     pub group_params: Buffer,
@@ -22,7 +24,7 @@ pub(super) struct GpuBending {
 
 /// Owns only the data buffers uploaded to the GPU.
 #[derive(Component)]
-pub(super) struct GpuCloth {
+pub(crate) struct GpuCloth {
     pub particles: Buffer,
     pub velocities: Buffer,
     pub previous_positions: Buffer,
@@ -134,7 +136,7 @@ fn pack_group_params(groups: &[ConstraintGroup], stride: usize) -> Vec<u8> {
 }
 
 /// Byte distance between color slots; a color's dynamic offset is index * stride.
-pub(super) fn group_param_stride(device: &RenderDevice) -> u32 {
+pub(crate) fn group_param_stride(device: &RenderDevice) -> u32 {
     let alignment = device.limits().min_uniform_buffer_offset_alignment;
     let payload_size = size_of::<GroupParams>() as u32;
     payload_size.div_ceil(alignment) * alignment

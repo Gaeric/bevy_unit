@@ -2,7 +2,7 @@ use bevy::{
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     prelude::*,
 };
-use bevy_cloth::xpbd::{Attachment, ClothStepSettings, MeshCollider, StretchCloth, XpbdPlugin};
+use bevy_cloth::{Attachment, ClothStepSettings, MeshCollider, StretchCloth, XpbdPlugin};
 
 const SEGMENTS: u32 = 16;
 

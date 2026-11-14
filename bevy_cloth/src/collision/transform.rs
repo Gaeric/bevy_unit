@@ -19,13 +19,15 @@ use bevy::{
 };
 use std::num::NonZeroU64;
 
-use super::{collider::PreparedCollider, collider_gpu::GpuCollider, pipeline::WORKGROUP_SIZE};
+use crate::solver::pipeline::WORKGROUP_SIZE;
+
+use super::{PreparedCollider, gpu::GpuCollider};
 
 /// Complete world transform, including parent transforms.
 #[derive(Component)]
-pub(super) struct ColliderTransform(pub Mat4);
+pub(crate) struct ColliderTransform(pub Mat4);
 
-pub(super) fn extract_collider_transforms(
+pub(crate) fn extract_collider_transforms(
     mut commands: Commands,
     colliders: Extract<
         Query<
@@ -51,12 +53,12 @@ pub(super) fn extract_collider_transforms(
 }
 
 #[derive(Resource)]
-pub(super) struct ColliderTransformPipeline {
+pub(crate) struct ColliderTransformPipeline {
     layout: BindGroupLayoutDescriptor,
-    pub(super) transform_vertices: CachedComputePipelineId,
+    pub(crate) transform_vertices: CachedComputePipelineId,
 }
 
-pub(super) fn init_transform_pipeline(
+pub(crate) fn init_transform_pipeline(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     cache: Res<PipelineCache>,
@@ -87,12 +89,12 @@ pub(super) fn init_transform_pipeline(
 
 /// Recreated with GPU buffers; None guarantees the first transform is dispatched.
 #[derive(Component)]
-pub(super) struct ColliderTransformBindGroup {
+pub(crate) struct ColliderTransformBindGroup {
     bind_group: BindGroup,
-    pub(super) submitted: Option<Mat4>,
+    pub(crate) submitted: Option<Mat4>,
 }
 
-pub(super) fn prepare_transform_bind_groups(
+pub(crate) fn prepare_transform_bind_groups(
     mut commands: Commands,
     device: Res<RenderDevice>,
     cache: Res<PipelineCache>,
@@ -121,7 +123,7 @@ pub(super) fn prepare_transform_bind_groups(
 
 /// Record world-point updates before later BVH refit/query commands.
 /// submitted tracks command recording, not GPU completion or BVH readiness.
-pub(super) fn transform_collider_vertices(
+pub(crate) fn transform_collider_vertices(
     mut context: RenderContext,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,

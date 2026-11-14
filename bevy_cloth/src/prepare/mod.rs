@@ -1,18 +1,22 @@
 //! Validate mesh inputs and prepare initial cloth data.
 
+mod bending;
+mod data;
+
 use bevy::{camera::visibility::NoFrustumCulling, mesh::PrimitiveTopology, prelude::*};
 use std::collections::BTreeSet;
 
-use super::{
-    StretchCloth,
-    bending::prepare_bending,
-    layout::{ConstraintGroup, FixedAttachment, Particle, PreparedCloth, StepParams, Stretch},
-    tick::ClothStepSettings,
+use crate::{
+    components::{ClothStepSettings, StretchCloth},
+    solver::layout::{FixedAttachment, Particle, StepParams, Stretch},
 };
+
+use bending::prepare_bending;
+pub(crate) use data::{ConstraintGroup, PreparedCloth};
 
 /// Prepare newly added cloths once, after world transforms have propagated.
 /// Source meshes must already be loaded and CPU-readable.
-pub(super) fn prepare_added_cloths(
+pub(crate) fn prepare_added_cloths(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
     time: Res<Time<Fixed>>,
@@ -247,7 +251,7 @@ fn build_normal_adjacency(particle_count: usize, indices: &[u32]) -> (Vec<u32>, 
 }
 
 /// Prepare particles and stretch constraints from validated inputs.
-pub(super) fn prepare_mesh(
+pub(crate) fn prepare_mesh(
     mesh: &Mesh,
     transform: &GlobalTransform,
     config: &StretchCloth,
@@ -335,7 +339,7 @@ pub(super) fn prepare_mesh(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::xpbd::Attachment;
+    use crate::components::Attachment;
     use bevy::{asset::RenderAssetUsages, mesh::Indices};
 
     fn hinge_mesh() -> Mesh {

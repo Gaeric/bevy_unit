@@ -3,7 +3,9 @@
 use bevy::{math::DVec3, prelude::*};
 use std::collections::BTreeMap;
 
-use super::layout::{Bend, ConstraintGroup, Particle};
+use crate::solver::layout::{Bend, Particle};
+
+use super::ConstraintGroup;
 
 #[derive(Clone, Copy)]
 struct EdgeFace {
@@ -14,7 +16,7 @@ struct EdgeFace {
 
 /// Inputs have validated triangle indices, finite world positions and compliance.
 /// Source indices define connectivity; coincident vertices are not welded.
-pub(super) fn prepare_bending(
+pub(crate) fn prepare_bending(
     particles: &[Particle],
     indices: &[u32],
     compliance: f32,

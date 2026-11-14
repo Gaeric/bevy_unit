@@ -1,20 +1,4 @@
-//! New GPU XPBD implementation, independent of the historical solvers.
-//! CPU preparation and GPU data/binding.
-
-mod bending;
-mod bindings;
-mod bvh;
-mod collider;
-mod collider_gpu;
-mod collider_refit;
-mod collider_transform;
-mod gpu;
-mod layout;
-mod output;
-mod pipeline;
-mod prepare;
-mod tick;
-mod upload;
+//! Cloth plugin assembly and execution order across Main World and Render World.
 
 use bevy::{
     asset::embedded_asset,
@@ -31,13 +15,21 @@ use bevy::{
     transform::TransformSystems,
 };
 
-pub use self::collider::{CollisionGroup, MeshCollider};
-pub use self::tick::ClothStepSettings;
-
-use self::{
-    collider::PreparedCollider,
-    layout::{PreparedCloth, StepParams},
-    tick::ClothTicks,
+use crate::{
+    collision::{
+        self, PreparedCollider, gpu as collider_gpu, refit as collider_refit,
+        transform as collider_transform,
+    },
+    components::{ClothStepSettings, CollisionGroup},
+    output::{self, bindings::ClothOutputBindGroupLayout, pipeline::init_output_pipeline},
+    prepare::{self, PreparedCloth},
+    solver::{
+        bindings,
+        layout::StepParams,
+        pipeline,
+        tick::{self, ClothTicks},
+        upload,
+    },
 };
 
 /// Prepares, simulates and writes newly added cloth meshes on GPU.
@@ -45,12 +37,12 @@ pub struct XpbdPlugin;
 
 impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
-        embedded_asset!(app, "layout.wesl");
-        embedded_asset!(app, "bending.wesl");
-        embedded_asset!(app, "output.wesl");
-        embedded_asset!(app, "bvh_query.wesl");
-        embedded_asset!(app, "collider_transform.wesl");
-        embedded_asset!(app, "collider_refit.wesl");
+        embedded_asset!(app, "solver/layout.wesl");
+        embedded_asset!(app, "solver/bending.wesl");
+        embedded_asset!(app, "output/output.wesl");
+        embedded_asset!(app, "collision/bvh_query.wesl");
+        embedded_asset!(app, "collision/collider_transform.wesl");
+        embedded_asset!(app, "collision/collider_refit.wesl");
 
         app.init_resource::<ClothTicks>()
             .add_plugins((
@@ -69,8 +61,8 @@ impl Plugin for XpbdPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    collider::clear_removed_colliders,
-                    collider::prepare_colliders,
+                    collision::clear_removed_colliders,
+                    collision::prepare_colliders,
                 )
                     .chain(),
             );
@@ -86,7 +78,7 @@ impl Plugin for XpbdPlugin {
         render_app
             .insert_resource(bindings::ClothBindGroupLayout::new())
             .insert_resource(bindings::ClothBendBindGroupLayout::new())
-            .insert_resource(bindings::ClothOutputBindGroupLayout::new())
+            .insert_resource(ClothOutputBindGroupLayout::new())
             .insert_resource(bindings::ContactBindGroupLayout::new())
             .add_systems(
                 ExtractSchedule,
@@ -100,7 +92,7 @@ impl Plugin for XpbdPlugin {
                 (
                     pipeline::init_pipelines,
                     pipeline::init_bend_pipeline,
-                    pipeline::init_output_pipeline,
+                    init_output_pipeline,
                     pipeline::init_contact_pipeline,
                     collider_transform::init_transform_pipeline,
                     collider_refit::init_refit_pipeline,
@@ -133,33 +125,4 @@ impl Plugin for XpbdPlugin {
                     .before(camera_driver),
             );
     }
-}
-
-/// Stretch and dihedral-bending cloth input, placed on an entity with `Mesh3d`.
-///
-/// Add only after the entity has Mesh3d and its source Mesh is loaded and
-/// CPU-readable. Each mesh vertex corresponds to one particle; no welding is
-/// implied. Initial data is prepared once; later input changes do not rebuild it.
-#[derive(Component, Debug)]
-#[require(ClothStepSettings)]
-pub struct StretchCloth {
-    /// Mass of each free particle
-    pub particle_mass: f32,
-    /// XPBD distance-constraint compliance, in m/N; zero means inextensible.
-    pub stretch_compliance: f32,
-    /// XPBD dihedral-angle compliance; zero preserves the rest angle as a hard constraint.
-    pub bend_compliance: f32,
-    pub attachments: Vec<Attachment>,
-    /// World-space contact thickness, in meters.
-    pub collision_margin: f32,
-    /// Resolve contact on both sides of the triangle surface.
-    pub double_sided: bool,
-}
-
-/// A particle constrained to a fixed world-space position, not a distance limit.
-#[derive(Clone, Copy, Debug)]
-pub struct Attachment {
-    /// Index into the source mesh's POSITION attribute.
-    pub particle: u32,
-    pub position: Vec3,
 }

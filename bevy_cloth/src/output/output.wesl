@@ -1,6 +1,6 @@
 // Convert world-space particles into local-space mesh positions and normals.
 
-import super::layout::Particle;
+import super::super::solver::layout::Particle;
 
 // Offsets and stride are measured in four-byte words, matching OutputVertexParams.
 struct OutputVertexParams {
