@@ -10,6 +10,8 @@
 //! - stretch_lambdas: `array<f32>`, 4-byte stride; one accumulated XPBD lambda per
 //!   reordered stretch constraint. Clear at each substep start, accumulate across
 //!   constraint iterations within that substep. No cross-substep warm starting.
+//! - bend: `array<Bend>`, 32-byte stride; read-only, independently color-reordered.
+//! - bend_lambdas: `array<f32>`, zero-initialized; solving/clearing not yet dispatched.
 //! - attachments: `array<FixedAttachment>`, 16-byte stride; read-only fixed targets.
 //!
 //! Particle, velocity and previous-position arrays share particle indices.
@@ -133,8 +135,8 @@ pub(super) struct StepParams {
 ///     padding: vec2<u32>,
 /// }
 ///
-/// A thread with local constraint index i handles stretch[start + i], only if
-/// i < count. The same index selects its accumulated stretch lambda.
+/// A thread with local constraint index i handles constraint[start + i], only
+/// if i < count. Stretch and bend use separate buffers with this same format.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub(super) struct GroupParams {
@@ -144,7 +146,7 @@ pub(super) struct GroupParams {
     pub padding: [u32; 2],
 }
 
-/// A color group's contiguous range in the reordered stretch array.
+/// A color group's contiguous range in a reordered constraint array.
 ///
 /// Used only by the CPU to record dispatches; not uploaded as GPU storage data.
 /// Each dispatch passes its range through a separate `GroupParams` payload.
@@ -179,7 +181,7 @@ pub(super) struct PreparedCloth {
     /// Initial dihedral constraints, arranged contiguously by their own colors.
     pub bend: Vec<Bend>,
 
-    /// Bend color groups; currently CPU preparation only, not dispatched.
+    /// Bend color groups; uploaded with independent uniform slots, not dispatched yet.
     pub bend_groups: Vec<ConstraintGroup>,
 
     /// Fixed particles and their world-space targets.

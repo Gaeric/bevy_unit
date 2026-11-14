@@ -6,7 +6,10 @@ use bevy::{
     render::render_resource::{CachedComputePipelineId, ComputePipelineDescriptor, PipelineCache},
 };
 
-use super::bindings::{ClothBindGroupLayout, ClothOutputBindGroupLayout, ContactBindGroupLayout};
+use super::bindings::{
+    ClothBendBindGroupLayout, ClothBindGroupLayout, ClothOutputBindGroupLayout,
+    ContactBindGroupLayout,
+};
 
 /// Must match the workgroup size of the simulation and output entry points.
 pub(super) const WORKGROUP_SIZE: u32 = 64;
@@ -61,6 +64,29 @@ pub(super) fn init_contact_pipeline(
     commands.insert_resource(ClothContactPipeline {
         solve_contact,
         _query_shader: query_shader,
+    });
+}
+
+/// Prepared but not queued until bending.wesl defines solve_bending.
+/// This batch must not compile a missing entry or gate the existing solver on it.
+#[derive(Resource)]
+pub(super) struct ClothBendPipeline {
+    pub descriptor: ComputePipelineDescriptor,
+}
+
+pub(super) fn init_bend_pipeline(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    layout: Res<ClothBendBindGroupLayout>,
+) {
+    commands.insert_resource(ClothBendPipeline {
+        descriptor: ComputePipelineDescriptor {
+            label: Some("xpbd solve_bending".into()),
+            layout: vec![layout.descriptor.clone()],
+            shader: load_embedded_asset!(asset_server.as_ref(), "bending.wesl"),
+            entry_point: Some("solve_bending".into()),
+            ..default()
+        },
     });
 }
 

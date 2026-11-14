@@ -17,8 +17,8 @@ use std::{mem::size_of, num::NonZeroU64};
 
 use super::{
     collider_gpu::GpuCollider,
-    gpu::GpuCloth,
-    layout::{GroupParams, Particle, StepParams, Stretch},
+    gpu::{GpuBending, GpuCloth},
+    layout::{Bend, GroupParams, Particle, StepParams, Stretch},
     output::{GpuClothOutput, OutputVertexParams},
 };
 
@@ -181,6 +181,68 @@ impl ContactBindGroupLayout {
                 collider.indices.as_entire_binding(),
                 collider.nodes.as_entire_binding(),
                 collider.triangle_refs.as_entire_binding(),
+            )),
+        ))
+    }
+}
+
+/// Dihedral interface, separate from stretch/contact binding layouts.
+#[derive(Component)]
+pub(super) struct ClothBendBindGroup(pub BindGroup);
+
+#[derive(Resource)]
+pub(super) struct ClothBendBindGroupLayout {
+    pub descriptor: BindGroupLayoutDescriptor,
+}
+
+impl ClothBendBindGroupLayout {
+    pub fn new() -> Self {
+        Self {
+            descriptor: BindGroupLayoutDescriptor::new(
+                "xpbd bend layout",
+                &BindGroupLayoutEntries::sequential(
+                    ShaderStages::COMPUTE,
+                    (
+                        uniform_buffer_sized(
+                            false,
+                            NonZeroU64::new(size_of::<StepParams>() as u64),
+                        ),
+                        storage_buffer_sized(false, NonZeroU64::new(size_of::<Particle>() as u64)),
+                        uniform_buffer_sized(
+                            true,
+                            NonZeroU64::new(size_of::<GroupParams>() as u64),
+                        ),
+                        storage_buffer_read_only_sized(
+                            false,
+                            NonZeroU64::new(size_of::<Bend>() as u64),
+                        ),
+                        storage_buffer_sized(false, NonZeroU64::new(size_of::<f32>() as u64)),
+                    ),
+                ),
+            ),
+        }
+    }
+
+    pub fn create_bind_group(
+        &self,
+        device: &RenderDevice,
+        cache: &PipelineCache,
+        cloth: &GpuCloth,
+        bending: &GpuBending,
+    ) -> ClothBendBindGroup {
+        ClothBendBindGroup(device.create_bind_group(
+            "xpbd bend bind group",
+            &cache.get_bind_group_layout(&self.descriptor),
+            &BindGroupEntries::sequential((
+                cloth.step_params.as_entire_binding(),
+                cloth.particles.as_entire_binding(),
+                BindingResource::Buffer(BufferBinding {
+                    buffer: &bending.group_params,
+                    offset: 0,
+                    size: NonZeroU64::new(size_of::<GroupParams>() as u64),
+                }),
+                bending.constraints.as_entire_binding(),
+                bending.lambdas.as_entire_binding(),
             )),
         ))
     }

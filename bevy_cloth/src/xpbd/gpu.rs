@@ -9,7 +9,16 @@ use bevy::{
 };
 use std::mem::size_of;
 
-use super::layout::{GroupParams, PreparedCloth, StepParams};
+use super::layout::{ConstraintGroup, GroupParams, PreparedCloth, StepParams};
+
+/// Present only when the prepared cloth has dihedral constraints.
+/// Lambda indices follow the color-reordered bend array, not the source edges.
+/// Allocated here; substep clearing and solving are connected in a later batch.
+pub(super) struct GpuBending {
+    pub constraints: Buffer,
+    pub lambdas: Buffer,
+    pub group_params: Buffer,
+}
 
 /// Owns only the data buffers uploaded to the GPU.
 #[derive(Component)]
@@ -19,6 +28,7 @@ pub(super) struct GpuCloth {
     pub previous_positions: Buffer,
     pub stretch: Buffer,
     pub stretch_lambdas: Buffer,
+    pub bending: Option<GpuBending>,
     pub step_params: Buffer,
     pub group_params: Buffer,
 }
@@ -38,23 +48,33 @@ impl GpuCloth {
             .collect();
         let stretch_lambdas = vec![0.0_f32; prepared.stretch.len()];
 
-        // One aligned uniform slot per color.
+        // Separate color arrays share the same dynamic-uniform slot format.
         let stride = group_param_stride(device) as usize;
-        let mut group_bytes = vec![0_u8; prepared.groups.len() * stride];
-
-        for (index, group) in prepared.groups.iter().enumerate() {
-            let params = GroupParams {
-                start: group.start,
-                count: group.count,
-                padding: [0; 2],
-            };
-            let offset = index * stride;
-            group_bytes[offset..offset + size_of::<GroupParams>()]
-                .copy_from_slice(bytemuck::bytes_of(&params));
-        }
+        let group_bytes = pack_group_params(&prepared.groups, stride);
 
         let storage = BufferUsages::STORAGE | BufferUsages::COPY_DST;
         let uniform = BufferUsages::UNIFORM | BufferUsages::COPY_DST;
+        let bending = (!prepared.bend.is_empty()).then(|| {
+            let lambdas = vec![0.0_f32; prepared.bend.len()];
+            let groups = pack_group_params(&prepared.bend_groups, stride);
+            GpuBending {
+                constraints: device.create_buffer_with_data(&BufferInitDescriptor {
+                    label: Some("xpbd bend constraints"),
+                    contents: bytemuck::cast_slice(&prepared.bend),
+                    usage: BufferUsages::STORAGE,
+                }),
+                lambdas: device.create_buffer_with_data(&BufferInitDescriptor {
+                    label: Some("xpbd bend lambdas"),
+                    contents: bytemuck::cast_slice(&lambdas),
+                    usage: storage,
+                }),
+                group_params: device.create_buffer_with_data(&BufferInitDescriptor {
+                    label: Some("xpbd bend group params"),
+                    contents: &groups,
+                    usage: BufferUsages::UNIFORM,
+                }),
+            }
+        });
 
         Self {
             particles: device.create_buffer_with_data(&BufferInitDescriptor {
@@ -82,6 +102,7 @@ impl GpuCloth {
                 contents: bytemuck::cast_slice(&stretch_lambdas),
                 usage: storage,
             }),
+            bending,
             step_params: device.create_buffer_with_data(&BufferInitDescriptor {
                 label: Some("xpbd step params"),
                 contents: bytemuck::bytes_of(step),
@@ -94,6 +115,22 @@ impl GpuCloth {
             }),
         }
     }
+}
+
+/// One immutable, device-aligned uniform slot per constraint color.
+fn pack_group_params(groups: &[ConstraintGroup], stride: usize) -> Vec<u8> {
+    let mut bytes = vec![0_u8; groups.len() * stride];
+    for (index, group) in groups.iter().enumerate() {
+        let params = GroupParams {
+            start: group.start,
+            count: group.count,
+            padding: [0; 2],
+        };
+        let offset = index * stride;
+        bytes[offset..offset + size_of::<GroupParams>()]
+            .copy_from_slice(bytemuck::bytes_of(&params));
+    }
+    bytes
 }
 
 /// Byte distance between color slots; a color's dynamic offset is index * stride.

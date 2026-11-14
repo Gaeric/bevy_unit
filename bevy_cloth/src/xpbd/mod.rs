@@ -46,6 +46,7 @@ pub struct XpbdPlugin;
 impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "layout.wesl");
+        embedded_asset!(app, "bending.wesl");
         embedded_asset!(app, "output.wesl");
         embedded_asset!(app, "bvh_query.wesl");
         embedded_asset!(app, "collider_transform.wesl");
@@ -84,6 +85,7 @@ impl Plugin for XpbdPlugin {
 
         render_app
             .insert_resource(bindings::ClothBindGroupLayout::new())
+            .insert_resource(bindings::ClothBendBindGroupLayout::new())
             .insert_resource(bindings::ClothOutputBindGroupLayout::new())
             .insert_resource(bindings::ContactBindGroupLayout::new())
             .add_systems(
@@ -97,6 +99,7 @@ impl Plugin for XpbdPlugin {
                 RenderStartup,
                 (
                     pipeline::init_pipelines,
+                    pipeline::init_bend_pipeline,
                     pipeline::init_output_pipeline,
                     pipeline::init_contact_pipeline,
                     collider_transform::init_transform_pipeline,
