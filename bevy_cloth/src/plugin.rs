@@ -38,6 +38,9 @@ pub struct XpbdPlugin;
 impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "solver/layout.wesl");
+        embedded_asset!(app, "solver/integration.wesl");
+        embedded_asset!(app, "solver/stretch.wesl");
+        embedded_asset!(app, "solver/contact.wesl");
         embedded_asset!(app, "solver/bending.wesl");
         embedded_asset!(app, "output/output.wesl");
         embedded_asset!(app, "collision/bvh_query.wesl");

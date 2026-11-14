@@ -39,9 +39,10 @@
   | 目录 | 用途 | 当前边界 |
   |------+------+----------|
   | =src/components.rs=、=src/plugin.rs= | 当前 XPBD 公开输入与插件装配；公共类型由 =src/lib.rs= 根导出 | 当前工作与验证边界见 =plan.org= |
-  | =src/prepare/{mod,bending,data}.rs= | CPU 输入与约束数据准备 | 不属于 GPU 每步求解 |
-  | =src/solver/{layout,gpu,bindings,pipeline,tick,upload}.rs= 及同目录 WESL | GPU 求解布局、资源、管线、tick 与上传 | 主线求解职责 |
-  | =src/collision/=、=src/output/= | 网格碰撞（mod/gpu/bvh/transform/refit 与 query/transform/refit WESL）；输出（mod/bindings/pipeline 与 output.wesl） | 碰撞与输出职责分离 |
+  | =src/prepare/{mesh,systems,bending,data}.rs= | Mesh 数据准备、Bevy 准备系统、弯曲约束与准备结果；mod.rs 仅声明与导出 | 不属于 GPU 每步求解 |
+  | =src/solver/{layout,gpu,bindings,pipeline,tick,upload}.rs= | GPU 求解布局、资源、管线、tick 与上传 | 主线求解职责 |
+  | =src/solver/{layout,integration,stretch,bending,contact}.wesl= | 公共数据定义、时间推进、拉伸、弯曲与接触响应 | layout 仅含共享结构；运算与布局分离 |
+  | =src/collision/=、=src/output/= | 网格碰撞（prepare/gpu/bvh/transform/refit 与 query/transform/refit WESL）；输出（mod/bindings/pipeline 与 output.wesl） | collision/mod.rs 仅声明与导出；碰撞与输出职责分离 |
   | =src/legacy/sim/= | CPU 求解、网格与约束生成、碰撞和空间哈希 | 已有实现与测试，不是独立正确性标准 |
   | =src/legacy/demo/= | 场景、面板、相机、抓取和 Mesh 写回 | 交互演示仍调用 CPU 求解器 |
   | =src/reference/= | 保留的 GPU 参考求解、动态邻居查找、诊断与 live 输出 | 七场景及呈现已实现；隔离all-targets检查通过，设备验收待运行 |

@@ -29,7 +29,7 @@ pub(crate) fn init_contact_pipeline(
     let solve_contact = cache.queue_compute_pipeline(ComputePipelineDescriptor {
         label: Some("xpbd solve_contact".into()),
         layout: vec![layout.cloth.clone(), layout.collider.clone()],
-        shader: load_embedded_asset!(asset_server.as_ref(), "layout.wesl"),
+        shader: load_embedded_asset!(asset_server.as_ref(), "contact.wesl"),
         entry_point: Some("solve_contact".into()),
         ..default()
     });
@@ -67,6 +67,8 @@ pub(crate) struct ClothPipelines {
     pub predict: CachedComputePipelineId,
     pub solve_stretch: CachedComputePipelineId,
     pub update_velocity: CachedComputePipelineId,
+    /// Keep the shared WESL data definitions available to all importing shaders.
+    _layout_shader: Handle<Shader>,
 }
 
 pub(crate) fn init_pipelines(
@@ -75,22 +77,29 @@ pub(crate) fn init_pipelines(
     cache: Res<PipelineCache>,
     layout: Res<ClothBindGroupLayout>,
 ) {
-    let shader = load_embedded_asset!(asset_server.as_ref(), "layout.wesl");
+    let layout_shader = load_embedded_asset!(asset_server.as_ref(), "layout.wesl");
+    let integration_shader = load_embedded_asset!(asset_server.as_ref(), "integration.wesl");
+    let stretch_shader = load_embedded_asset!(asset_server.as_ref(), "stretch.wesl");
 
-    let [predict, solve_stretch, update_velocity] = ["predict", "solve_stretch", "update_velocity"]
-        .map(|entry_point| {
-            cache.queue_compute_pipeline(ComputePipelineDescriptor {
-                label: Some(format!("xpbd {entry_point}").into()),
-                layout: vec![layout.descriptor.clone()],
-                shader: shader.clone(),
-                entry_point: Some(entry_point.into()),
-                ..default()
-            })
-        });
+    let [predict, solve_stretch, update_velocity] = [
+        ("predict", integration_shader.clone()),
+        ("solve_stretch", stretch_shader),
+        ("update_velocity", integration_shader),
+    ]
+    .map(|(entry_point, shader)| {
+        cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some(format!("xpbd {entry_point}").into()),
+            layout: vec![layout.descriptor.clone()],
+            shader,
+            entry_point: Some(entry_point.into()),
+            ..default()
+        })
+    });
 
     commands.insert_resource(ClothPipelines {
         predict,
         solve_stretch,
         update_velocity,
+        _layout_shader: layout_shader,
     });
 }
