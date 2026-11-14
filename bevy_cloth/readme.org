@@ -27,15 +27,23 @@
 * 代码现在在哪里
   | 目录 | 用途 | 当前边界 |
   |------+------+----------|
-  | =src/sim/= | CPU 求解、网格与约束生成、碰撞和空间哈希 | 已有实现与测试，不是独立正确性标准 |
-  | =src/demo/= | 场景、面板、相机、抓取和 Mesh 写回 | 交互演示仍调用 CPU 求解器 |
-  | =src/gpu/= | GPU 求解、动态邻居查找、诊断与 live 输出 | 七场景及呈现已实现；隔离all-targets检查通过，设备验收待运行 |
-  | =tests/= | CPU 与外围测试 | 测试存在或曾通过，不等于全部物理目标已验收 |
+  | =src/xpbd/= | 当前 XPBD 主线 | 当前工作与验证边界见 =plan.org= |
+  | =src/legacy/sim/= | CPU 求解、网格与约束生成、碰撞和空间哈希 | 已有实现与测试，不是独立正确性标准 |
+  | =src/legacy/demo/= | 场景、面板、相机、抓取和 Mesh 写回 | 交互演示仍调用 CPU 求解器 |
+  | =src/ref/= | 保留的 GPU 参考求解、动态邻居查找、诊断与 live 输出 | 七场景及呈现已实现；隔离all-targets检查通过，设备验收待运行 |
+  | =src/legacy/cloth/=、=src/legacy/imported.rs= | 旧 GLB 布料支线及其导入准备 | cloth 依赖 imported，不是当前 XPBD 主线 |
+  | =examples/ref/= | GPU 参考入口 | =velvet-ref=、=velvet-ref-live=、=velvet-ref-scenes= |
+  | =examples/legacy/= | 旧 CPU 演示与 GLB 入口 | 保留原 example 名称 |
+  | =tests/legacy/= | 旧 CPU 与外围测试 | 测试存在或曾通过，不等于全部物理目标已验收 |
 
-  =velvet-gpu= 是一次性无窗口对照；=velvet-gpu-live= 保留小型 fixture 实时入口。
-  =velvet-gpu-scenes= 是共享七场景的独立 GPU 入口；CPU =velvet-scenes= 保留七场景。
+  =src/ref/= 与 =src/legacy/= 并列；原 =src/gpu/imported.rs= 已移至 =src/legacy/imported.rs=。
+  ref 仍依赖 legacy 的 CPU 参考与共享场景，不能直接删除 legacy。
+  以下求解和演示细节描述保留的 ref/legacy 参考实现，不代表当前 XPBD 主线。
+
+  =velvet-ref= 是一次性无窗口对照；=velvet-ref-live= 保留小型 fixture 实时入口。
+  =velvet-ref-scenes= 是共享七场景的独立 GPU 入口；CPU =velvet-scenes= 保留七场景。
   它们不是同一演示的 CPU/GPU 模式开关；GPU七场景已有三角布面、GPU动态法线、共享纹理/光照、阴影及L线框叠加，
-  无CPU面板或抓取。呈现链路已实现，设备视觉待验证；小型 =velvet-gpu-live= 仍为原彩色线框。
+  无CPU面板或抓取。呈现链路已实现，设备视觉待验证；小型 =velvet-ref-live= 仍为原彩色线框。
   生产求解与动态邻居生成都在 GPU；CPU 独立暴力查找只用于小规模诊断。
   动态邻居采用 counting hash、分层 scan、27 个真实 cell 查询、排序唯一 ID 与溢出统计。
   现有 gather 写法是“每个粒子收集自己的约束修正”，避免多个线程同时写同一粒子；
@@ -65,13 +73,13 @@
 
   #+begin_src bash
     cargo run -j 2 -p bevy_cloth --example velvet-scenes         # CPU 七场景演示与面板
-    cargo run -j 2 -p bevy_cloth --example velvet-gpu-scenes -- --scene 1 --paused
-    cargo run -j 2 -p bevy_cloth --example velvet-gpu-scenes -- --scene collision --paused --timing
-    cargo run -j 2 -p bevy_cloth --example velvet-gpu-scenes -- --scene high-resolution --paused --timing
-    cargo run -j 2 -p bevy_cloth --example velvet-gpu            # headless 60 步对照 + 邻居/粒子碰撞专项
-    cargo run -j 2 -p bevy_cloth --example velvet-gpu-live       # 默认 16 分辨率、两层，运行中
-    cargo run -j 2 -p bevy_cloth --example velvet-gpu-live -- --resolution 32 --layers 3 --substeps 4 --iterations 6 --paused --timing
-    cargo run -j 2 -p bevy_cloth --example velvet-gpu-live -- --help
+    cargo run -j 2 -p bevy_cloth --example velvet-ref-scenes -- --scene 1 --paused
+    cargo run -j 2 -p bevy_cloth --example velvet-ref-scenes -- --scene collision --paused --timing
+    cargo run -j 2 -p bevy_cloth --example velvet-ref-scenes -- --scene high-resolution --paused --timing
+    cargo run -j 2 -p bevy_cloth --example velvet-ref            # headless 60 步对照 + 邻居/粒子碰撞专项
+    cargo run -j 2 -p bevy_cloth --example velvet-ref-live       # 默认 16 分辨率、两层，运行中
+    cargo run -j 2 -p bevy_cloth --example velvet-ref-live -- --resolution 32 --layers 3 --substeps 4 --iterations 6 --paused --timing
+    cargo run -j 2 -p bevy_cloth --example velvet-ref-live -- --help
     cargo run -j 2 -p bevy_cloth --example velvet-00-sandbox      # 场景骨架，不是布料模拟验收
     cargo run -j 2 -p bevy_cloth --example velvet-01-collision    # 历史入口，当前实际加载 Attach 场景
   #+end_src
@@ -81,7 +89,7 @@
   鼠标左键拖拽布料，中键转相机，滚轮缩放。UI 控件获得焦点时，Space 不切换暂停。
   操作与重载仍有已知限制，见下节；不要用入口名称代替检查实际场景。
 
-  =velvet-gpu-scenes=：=--scene= 接受数字 =1..7= 或下表名称，另有 =--paused=、=--timing=、=--help=。
+  =velvet-ref-scenes=：=--scene= 接受数字 =1..7= 或下表名称，另有 =--paused=、=--timing=、=--help=。
   默认场景1、运行中、计时关。=1–7= 切场景并暂停，=Space= 暂停/继续，暂停时 =S= 推进一 tick，=R= 重置并暂停，
   =C= 地面/实体碰撞器显隐（不改碰撞计算，隐藏也移除其可见遮挡与投影），=L= 布面三角线框叠加开关；中键环绕、滚轮缩放。
   与 CPU 一样使用 60Hz；下表分辨率是每边分段数，粒子数为 =(resolution+1)² × 布片数=。
@@ -98,10 +106,10 @@
 
   全部默认自碰撞开、neighbors64、hash_interval3，其他参数读取共享 =scene_params=；GPU 不施加旧 fixture 扰动或弯曲柔度覆盖。
   Attach 四角挂点、Collision 顶部两角挂点、Swirl 单挂点，其余无挂点。Multiple 三片布合并到同一求解器/邻居表，支持跨布片自碰撞，不是三个独立求解器。
-  两端共用 =demo/scenes.rs= 场景和运动公式。碰撞器按模拟 tick 上传完整当前/上一模型（含旋转与缩放）；
+  两端共用 =src/legacy/demo/scenes.rs= 场景和运动公式。碰撞器按模拟 tick 上传完整当前/上一模型（含旋转与缩放）；
   首 tick 保留 CPU 初始历史仅平移的行为。Friction 保留0.5秒平移延迟与有符号截断/余数决定的旋转，不能只上传球心忽略旋转历史。
   Swirl 每 tick 更新 attachment slot；球体虽 disabled 仍可见并随槽运动，求解仍上传 legacy disabled 槽，不把它当作活动球体。
-  HD200 仅共享高分辨率场景放宽到200；旧 =velvet-gpu-live --resolution= 上限仍128。
+  HD200 仅共享高分辨率场景放宽到200；旧 =velvet-ref-live --resolution= 上限仍128。
   场景名额不是设备容量承诺：solver-owned buffers、输出实际allocation/binding范围仍按实际设备上限检查，超限拒绝；未测稳定性或性能。
   切换/重置清空待提交 tick、重建场景 Mesh/GPU buffers、复位动画时钟和采样；generation 拒绝旧 Mesh/读回。
   实体碰撞器采用提取 tick 边界，与该次布料输出同步；只画本体，不含 margin/圆角投影包络，不证明无穿透。
@@ -117,7 +125,7 @@
   退化三角形法线保持零，与CPU语义一致；极端非有限数/溢出不伪装为有效法线。
   七场景正反面受光、褶皱明暗、投影、L叠加闪烁、暂停/单步及反复R/1–7切换仍待设备验证，不以编译/模型测试代替。
 
-  =velvet-gpu-live=：=Space= 暂停/继续，暂停时 =S= 请求一个 fixed tick，=R= 重建同配置初态并暂停，=C= 隐藏/显示碰撞器参照。
+  =velvet-ref-live=：=Space= 暂停/继续，暂停时 =S= 请求一个 fixed tick，=R= 重建同配置初态并暂停，=C= 隐藏/显示碰撞器参照。
   =R= 清空待提交 tick、重建 GPU buffers、复位计数/预热；日志 generation 区分实验，旧在途读回不混入新结果。
   它按 =FixedUpdate= 的 =Time<Fixed>= 排队每次 dt（默认 64Hz），就绪前不积压启动 tick。
   配置层数的彩色线框直接由 GPU 写 Mesh；无相机环绕或 CPU Mesh 读回。

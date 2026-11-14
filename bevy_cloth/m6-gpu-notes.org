@@ -14,9 +14,10 @@
   以下源路径以 workspace 根为起点：=../Velvet/Velvet/VtClothSolverGPU.hpp/.cu/.cuh=、
   =SpatialHashGPU.hpp/.cu/.cuh=、=Common.cuh/.hpp=、=VtBuffer.hpp=。本任务不修改该参考仓库。
 
-* 当前 GPU 实现（2026-10-29；headless 已测，新增 live 待主机验证）
-  - =src/gpu/solver.wesl= 有九个求解入口：SDF 预稳定、预测、粒子碰撞、SDF 碰撞、拉伸 gather、挂点/LRA gather、弯曲 gather、统一应用修正、更新位置与速度；另有动态邻居 kernel。
-  - =src/gpu/solver_gpu.rs= 建立约束查询表并共享 =record_step=；headless 一次提交 60 步，读回位置/速度作诊断。
+* 保留的 GPU 参考实现（2026-10-29；headless 已测，新增 live 待主机验证）
+  以下实现与验证描述保留旧记录，指 =src/ref/= 参考实现，不是当前 =src/xpbd/= 主线状态。
+  - =src/ref/solver.wesl= 有九个求解入口：SDF 预稳定、预测、粒子碰撞、SDF 碰撞、拉伸 gather、挂点/LRA gather、弯曲 gather、统一应用修正、更新位置与速度；另有动态邻居 kernel。
+  - =src/ref/solver_gpu.rs= 建立约束查询表并共享 =record_step=；headless 一次提交 60 步，读回位置/速度作诊断。
     独立 =SolverLivePlugin=（=live.rs=）按 fixed tick 逐请求提交，共用求解 kernel，不运行 CPU 参考或专项读回。
   - “每粒子收集修正”（gather）：一个线程查找该粒子的相关约束，只写自己的修正量。
     查询表采用 CSR，即连续数组加分段索引。求修正和应用修正分两次 dispatch（计算发射）执行。

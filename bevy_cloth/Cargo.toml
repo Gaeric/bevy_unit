@@ -3,6 +3,78 @@ name = "bevy_cloth"
 version = "0.1.0"
 edition = "2024"
 
+[[example]]
+name = "velvet-ref"
+path = "examples/ref/velvet-ref.rs"
+
+[[example]]
+name = "velvet-ref-live"
+path = "examples/ref/velvet-ref-live.rs"
+
+[[example]]
+name = "velvet-ref-scenes"
+path = "examples/ref/velvet-ref-scenes.rs"
+
+[[example]]
+name = "01-cannonball2d"
+path = "examples/legacy/01-cannonball2d.rs"
+
+[[example]]
+name = "02-cannonball3d"
+path = "examples/legacy/02-cannonball3d.rs"
+
+[[example]]
+name = "03-billiard"
+path = "examples/legacy/03-billiard.rs"
+
+[[example]]
+name = "velvet-00-sandbox"
+path = "examples/legacy/velvet-00-sandbox.rs"
+
+[[example]]
+name = "velvet-01-collision"
+path = "examples/legacy/velvet-01-collision.rs"
+
+[[example]]
+name = "velvet-gltf"
+path = "examples/legacy/velvet-gltf.rs"
+
+[[example]]
+name = "velvet-scenes"
+path = "examples/legacy/velvet-scenes.rs"
+
+[[test]]
+name = "camera"
+path = "tests/legacy/camera.rs"
+
+[[test]]
+name = "colliders"
+path = "tests/legacy/colliders.rs"
+
+[[test]]
+name = "grab"
+path = "tests/legacy/grab.rs"
+
+[[test]]
+name = "hash"
+path = "tests/legacy/hash.rs"
+
+[[test]]
+name = "mesh_gen"
+path = "tests/legacy/mesh_gen.rs"
+
+[[test]]
+name = "render"
+path = "tests/legacy/render.rs"
+
+[[test]]
+name = "scenes"
+path = "tests/legacy/scenes.rs"
+
+[[test]]
+name = "solver_smoke"
+path = "tests/legacy/solver_smoke.rs"
+
 [dependencies]
 # fps overlay in the examples; `fps_overlay` is behind bevy_dev_tools' `render` feature in 0.20
 bevy = { version = "0.20.0", features = [
