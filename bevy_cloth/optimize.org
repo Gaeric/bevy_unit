@@ -1,0 +1,4 @@
+#+title: optimize
+#+startup: content
+#+OPTIONS: ^:{}
+1. 考虑如何处理单个render frame中多个tick的情况，当前直接使用最后的节点位置进行碰撞求解，是否需要逐tick分开以优化碰撞功能
