@@ -14,13 +14,15 @@ use bevy::{
 };
 
 use super::{
-    bindings::{ClothBindGroup, ClothContactBindGroup, ColliderContactBindGroup},
+    bindings::{
+        ClothBendBindGroup, ClothBindGroup, ClothContactBindGroup, ColliderContactBindGroup,
+    },
     collider::CollisionGroup,
     collider_refit::ColliderRefitPipeline,
     collider_transform::ColliderTransformPipeline,
     gpu::{GpuCloth, group_param_stride},
     layout::{PreparedCloth, StepParams},
-    pipeline::{ClothContactPipeline, ClothPipelines, WORKGROUP_SIZE},
+    pipeline::{ClothBendPipeline, ClothContactPipeline, ClothPipelines, WORKGROUP_SIZE},
 };
 
 /// Total number of simulation ticks requested by Main World.
@@ -93,6 +95,7 @@ pub(super) fn simulate_cloths(
     ticks: Res<ClothTicks>,
     cache: Res<PipelineCache>,
     pipelines: Res<ClothPipelines>,
+    bend_pipeline: Res<ClothBendPipeline>,
     contact_pipeline: Res<ClothContactPipeline>,
     transform_pipeline: Res<ColliderTransformPipeline>,
     refit_pipeline: Res<ColliderRefitPipeline>,
@@ -101,6 +104,7 @@ pub(super) fn simulate_cloths(
         &GpuCloth,
         &ClothBindGroup,
         &ClothContactBindGroup,
+        Option<&ClothBendBindGroup>,
         &PreparedCloth,
         &StepParams,
         &ClothStepSettings,
@@ -131,11 +135,13 @@ pub(super) fn simulate_cloths(
     };
 
     let group_stride = group_param_stride(context.render_device());
+    let solve_bending = cache.get_compute_pipeline(bend_pipeline.solve_bending);
 
     for (
         gpu,
         binding,
         contact_binding,
+        bend_binding,
         prepared,
         step,
         settings,
@@ -143,6 +149,14 @@ pub(super) fn simulate_cloths(
         mut simulation,
     ) in &mut cloths
     {
+        let bending = if let Some(data) = &gpu.bending {
+            let (Some(pipeline), Some(binding)) = (solve_bending, bend_binding) else {
+                continue;
+            };
+            Some((data, pipeline, binding))
+        } else {
+            None
+        };
         let Some(mut submitted) = simulation.submitted else {
             // Start here instead of replaying ticks requested during loading.
             simulation.submitted = Some(ticks.requested);
@@ -178,6 +192,9 @@ pub(super) fn simulate_cloths(
             for _ in 0..settings.substeps {
                 let encoder = context.command_encoder();
                 encoder.clear_buffer(&gpu.stretch_lambdas, 0, None);
+                if let Some((data, _, _)) = bending {
+                    encoder.clear_buffer(&data.lambdas, 0, None);
+                }
 
                 let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                     label: Some("xpbd cloth substep"),
@@ -196,12 +213,20 @@ pub(super) fn simulate_cloths(
                     particle_workgroups,
                 );
 
-                pass.set_pipeline(solve_stretch);
                 for _ in 0..settings.iterations {
+                    pass.set_pipeline(solve_stretch);
                     for (color, group) in prepared.groups.iter().enumerate() {
                         let offset = color as u32 * group_stride;
                         pass.set_bind_group(0, &binding.0, &[offset]);
                         pass.dispatch_workgroups(group.count.div_ceil(WORKGROUP_SIZE), 1, 1);
+                    }
+                    if let Some((_, pipeline, bend_binding)) = bending {
+                        pass.set_pipeline(pipeline);
+                        for (color, group) in prepared.bend_groups.iter().enumerate() {
+                            let offset = color as u32 * group_stride;
+                            pass.set_bind_group(0, &bend_binding.0, &[offset]);
+                            pass.dispatch_workgroups(group.count.div_ceil(WORKGROUP_SIZE), 1, 1);
+                        }
                     }
                 }
 

@@ -11,7 +11,7 @@
 //!   reordered stretch constraint. Clear at each substep start, accumulate across
 //!   constraint iterations within that substep. No cross-substep warm starting.
 //! - bend: `array<Bend>`, 32-byte stride; read-only, independently color-reordered.
-//! - bend_lambdas: `array<f32>`, zero-initialized; solving/clearing not yet dispatched.
+//! - bend_lambdas: `array<f32>`, reset per substep, accumulated across bend iterations.
 //! - attachments: `array<FixedAttachment>`, 16-byte stride; read-only fixed targets.
 //!
 //! Particle, velocity and previous-position arrays share particle indices.
@@ -181,7 +181,7 @@ pub(super) struct PreparedCloth {
     /// Initial dihedral constraints, arranged contiguously by their own colors.
     pub bend: Vec<Bend>,
 
-    /// Bend color groups; uploaded with independent uniform slots, not dispatched yet.
+    /// Bend color groups; dispatched after stretch colors in each iteration.
     pub bend_groups: Vec<ConstraintGroup>,
 
     /// Fixed particles and their world-space targets.

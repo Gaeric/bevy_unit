@@ -135,7 +135,7 @@ impl Plugin for XpbdPlugin {
     }
 }
 
-/// Stretch-only cloth input, placed on an entity with `Mesh3d`.
+/// Stretch and dihedral-bending cloth input, placed on an entity with `Mesh3d`.
 ///
 /// Add only after the entity has Mesh3d and its source Mesh is loaded and
 /// CPU-readable. Each mesh vertex corresponds to one particle; no welding is
@@ -147,7 +147,7 @@ pub struct StretchCloth {
     pub particle_mass: f32,
     /// XPBD distance-constraint compliance, in m/N; zero means inextensible.
     pub stretch_compliance: f32,
-    /// Dihedral-angle compliance; currently prepared on CPU only, not solved.
+    /// XPBD dihedral-angle compliance; zero preserves the rest angle as a hard constraint.
     pub bend_compliance: f32,
     pub attachments: Vec<Attachment>,
     /// World-space contact thickness, in meters.

@@ -13,7 +13,7 @@ use super::layout::{ConstraintGroup, GroupParams, PreparedCloth, StepParams};
 
 /// Present only when the prepared cloth has dihedral constraints.
 /// Lambda indices follow the color-reordered bend array, not the source edges.
-/// Allocated here; substep clearing and solving are connected in a later batch.
+/// Cleared at each substep start, accumulated across colored bend iterations.
 pub(super) struct GpuBending {
     pub constraints: Buffer,
     pub lambdas: Buffer,

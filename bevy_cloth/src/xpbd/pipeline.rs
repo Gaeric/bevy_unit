@@ -67,27 +67,26 @@ pub(super) fn init_contact_pipeline(
     });
 }
 
-/// Prepared but not queued until bending.wesl defines solve_bending.
-/// This batch must not compile a missing entry or gate the existing solver on it.
+/// Only cloths with dihedral constraints wait for this pipeline.
 #[derive(Resource)]
 pub(super) struct ClothBendPipeline {
-    pub descriptor: ComputePipelineDescriptor,
+    pub solve_bending: CachedComputePipelineId,
 }
 
 pub(super) fn init_bend_pipeline(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    cache: Res<PipelineCache>,
     layout: Res<ClothBendBindGroupLayout>,
 ) {
-    commands.insert_resource(ClothBendPipeline {
-        descriptor: ComputePipelineDescriptor {
-            label: Some("xpbd solve_bending".into()),
-            layout: vec![layout.descriptor.clone()],
-            shader: load_embedded_asset!(asset_server.as_ref(), "bending.wesl"),
-            entry_point: Some("solve_bending".into()),
-            ..default()
-        },
+    let solve_bending = cache.queue_compute_pipeline(ComputePipelineDescriptor {
+        label: Some("xpbd solve_bending".into()),
+        layout: vec![layout.descriptor.clone()],
+        shader: load_embedded_asset!(asset_server.as_ref(), "bending.wesl"),
+        entry_point: Some("solve_bending".into()),
+        ..default()
     });
+    commands.insert_resource(ClothBendPipeline { solve_bending });
 }
 
 #[derive(Resource)]
