@@ -1,11 +1,12 @@
 //! The physical spring arm doesn’t solve the jitter problem.
 //! This design won't work unless the jitter issue is fixed.
 
-use avian3d::{math::TAU, prelude::*};
+use avian3d::prelude::*;
 use bevy::{
     color::palettes::tailwind::{BLUE_600, CYAN_600},
     prelude::*,
 };
+use std::f32::consts::TAU;
 
 use crate::Character;
 
