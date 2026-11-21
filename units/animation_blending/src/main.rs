@@ -8,7 +8,8 @@ use bevy::{
     platform::collections::HashSet,
     prelude::*,
     tasks::IoTaskPool,
-    ui::widget::Button,
+    ui::Pressed,
+    ui_widgets::Button,
     world_serialization::WorldInstanceReady,
 };
 
@@ -434,7 +435,7 @@ fn setup_animation_graph_once_loaded(
 // A system that handles requests from the user to toggle mask groups an and
 // off.
 fn handle_button_toggles(
-    mut interactions: Query<(&Interaction, &mut AnimationControl), Changed<Interaction>>,
+    pressed_buttons: Query<&AnimationControl, Added<Pressed>>,
     mut animation_players: Query<&AnimationGraphHandle, With<AnimationPlayer>>,
     mut animation_graphs: ResMut<Assets<AnimationGraph>>,
     mut animation_nodes: Option<ResMut<AnimationNodes>>,
@@ -444,12 +445,7 @@ fn handle_button_toggles(
         return;
     };
 
-    for (interaction, animation_control) in interactions.iter_mut() {
-        // We only care about press events.
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-
+    for animation_control in &pressed_buttons {
         // Toggle the state of the clip.
         app_state.0[animation_control.group_id as usize].clip = animation_control.label as u8;
 

@@ -236,7 +236,7 @@ checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 name = "animation_blending"
 version = "0.1.0"
 dependencies = [
- "bevy 0.19.1",
+ "bevy 0.20.1",
  "ron",
 ]
 
@@ -880,9 +880,7 @@ dependencies = [
  "bevy_tasks 0.19.1",
  "bevy_utils 0.19.1",
  "console_error_panic_hook",
- "crossbeam-channel",
  "ctrlc",
- "dioxus-devtools",
  "downcast-rs 2.0.2",
  "log",
  "thiserror 2.0.21",
@@ -1439,7 +1437,6 @@ dependencies = [
  "serde",
  "slotmap",
  "smallvec",
- "subsecond",
  "thiserror 2.0.21",
  "variadics_please 1.1.0",
 ]
