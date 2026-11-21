@@ -59,14 +59,6 @@ impl Plugin for DemoModularPlugin {
         app.register_modular_component::<ModularCharacterLegs>();
         app.register_modular_component::<ModularCharacterFeet>();
 
-        #[cfg(feature = "with-inspector")]
-        {
-            use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
-
-            app.add_plugins(EguiPlugin::default())
-                .add_plugins(WorldInspectorPlugin::new());
-        }
-
         // AmbientLight Resource
         app.insert_resource(GlobalAmbientLight {
             color: Color::default(),
@@ -213,7 +205,7 @@ fn setup_animation_graph(
 
 // todo: analyzer the animation process
 fn animation_player_added(
-    trigger: On<Add, AnimationPlayer>,
+    trigger: On<Add<AnimationPlayer>>,
     mut commands: Commands,
     graph_cache: Res<AnimationGraphCache>,
     mut players: Query<&mut AnimationPlayer>,

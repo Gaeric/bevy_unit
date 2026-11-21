@@ -1,4 +1,4 @@
-use bevy::{platform::collections::HashMap, prelude::*, scene::SceneInstanceReady};
+use bevy::{platform::collections::HashMap, prelude::*, world_serialization::WorldInstanceReady};
 
 fn main() {
     let mut app = App::new();
@@ -6,14 +6,6 @@ fn main() {
     app.add_plugins(DefaultPlugins);
     app.add_systems(Startup, setup_scene);
     // app.add_observer(when_scene_ready);
-
-    #[cfg(feature = "with-inspector")]
-    {
-        use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
-
-        app.add_plugins(EguiPlugin::default())
-            .add_plugins(WorldInspectorPlugin::new());
-    }
 
     app.run();
 }
@@ -34,7 +26,7 @@ fn setup_scene(mut command: Commands, asset_server: Res<AssetServer>) {
 }
 
 fn when_scene_ready(
-    trigger: On<SceneInstanceReady>,
+    trigger: On<WorldInstanceReady>,
     childrens: Query<&Children>,
     names: Query<(&Name, Entity)>,
 ) {

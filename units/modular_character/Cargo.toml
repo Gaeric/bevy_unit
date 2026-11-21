@@ -3,10 +3,6 @@ name = "modular_character"
 version = "0.1.0"
 edition = "2024"
 
-[features]
-with-inspector = ["bevy-inspector-egui"]
-
 [dependencies]
-bevy = "0.19.0"
-bevy-inspector-egui = { version = "0.37.0", optional = true }
+bevy = "0.20.1"
 paste = "1.0"
