@@ -51,7 +51,7 @@ pub fn plugin(app: &mut App) {
 }
 
 pub fn anchor_camera_to_chracter(
-    player: On<Add, WaltzPlayer>,
+    player: On<Add<WaltzPlayer>>,
     mut commands: Commands,
     // player_transform: Single<&Transform, With<WaltzPlayer>>,
     mut waltz_camera: Single<&mut WaltzCamera>,
@@ -63,7 +63,7 @@ pub fn anchor_camera_to_chracter(
     waltz_camera.desired_distance = 3.0;
 }
 
-fn setup_camera_ctrl_bind(trigger: On<Add, WaltzCamera>, mut commands: Commands) {
+fn setup_camera_ctrl_bind(trigger: On<Add<WaltzCamera>>, mut commands: Commands) {
     info!("setup camera bind");
     commands.entity(trigger.entity).insert((
         CameraCtrl,

@@ -64,7 +64,7 @@ struct Jump;
 #[action_output(bool)]
 struct SetWeapon;
 
-fn setup_character_ctrl_bind(add: On<Add, WaltzPlayer>, mut commands: Commands) {
+fn setup_character_ctrl_bind(add: On<Add<WaltzPlayer>>, mut commands: Commands) {
     info!("setup player bind");
     commands.entity(add.entity).insert((
         CharacterCtrl,
@@ -76,7 +76,7 @@ fn setup_character_ctrl_bind(add: On<Add, WaltzPlayer>, mut commands: Commands) 
     ));
 }
 
-fn setup_character_accumulated(trigger: On<Add, WaltzPlayer>, mut commands: Commands) {
+fn setup_character_accumulated(trigger: On<Add<WaltzPlayer>>, mut commands: Commands) {
     info!("setup player accumulated");
     commands
         .entity(trigger.entity)

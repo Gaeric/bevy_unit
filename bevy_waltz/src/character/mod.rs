@@ -1,7 +1,6 @@
 ///! character controller system
 ///! forked from the tnua shooter_like demo
 use animating::{AnimationState, animate_character, animation_patcher_system};
-use avian3d::math::Vector;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::{color::palettes::css, ecs::system::Query, gizmos::gizmos::Gizmos};
@@ -306,7 +305,7 @@ fn setup_player(
         GltfSceneHandler {
             names_from: asset_server.load("waltz/player.glb"),
         },
-        Collider::capsule_endpoints(0.5, 0.5 * Vector::Y, 1.2 * Vector::Y),
+        Collider::capsule_endpoints(0.5, 0.5 * Vec3::Y, 1.2 * Vec3::Y),
     ));
 
     setup_character_with_entity_cmd(cmd, ctrl_scheme_cfg_assets);

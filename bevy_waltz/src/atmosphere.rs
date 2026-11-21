@@ -19,7 +19,7 @@ fn dynamic_atmosphere(mut suns: Query<&mut Transform, With<DirectionalLight>>, t
 }
 
 fn added_atmosphere(
-    camera: On<Add, WaltzCamera>,
+    camera: On<Add<WaltzCamera>>,
     // camera: Single<Entity, (With<WaltzCamera>, Added<Camera3d>)>,
     mut commands: Commands,
     mut scattering_mediums: ResMut<Assets<ScatteringMedium>>,

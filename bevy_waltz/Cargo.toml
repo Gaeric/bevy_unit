@@ -4,24 +4,24 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.19.0", features = [
+bevy = { version = "0.20.1", features = [
         "wayland",
         "dynamic_linking",
         "hotpatching",
 ] }
 
 # physic engine
-avian3d = { version = "0.7.0", features = ["diagnostic_ui"] }
+avian3d = { version = "0.8.0", features = ["diagnostic_ui"] }
 
 # character system
-bevy-tnua = "0.32.0"
-bevy-tnua-avian3d = "0.12.0"
+bevy-tnua = "0.33.2"
+bevy-tnua-avian3d = "0.13.2"
 
 # control system
-bevy_enhanced_input = "0.26"
+bevy_enhanced_input = "0.27.2"
 
 # develop ui toolkit
-bevy_perf_ui = "0.7.0"
+bevy_perf_ui = "0.8.0"
 
 #
 serde = { version = "1", features = ["derive"] }
@@ -29,6 +29,6 @@ serde = { version = "1", features = ["derive"] }
 # bone attachments
 bone_attachments = { path = "../units/bone_attachments" }
 
-bevy_mod_outline = { git = "https://github.com/komadori/bevy_mod_outline", branch = "master" }
+bevy_mod_outline = "0.14.0"
 
-bevy_framepace = "0.22.0"
+bevy_framepace = "0.23.0"

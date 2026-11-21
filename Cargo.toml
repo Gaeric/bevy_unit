@@ -75,6 +75,10 @@ bevy_pbr = { path = "../bevy_engines/bevy_0.20/crates/bevy_pbr" }
 bevy_state = { path = "../bevy_engines/bevy_0.20/crates/bevy_state" }
 bevy_utils = { path = "../bevy_engines/bevy_0.20/crates/bevy_utils" }
 bevy_feathers = { path = "../bevy_engines/bevy_0.20/crates/bevy_feathers" }
+bevy_curve = { path = "../bevy_engines/bevy_0.20/crates/bevy_curve" }
+bevy_shape = { path = "../bevy_engines/bevy_0.20/crates/bevy_shape" }
+bevy_diagnostic = { path = "../bevy_engines/bevy_0.20/crates/bevy_diagnostic" }
+bevy_tasks = { path = "../bevy_engines/bevy_0.20/crates/bevy_tasks" }
 
 # avian3d = { path = "../avian/crates/avian3d/" }
 # bevy-tnua = { path = "../bevy-tnua/" }

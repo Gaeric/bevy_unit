@@ -1,7 +1,11 @@
 //! the example fork from avian kinematic_character_3d
 
-use avian3d::{math::*, prelude::*};
-use bevy::prelude::*;
+use avian3d::prelude::*;
+use bevy::prelude::{Quat as Quaternion, Vec2 as Vector2, Vec3 as Vector, *};
+use std::f32::consts::PI;
+
+// This example uses Avian's default single-precision physics.
+type Scalar = f32;
 
 fn main() {
     App::new()
@@ -65,7 +69,7 @@ fn setup(
         PointLight {
             intensity: 2_000_000.0,
             range: 50.0,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(0.0, 15.0, 0.0),
@@ -315,8 +319,7 @@ fn kinematic_controller_collisions(
                 }
 
                 // Compute the impulse to apply.
-                let impulse_magnitude =
-                    normal_speed - (deepest_penetration / time.delta_secs_f64().adjust_precision());
+                let impulse_magnitude = normal_speed - deepest_penetration / time.delta_secs();
                 let mut impulse = impulse_magnitude * normal;
 
                 // Apply the impulse differently depending on the slope angle.
@@ -396,9 +399,7 @@ fn movement(
         Has<Grounded>,
     )>,
 ) {
-    // Precision is adjusted so that the example works with
-    // both the `f32` and `f64` features. Otherwise you don't need this.
-    let delta_time = time.delta_secs_f64().adjust_precision();
+    let delta_time = time.delta_secs();
 
     for event in movement_event_reader.read() {
         for (movement_acceleration, jump_impulse, mut linear_velocity, is_grounded) in
@@ -424,9 +425,7 @@ fn apply_gravity(
     time: Res<Time>,
     mut controllers: Query<(&ControllerGravity, &mut LinearVelocity)>,
 ) {
-    // Precision is adjusted so that the example works with
-    // both the `f32` and `f64` features. Otherwise you don't need this.
-    let delta_time = time.delta_secs_f64().adjust_precision();
+    let delta_time = time.delta_secs();
 
     for (gravity, mut linear_velocity) in &mut controllers {
         linear_velocity.0 += gravity.0 * delta_time;

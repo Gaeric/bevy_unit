@@ -1,9 +1,8 @@
-use std::f32::consts::PI;
-
-use bevy::{prelude::*, scene::SceneInstance};
+use bevy::{prelude::*, world_serialization::WorldInstance};
 use bevy_mod_outline::{
-    AsyncSceneInheritOutline, AutoGenerateOutlineNormalsPlugin, OutlinePlugin, OutlineVolume,
+    AsyncWorldInheritOutline, AutoGenerateOutlineNormalsPlugin, OutlinePlugin, OutlineVolume,
 };
+use std::f32::consts::PI;
 
 #[derive(Resource)]
 struct Fox(Handle<AnimationClip>);
@@ -18,7 +17,10 @@ fn main() {
             file_path: "../units/animation_blending/assets/".to_string(),
             ..default()
         }))
-        .add_plugins((OutlinePlugin, AutoGenerateOutlineNormalsPlugin::default()))
+        .add_plugins((
+            OutlinePlugin::EXTRUDE_VERTEX,
+            AutoGenerateOutlineNormalsPlugin::default(),
+        ))
         .insert_resource(GlobalAmbientLight::default())
         .add_systems(Startup, setup)
         .add_systems(Update, setup_scene_once_loaded)
@@ -69,15 +71,15 @@ fn setup(
             width: 3.0,
             colour: Color::srgb(1.0, 0.0, 0.0),
         },
-        AsyncSceneInheritOutline::default(),
+        AsyncWorldInheritOutline::default(),
     ));
 }
 
 // Once the scene is loaded, start the animation
 fn setup_scene_once_loaded(
     mut commands: Commands,
-    scene_query: Query<&SceneInstance>,
-    scene_manager: Res<SceneSpawner>,
+    scene_query: Query<&WorldInstance>,
+    scene_manager: Res<WorldInstanceSpawner>,
     mut player_query: Query<(Entity, &mut AnimationPlayer)>,
     animation: Res<Fox>,
     mut done: Local<bool>,
