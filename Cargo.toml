@@ -17,6 +17,12 @@ members = [
 ]
 exclude = ["units/winit_drag_drop"]
 
+[[bin]]
+name = "bevy_workflow"
+path = "src/main.rs"
+required-features = ["waltz"]
+
+
 [dependencies]
 bevy = { version = "0.20.0", features = [
         "wayland",
@@ -30,7 +36,7 @@ bevy = { version = "0.20.0", features = [
 ] }
 # bevy_shine = { path = "bevy_shine" }
 # modular_character = { path = "units/modular_character" }
-bevy_waltz = { path = "bevy_waltz" }
+bevy_waltz = { path = "bevy_waltz", optional = true }
 tracing-appender = "0.2.3"
 rand = "0.10.0"
 
@@ -76,6 +82,7 @@ bevy_feathers = { path = "../bevy_engines/bevy_0.20/crates/bevy_feathers" }
 
 [features]
 default = ["dev"]
+waltz = ["dep:bevy_waltz"]
 dev = [
         "bevy/dynamic_linking",
         "bevy/bevy_dev_tools",
