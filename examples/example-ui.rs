@@ -1,5 +1,4 @@
 use bevy::{ecs::system::EntityCommands, prelude::*, window::WindowResized};
-use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
 
 const GOLEN_RATIO: f32 = 1.618;
 
@@ -14,8 +13,6 @@ pub struct UiCamera;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(EguiPlugin::default())
-        .add_plugins(WorldInspectorPlugin::new())
         .add_systems(
             Startup,
             (setup, setup_game_interface, setup_card_ui).chain(),
@@ -46,37 +43,44 @@ pub struct CardProp {
     // path: Path,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Default)]
 pub struct CardContainer;
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub enum CardUIText {
     CardUITitle(String),
     CardUICost { base: u8, curr: u8 },
     CardUIDesc(String),
 }
 
-#[derive(Component)]
+impl Default for CardUIText {
+    fn default() -> Self {
+        Self::CardUITitle(String::new())
+    }
+}
+
+#[derive(Component, Clone, Default)]
 pub enum CardColorArea {
+    #[default]
     CardTotalBg,
     CardOrbBg,
     CardImgBg,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Default)]
 struct HistoryCardsArea;
-#[derive(Component)]
+#[derive(Component, Clone, Default)]
 struct MiddleArea;
 
-#[derive(Component)]
+#[derive(Component, Clone, Default)]
 struct BottomArea;
-#[derive(Component)]
+#[derive(Component, Clone, Default)]
 pub struct BottomLeftArea;
 
-#[derive(Component)]
+#[derive(Component, Clone, Default)]
 pub struct BottomMiddleArea;
 
-#[derive(Component)]
+#[derive(Component, Clone, Default)]
 pub struct BottomRightArea;
 
 #[derive(Component)]
@@ -119,124 +123,86 @@ pub trait CardSpawnExt {
 }
 
 impl CardSpawnExt for Commands<'_, '_> {
-    fn spawn_card(&'_ mut self, prop: &CardProp, config: &CardUIConfig) -> EntityCommands<'_> {
-        // 1. Root Card Container
-        // Uses fixed Px values derived from the dynamic config to maintain Aspect Ratio
-        let mut card = self.spawn((
+    fn spawn_card(&mut self, prop: &CardProp, config: &CardUIConfig) -> EntityCommands<'_> {
+        let base_cost = prop.base_cost;
+        let desc = prop.base_desc.join("\n");
+
+        self.spawn_scene(bsn! {
+            CardContainer
+            CardColorArea::CardTotalBg
             Node {
-                width: Val::Px(config.width),
-                height: Val::Px(config.height),
+                width: px(config.width),
+                height: px(config.height),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                padding: UiRect::all(Val::Px(config.padding)),
-                border: UiRect::all(Val::Px(3.0 * config.scale)),
-                border_radius: BorderRadius::all(Val::Percent(5.0)),
-                ..default()
-            },
-            CardColorArea::CardTotalBg,
-            BackgroundColor(CARD_TOTAL_BG),
-            BorderColor::all(CARD_TOTAL_BORDER),
-            CardContainer,
-        ));
-
-        card.observe(point_over)
-            .observe(point_out)
-            .observe(point_drag_start)
-            .observe(point_drag)
-            .observe(point_drag_end)
-            .observe(point_drag_drop);
-
-        card.with_children(|parent| {
-            // 2. Header Row
-            parent
-                .spawn(Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(20.0),
-                    // margin: UiRect::vertical(Val::Percent(5.0)),
+                padding: px(config.padding),
+                border: px(3.0 * config.scale),
+                border_radius: BorderRadius::all(percent(5)),
+            }
+            BackgroundColor(CARD_TOTAL_BG)
+            BorderColor::all(CARD_TOTAL_BORDER)
+            on(point_over)
+            on(point_out)
+            on(point_drag_start)
+            on(point_drag)
+            on(point_drag_end)
+            on(point_drag_drop)
+            Children [
+                // Header: energy orb, then title.
+                Node {
+                    width: percent(100),
+                    height: percent(20),
                     position_type: PositionType::Relative,
                     justify_content: JustifyContent::Center,
-                    // align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|header| {
-                    // Energy Orb
-                    header
-                        .spawn((
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(-config.padding),
-                                top: Val::Px(-config.padding),
-                                width: Val::Percent(20.0),
-                                aspect_ratio: Some(1.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border_radius: BorderRadius::all(Val::Percent(50.0)),
-                                ..default()
-                            },
-                            CardColorArea::CardOrbBg,
-                            BackgroundColor(CARD_ORB_BG),
-                        ))
-                        .with_children(|orb| {
-                            orb.spawn((
-                                Text::new(prop.base_cost.to_string()),
-                                TextFont {
-                                    font_size: config.font_cost,
-                                    ..default()
-                                },
-                                CardUIText::CardUICost {
-                                    base: prop.base_cost,
-                                    curr: prop.base_cost,
-                                },
-                            ));
-                        });
-
-                    header.spawn((
-                        Text::new(prop.title.clone()),
-                        TextFont {
-                            font_size: config.font_title,
-                            ..default()
-                        },
-                        CardUIText::CardUITitle(prop.title.clone()),
-                    ));
-                });
-
-            // 3. Illustration Area
-            parent.spawn((
+                }
+                Children [
+                    CardColorArea::CardOrbBg
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(-config.padding),
+                        top: px(-config.padding),
+                        width: percent(20),
+                        aspect_ratio: {Some(1.0)},
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border_radius: BorderRadius::all(percent(50)),
+                    }
+                    BackgroundColor(CARD_ORB_BG)
+                    Children [
+                        Text({base_cost.to_string()})
+                        TextFont { font_size: px(config.font_cost) }
+                        CardUIText::CardUICost { base: base_cost, curr: base_cost }
+                    ]
+                    --
+                    Text({prop.title.clone()})
+                    TextFont { font_size: px(config.font_title) }
+                    CardUIText::CardUITitle({prop.title.clone()})
+                ]
+                --
+                // Illustration.
+                CardColorArea::CardImgBg
                 Node {
-                    width: Val::Percent(100.0),
-                    aspect_ratio: Some(1.0),
-                    // flex_grow: 1.0,
-                    // margin: UiRect::vertical(Val::Percent(5.0)),
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Percent(50.0)),
-                    ..default()
-                },
-                CardColorArea::CardImgBg,
-                BackgroundColor(CARD_IMG_BG),
-            ));
-
-            // 4. Description Area
-            parent
-                .spawn(Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(30.0),
+                    width: percent(100),
+                    aspect_ratio: {Some(1.0)},
+                    border: px(2),
+                    border_radius: BorderRadius::all(percent(50)),
+                }
+                BackgroundColor(CARD_IMG_BG)
+                --
+                // Description.
+                Node {
+                    width: percent(100),
+                    height: percent(30),
                     justify_content: JustifyContent::Center,
-                    ..default()
-                })
-                .with_children(|desc_node| {
-                    desc_node.spawn((
-                        Text::new(prop.base_desc.join("\n")),
-                        TextFont {
-                            font_size: config.font_desc,
-                            ..default()
-                        },
-                        TextLayout::new_with_justify(Justify::Center),
-                        CardUIText::CardUIDesc(prop.base_desc.join("\n")),
-                    ));
-                });
-        });
-
-        card
+                }
+                Children [
+                    Text({desc.clone()})
+                    TextFont { font_size: px(config.font_desc) }
+                    TextLayout::justify(Justify::Center)
+                    CardUIText::CardUIDesc(desc)
+                ]
+            ]
+        })
     }
 }
 
@@ -271,105 +237,67 @@ fn setup_card_ui(
 }
 
 fn setup_game_interface(mut commands: Commands, _asset_server: Res<AssetServer>) {
-    commands
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
+    commands.spawn_scene(bsn! {
+        Node {
+            width: percent(100),
+            height: percent(100),
             flex_direction: FlexDirection::Column,
-            ..default()
-        },))
-        .with_children(|parent| {
-            // (Top Section)
-            parent
-                .spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Percent(10.0),
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::Start,
-                        align_items: AlignItems::Start,
-                        // padding: UiRect::all(Val::Px(10.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
-                ))
-                .with_children(|top_section| {
-                    // (HistoryCardsArea Section)
-                    top_section.spawn((
-                        Node {
-                            width: Val::Percent(40.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.3, 0.1, 0.1)),
-                        HistoryCardsArea,
-                    ));
-                });
-
-            parent.spawn((
+        }
+        Children [
+            // Top bar.
+            Node {
+                width: percent(100),
+                height: percent(10),
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Start,
+                align_items: AlignItems::Start,
+            }
+            BackgroundColor(Color::srgb(0.2, 0.2, 0.2))
+            Children [
+                HistoryCardsArea
+                Node { width: percent(40), height: percent(100) }
+                BackgroundColor(Color::srgb(0.3, 0.1, 0.1))
+            ]
+            --
+            MiddleArea
+            Node {
+                width: percent(100),
+                flex_grow: 1.0,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+            }
+            BackgroundColor(Color::srgb(0.1, 0.1, 0.2))
+            --
+            BottomArea
+            Node {
+                width: percent(100),
+                height: percent(40),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                position_type: PositionType::Relative,
+                flex_direction: FlexDirection::Row,
+            }
+            BackgroundColor(Color::srgb(0.1, 0.2, 0.1))
+            Children [
+                BottomLeftArea
+                Node { width: percent(20), height: percent(100) }
+                BackgroundColor(Color::srgb(0.15, 0.15, 0.15))
+                --
+                BottomMiddleArea
                 Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
+                    width: percent(60),
+                    height: percent(100),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.1, 0.1, 0.2)),
-                MiddleArea,
-            ));
-            //  (Bottom Section)
-            parent
-                .spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Percent(40.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        position_type: PositionType::Relative,
-                        flex_direction: FlexDirection::Row,
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.1, 0.2, 0.1)),
-                    BottomArea,
-                ))
-                .with_children(|bottom| {
-                    // Left Sub-Area (e.g., Draw Pile)
-                    bottom.spawn((
-                        Node {
-                            width: Val::Percent(20.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
-                        BottomLeftArea,
-                    ));
-
-                    // Middle Sub-Area (Main Hand)
-                    bottom.spawn((
-                        Node {
-                            width: Val::Percent(60.0), // Takes most of the space
-                            height: Val::Percent(100.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        // Transparent or slightly different green
-                        BackgroundColor(Color::srgb(0.12, 0.2, 0.12)),
-                        BottomMiddleArea,
-                    ));
-
-                    // Right Sub-Area (e.g., Discard Pile)
-                    bottom.spawn((
-                        Node {
-                            width: Val::Percent(20.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
-                        BottomRightArea,
-                    ));
-                });
-        });
+                }
+                BackgroundColor(Color::srgb(0.12, 0.2, 0.12))
+                --
+                BottomRightArea
+                Node { width: percent(20), height: percent(100) }
+                BackgroundColor(Color::srgb(0.15, 0.15, 0.15))
+            ]
+        ]
+    });
 }
 
 pub fn window_resizing(
@@ -389,17 +317,17 @@ pub fn window_resizing(
         }
 
         for (mut font, kind) in &mut card_texts {
-            font.font_size = match *kind {
+            font.font_size = FontSize::Px(match *kind {
                 CardUIText::CardUITitle(_) => new_config.font_title,
                 CardUIText::CardUICost { .. } => new_config.font_cost,
                 CardUIText::CardUIDesc(_) => new_config.font_desc,
-            }
+            });
         }
     }
 }
 
 fn point_over(
-    on_over: On<Pointer<Over>>,
+    on_over: On<PointerOver>,
     mut card_areas: Query<(&mut BackgroundColor, &CardColorArea)>,
     mut border_areas: Query<&mut BorderColor>,
 ) {
@@ -418,7 +346,7 @@ fn point_over(
 }
 
 fn point_out(
-    on_over: On<Pointer<Out>>,
+    on_over: On<PointerOut>,
     mut card_areas: Query<(&mut BackgroundColor, &CardColorArea)>,
     mut border_areas: Query<&mut BorderColor>,
 ) {
@@ -436,7 +364,7 @@ fn point_out(
 }
 
 fn point_drag_start(
-    on_drag_start: On<Pointer<DragStart>>,
+    on_drag_start: On<PointerDragStart>,
     mut query: Query<(&mut Outline, &mut GlobalZIndex)>,
 ) {
     if let Ok((mut outline, mut global_zindex)) = query.get_mut(on_drag_start.event_target()) {
@@ -445,14 +373,14 @@ fn point_drag_start(
     }
 }
 
-fn point_drag(on_drag: On<Pointer<Drag>>, mut query: Query<&mut UiTransform>) {
+fn point_drag(on_drag: On<PointerDrag>, mut query: Query<&mut UiTransform>) {
     if let Ok(mut transform) = query.get_mut(on_drag.event_target()) {
         transform.translation = Val2::px(on_drag.distance.x, on_drag.distance.y);
     }
 }
 
 fn point_drag_end(
-    on_drag_end: On<Pointer<DragEnd>>,
+    on_drag_end: On<PointerDragEnd>,
     mut query: Query<(&mut UiTransform, &mut Outline, &mut GlobalZIndex)>,
 ) {
     if let Ok((mut transform, mut outline, mut global_zindex)) =
@@ -464,7 +392,7 @@ fn point_drag_end(
     }
 }
 
-fn point_drag_drop(on_drag_drop: On<Pointer<DragDrop>>, mut query: Query<&mut Node>) {
+fn point_drag_drop(on_drag_drop: On<PointerDragDrop>, mut query: Query<&mut Node>) {
     if let Ok([mut a, mut b]) =
         query.get_many_mut([on_drag_drop.event_target(), on_drag_drop.dropped])
     {
