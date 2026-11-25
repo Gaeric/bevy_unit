@@ -2,15 +2,37 @@ use bevy::{
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     prelude::*,
 };
-use bevy_cloth::{Cloth, ClothPlugin, ClothStepSettings, FixedAttachment, MeshCollider};
+use bevy_cloth::{
+    Cloth, ClothExternalFriction, ClothLongRangeAttachments, ClothPlugin, ClothSelfCollision,
+    ClothSolver, ClothStepSettings, CollisionGroup, FixedAttachment, MeshCollider,
+};
 
 const SEGMENTS: u32 = 16;
 
 #[derive(Component)]
 struct MovingSphere;
 
+#[derive(Resource, Default)]
+struct DemoOptions {
+    compare: bool,
+    lra: bool,
+    friction: bool,
+    self_collision: bool,
+}
+
 fn main() {
+    let mut options = DemoOptions::default();
+    for arg in std::env::args().skip(1) {
+        match arg.as_str() {
+            "--compare" => options.compare = true,
+            "--lra" => options.lra = true,
+            "--friction" => options.friction = true,
+            "--self-collision" => options.self_collision = true,
+            _ => {}
+        }
+    }
     App::new()
+        .insert_resource(options)
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "xpbd solver".into(),
@@ -29,8 +51,61 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    options: Res<DemoOptions>,
 ) {
-    let (mesh, attachments) = cloth_input();
+    spawn_case(
+        &mut commands,
+        &asset_server,
+        &mut meshes,
+        &mut materials,
+        ClothSolver::ColoredGs,
+        if options.compare { -1.2 } else { 0.0 },
+        &options,
+    );
+    if options.compare {
+        spawn_case(
+            &mut commands,
+            &asset_server,
+            &mut meshes,
+            &mut materials,
+            ClothSolver::Jacobi,
+            1.2,
+            &options,
+        );
+    }
+    commands.spawn((
+        Camera3d::default(),
+        FreeCamera::default(),
+        Transform::from_xyz(0.6, 2.0, if options.compare { 7.0 } else { 5.0 })
+            .looking_at(Vec3::new(0.0, 1.5, 0.0), Vec3::Y),
+    ));
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 10_000.0,
+            ..default()
+        },
+        Transform::from_xyz(3.0, 5.0, 4.0).looking_at(Vec3::new(0.0, 1.5, 0.0), Vec3::Y),
+    ));
+}
+
+fn spawn_case(
+    commands: &mut Commands,
+    asset_server: &AssetServer,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    solver: ClothSolver,
+    x: f32,
+    options: &DemoOptions,
+) {
+    // In this demo each solver has its own collider.
+    let group = match solver {
+        ClothSolver::ColoredGs => CollisionGroup(0),
+        ClothSolver::Jacobi => CollisionGroup(1),
+    };
+    let (mesh, mut attachments) = cloth_input();
+    for attachment in &mut attachments {
+        attachment.position.x += x;
+    }
     let marker = meshes.add(Sphere::new(0.035));
     let marker_material = materials.add(StandardMaterial {
         base_color: Color::srgb(1.0, 0.1, 0.05),
@@ -46,12 +121,12 @@ fn setup(
         info!(
             particle = attachment.particle,
             target = ?attachment.position,
-            "fixed attachment input (solver not connected)"
+            "fixed attachment target"
         );
     }
 
-    commands.spawn((
-        Name::new("Stretch cloth"),
+    let mut cloth = commands.spawn((
+        Name::new(format!("{solver:?} cloth")),
         Mesh3d(meshes.add(mesh)),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.0, 0.5, 1.0),
@@ -62,7 +137,9 @@ fn setup(
             reflectance: 0.01,
             ..default()
         })),
-        Transform::IDENTITY,
+        Transform::from_xyz(x, 0.0, 0.0),
+        solver,
+        group,
         Cloth {
             particle_mass: 1.0,
             stretch_compliance: 0.0001,
@@ -77,30 +154,33 @@ fn setup(
             iterations: 10,
         },
     ));
+    if options.lra {
+        cloth.insert(ClothLongRangeAttachments { compliance: 0.0 });
+    }
+    if options.friction {
+        cloth.insert(ClothExternalFriction { coefficient: 0.4 });
+    }
+    if options.self_collision {
+        cloth.insert(ClothSelfCollision {
+            diameter: 2.0 / SEGMENTS as f32,
+            friction: if options.friction { 0.4 } else { 0.0 },
+            neighbor_capacity: 32,
+        });
+    }
+
     // Initial overlap exercises tick-start stabilization and substep mesh contact.
     commands.spawn((
-        Name::new("Mesh collider sphere"),
+        Name::new(format!("{solver:?} collider")),
         Mesh3d(meshes.add(Sphere::new(0.5).mesh().uv(32, 18))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::WHITE,
             perceptual_roughness: 1.0,
             ..default()
         })),
-        Transform::from_xyz(0.0, 1.4, -0.35),
+        Transform::from_xyz(x, 1.4, -0.35),
         MeshCollider,
+        group,
         MovingSphere,
-    ));
-    commands.spawn((
-        Camera3d::default(),
-        FreeCamera::default(),
-        Transform::from_xyz(0.6, 2.0, 5.0).looking_at(Vec3::new(0.0, 1.5, 0.0), Vec3::Y),
-    ));
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 10_000.0,
-            ..default()
-        },
-        Transform::from_xyz(3.0, 5.0, 4.0).looking_at(Vec3::new(0.0, 1.5, 0.0), Vec3::Y),
     ));
 }
 

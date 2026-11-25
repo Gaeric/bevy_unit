@@ -7,23 +7,47 @@
 * Intro
   本项目主要目标是实现高性能bevy cloth simulation。
 
-  当前采用基于compute shader实现的jaboci xpbd求解器。
+  主线用 GPU compute 执行 XPBD。默认逐色 Gauss–Seidel，也可按布料选择 Jacobi。
 
   本项目早期参考velvet进行实现，过程中使用ai进行辅助。
 * How to Use
   当前布料公共入口从 crate 根导入；完整场景接入见 =examples/xpbd-solver.rs=。
   #+begin_src rust
     use bevy_cloth::{
-        Cloth, ClothPlugin, ClothStepSettings, CollisionGroup, FixedAttachment, MeshCollider,
+        Cloth, ClothExternalFriction, ClothLongRangeAttachments, ClothPlugin,
+        ClothSelfCollision, ClothSolver, ClothStepSettings, CollisionGroup,
+        FixedAttachment, MeshCollider,
     };
   #+end_src
   =ClothPlugin= 安装插件，=Cloth= 声明布料，=FixedAttachment= 声明固定世界坐标挂点。
   =ClothStepSettings= 仍是初始化时读取的 per-cloth Component，运行时修改尚不生效。
 
-  从 workspace 根目录启动现有入口（仅说明入口，不代表本批已运行或验证）：
+  添加 =Cloth= 时可同时添加 =ClothSolver::Jacobi=；省略则使用 =ClothSolver::ColoredGs=。
+  两种策略求解同一套 XPBD 约束；运行时修改不会重建求解数据。
+
+  拉伸和弯曲是基础约束。长距离约束（LRA）默认关闭，可在添加 =Cloth= 时同时添加
+  =ClothLongRangeAttachments { compliance: 0.0 }=；零表示刚性距离上限。
+  每个能沿原网格边到达挂点的自由粒子至多生成一条约束，上限取固定目标应用前的最短静止路径长度。
+  运行时用当前位置到固定挂点的直线距离求解。它只约束拉长，不替代固定挂点，也不焊接接缝。
+  零柔度不表示有限轮迭代后所有约束都能同时精确满足。
+
+  外部摩擦与自碰撞也默认关闭；在添加 =Cloth= 时按需一起添加：
+  - =ClothExternalFriction { coefficient: 0.4 }=：在子步的 BVH 法向投影后限制切向相对滑动。
+    响应包含碰撞体平移和旋转；tick 开头的稳定步骤仍只做法向投影。
+  - =ClothSelfCollision { diameter: 0.125, friction: 0.4, neighbor_capacity: 32 }=：同一件布料内的离散粒子接触。
+    =friction: 0.0= 只关闭自碰撞摩擦。每个子步重建邻居，超容量会告警，截断后只解双方都保留的接触对。
+    静止网格中已在一个直径以内的粒子对被排除，包括相邻的拆分顶点；不支持跨布料接触、连续碰撞或点–面/边–边自碰撞。
+  这两个接触阶段由两种 solver 共用，不放入内部约束 sweep；后续约束仍可能重新引入穿透。
+
+  从 workspace 根目录运行。加 =--compare= 时左侧是 Colored GS，右侧是 Jacobi，
+  两侧各有同样的挂点和移动碰撞体，用于运行验证而非计时：
   #+begin_src bash
     cargo run -j 2 -p bevy_cloth --example xpbd-solver
+    cargo run -j 2 -p bevy_cloth --example xpbd-solver -- --compare
+    cargo run -j 2 -p bevy_cloth --example xpbd-solver -- --compare --lra --friction --self-collision
   #+end_src
+  三个功能开关可独立使用：=--lra= 增加刚性距离上限；=--friction= 打开外部摩擦，若已打开自碰撞也会启用自接触摩擦；
+  =--self-collision= 打开自碰撞。准备日志中的 =tethers= 是生成的长距离约束数。
 * Record for AI
   - 本文件：项目入口、代码现状和运行方式。
   - [[file:plan.org][plan.org]]：协作约定、当前问题和下一步；不把所有未来功能都展开成任务。
@@ -44,7 +68,7 @@
   | =src/prepare/{mesh,systems,bending,data}.rs= | Mesh 数据准备、Bevy 准备系统、弯曲约束与准备结果；mod.rs 仅声明与导出 | 不属于 GPU 每步求解 |
   | =src/solver/{layout,gpu,bindings,pipeline,tick,upload}.rs= | GPU 求解布局、资源、管线、tick 与上传 | 主线求解职责 |
   | =src/solver/{layout,integration,stretch,bending,contact}.wesl= | 公共数据定义、时间推进、拉伸、弯曲与接触响应 | layout 仅含共享结构；运算与布局分离 |
-  | =src/collision/=、=src/output/= | 网格碰撞（prepare/gpu/bvh/transform/refit 与 query/transform/refit WESL）；输出（mod/bindings/pipeline 与 output.wesl） | collision/mod.rs 仅声明与导出；碰撞与输出职责分离 |
+  | =src/collision/=、=src/output/= | 外部网格 BVH/变换/表面历史，自碰撞的粒子邻居与求解，Mesh 输出 | 接触与内部约束、输出分离 |
   | =src/legacy/sim/= | CPU 求解、网格与约束生成、碰撞和空间哈希 | 已有实现与测试，不是独立正确性标准 |
   | =src/legacy/demo/= | 场景、面板、相机、抓取和 Mesh 写回 | 交互演示仍调用 CPU 求解器 |
   | =src/reference/= | 保留的 GPU 参考求解、动态邻居查找、诊断与 live 输出 | 七场景及呈现已实现；隔离all-targets检查通过，设备验收待运行 |
