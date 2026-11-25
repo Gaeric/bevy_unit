@@ -1,13 +1,16 @@
 import super::layout::{Particle, StepParams};
-import super::super::collision::bvh_query::{closest_hit, QueryHit, QUERY_OK, INVALID_TRIANGLE};
-
-// Shared by particle and stretch stages.
+import super::super::collision::bvh_query::{
+    closest_hit, QueryHit, QUERY_OK, INVALID_TRIANGLE, finite_scalar, finite_vector,
+};
 
 @group(0) @binding(0)
 var<uniform> step_params: StepParams;
 
 @group(0) @binding(1)
 var<storage, read_write> particles: array<Particle>;
+
+@group(0) @binding(2)
+var<storage, read> previous_positions: array<vec4<f32>>;
 
 // Solid-shell contact signs the nearest distance using the winning face winding.
 // Two-sided contact keeps the particle on its current side of the surface.
@@ -46,20 +49,50 @@ fn contact_correction(position: vec3<f32>, hit: QueryHit) -> vec3<f32> {
     return correction_length * normal;
 }
 
-// Shared by tick-start stabilization and post-prediction substep contact.
+fn tangential_correction(index: u32, position: vec3<f32>, correction: vec3<f32>) -> vec3<f32> {
+    if step_params.external_friction == 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let depth = length(correction);
+    if depth == 0.0 || !finite_scalar(depth) {
+        return vec3<f32>(0.0);
+    }
+
+    let relative_motion = position - previous_positions[index].xyz;
+    let normal = correction / depth;
+    let tangent = relative_motion - normal * dot(relative_motion, normal);
+    let tangent_length = length(tangent);
+    if !finite_vector(tangent) || !finite_scalar(tangent_length) || tangent_length == 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let length_cap = step_params.external_friction * depth;
+    return -tangent * min(length_cap / tangent_length, 1.0);
+}
+
+fn is_movable(index: u32) -> bool {
+    return index < step_params.particle_count && particles[index].inv_mass > 0.0;
+}
+
+@compute @workgroup_size(64)
+fn stabilize_contact(@builtin(global_invocation_id) invocation: vec3<u32>) {
+    let index = invocation.x;
+    if !is_movable(index) {
+        return;
+    }
+    let position = particles[index].position;
+    let hit = closest_hit(position);
+    particles[index].position = position + contact_correction(position, hit);
+}
+
 @compute @workgroup_size(64)
 fn solve_contact(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let index = invocation.x;
-    if index >= step_params.particle_count {
+    if !is_movable(index) {
         return;
     }
-
-    let particle = particles[index];
-    if particle.inv_mass == 0.0 {
-        return;
-    }
-
-    let hit = closest_hit(particle.position);
-    let correction = contact_correction(particle.position, hit);
-    particles[index].position = particle.position + correction;
+    let position = particles[index].position;
+    let hit = closest_hit(position);
+    let normal_delta = contact_correction(position, hit);
+    let tangent_delta = tangential_correction(index, position, normal_delta);
+    particles[index].position = position + normal_delta + tangent_delta;
 }

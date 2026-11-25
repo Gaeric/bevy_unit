@@ -44,6 +44,15 @@ pub struct ClothLongRangeAttachments {
     pub compliance: f32,
 }
 
+/// Opt-in friction against external mesh colliders. Add alongside `Cloth`.
+/// Without this component, external contact only corrects the normal direction.
+/// Read when adding `Cloth`; later edits do not change the simulation.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct ClothExternalFriction {
+    /// Finite, nonnegative Coulomb coefficient used for the tangential correction cap.
+    pub coefficient: f32,
+}
+
 /// A particle constrained to a fixed world-space position, not a distance limit.
 #[derive(Clone, Copy, Debug)]
 pub struct FixedAttachment {

@@ -185,12 +185,19 @@ pub(crate) fn simulate_cloths(
     )>,
 ) {
     // Check compilation once at the entry; transform/refit commands precede this system.
-    let (Some(_), Some(_), Some(_), Some(predict), Some(solve_contact), Some(update_velocity)) = (
+    let (
+        Some(_),
+        Some(_),
+        Some(_),
+        Some(predict),
+        Some(stabilize),
+        Some(update_velocity),
+    ) = (
         cache.get_compute_pipeline(transform_pipeline.transform_vertices),
         cache.get_compute_pipeline(refit_pipeline.leaves),
         cache.get_compute_pipeline(refit_pipeline.internal),
         cache.get_compute_pipeline(integration_pipelines.predict),
-        cache.get_compute_pipeline(contact_pipeline.solve_contact),
+        cache.get_compute_pipeline(contact_pipeline.stabilize),
         cache.get_compute_pipeline(integration_pipelines.update_velocity),
     ) else {
         return;
@@ -200,6 +207,7 @@ pub(crate) fn simulate_cloths(
     let solve_stretch = cache.get_compute_pipeline(colored_gs_pipelines.solve_stretch);
     let solve_bending = cache.get_compute_pipeline(colored_gs_pipelines.solve_bending);
     let solve_tethers = cache.get_compute_pipeline(colored_gs_pipelines.solve_tethers);
+    let frictional_contact = cache.get_compute_pipeline(contact_pipeline.solve_contact);
 
     for (
         cloth_buffers,
@@ -277,6 +285,14 @@ pub(crate) fn simulate_cloths(
             })
             .map(|(binding, _, _, _)| &binding.0)
             .collect();
+        let solve_contact = if step_params.external_friction > 0.0 && !collider_bindings.is_empty() {
+            let Some(pipeline) = frictional_contact else {
+                continue;
+            };
+            pipeline
+        } else {
+            stabilize
+        };
 
         while tick_cursor < ticks.requested {
             if !collider_bindings.is_empty() {
@@ -290,7 +306,7 @@ pub(crate) fn simulate_cloths(
 
                 record_contacts(
                     &mut pass,
-                    solve_contact,
+                    stabilize,
                     &contact_bind_group.0,
                     &collider_bindings,
                     particle_workgroups,

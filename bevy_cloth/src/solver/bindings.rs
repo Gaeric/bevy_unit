@@ -25,7 +25,7 @@ use super::{
     },
 };
 
-/// Group 0 for contact: one cloth's parameters and writable particles.
+/// Group 0 for contact: cloth parameters, writable particles and substep start positions.
 #[derive(Component)]
 pub(crate) struct ClothContactBindGroup(pub BindGroup);
 
@@ -61,6 +61,7 @@ impl ContactBindGroupLayout {
                                 NonZeroU64::new(size_of::<Particle>() as u64),
                             ),
                         ),
+                        (2, storage_buffer_read_only_sized(false, NonZeroU64::new(16))),
                     ),
                 ),
             ),
@@ -91,6 +92,7 @@ impl ContactBindGroupLayout {
             &BindGroupEntries::with_indices((
                 (0, cloth_buffers.step_params.as_entire_binding()),
                 (1, cloth_buffers.particles.as_entire_binding()),
+                (2, cloth_buffers.previous_positions.as_entire_binding()),
             )),
         ))
     }

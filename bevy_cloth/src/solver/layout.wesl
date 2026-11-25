@@ -35,7 +35,7 @@ struct StepParams {
     collision_margin: f32,
     double_sided: u32,
     bend_count: u32,
-    padding: u32,
+    external_friction: f32,
 };
 
 struct ConstraintRangeParams {

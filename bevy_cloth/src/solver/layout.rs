@@ -119,7 +119,7 @@ pub(crate) struct FixedAttachment {
 ///     collision_margin: f32,
 ///     double_sided: u32,
 ///     bend_count: u32,
-///     padding: u32,
+///     external_friction: f32,
 /// }
 #[repr(C)]
 #[derive(Component, Clone, Copy, Debug, Pod, Zeroable, ExtractComponent)]
@@ -139,7 +139,7 @@ pub(crate) struct StepParams {
     pub double_sided: u32,
     /// Used to locate the tether correction slots after the bend slots in Jacobi.
     pub bend_count: u32,
-    pub padding: u32,
+    pub external_friction: f32,
 }
 
 /// Constraint range for one color dispatch. Uniform payload size: 16 bytes.
@@ -211,7 +211,7 @@ mod tests {
         assert_eq!(offset_of!(StepParams, collision_margin), 32);
         assert_eq!(offset_of!(StepParams, double_sided), 36);
         assert_eq!(offset_of!(StepParams, bend_count), 40);
-        assert_eq!(offset_of!(StepParams, padding), 44);
+        assert_eq!(offset_of!(StepParams, external_friction), 44);
 
         assert_eq!(size_of::<ConstraintRangeParams>(), 16);
         assert_eq!(offset_of!(ConstraintRangeParams, start), 0);

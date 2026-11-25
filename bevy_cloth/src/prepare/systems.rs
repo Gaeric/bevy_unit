@@ -1,7 +1,9 @@
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
 use crate::{
-    components::{Cloth, ClothLongRangeAttachments, ClothSolver, ClothStepSettings},
+    components::{
+        Cloth, ClothExternalFriction, ClothLongRangeAttachments, ClothSolver, ClothStepSettings,
+    },
     prepare::ConstraintSchedule,
     solver::layout::StepParams,
 };
@@ -21,11 +23,12 @@ pub(crate) fn prepare_added_cloths(
             &ClothStepSettings,
             &ClothSolver,
             Option<&ClothLongRangeAttachments>,
+            Option<&ClothExternalFriction>,
         ),
         Added<Cloth>,
     >,
 ) {
-    for (entity, mesh_handle, transform, config, settings, solver, long_range) in &cloths {
+    for (entity, mesh_handle, transform, config, settings, solver, long_range, friction) in &cloths {
         if !settings.gravity.is_finite() || settings.substeps == 0 || settings.iterations == 0 {
             warn!(
                 ?entity,
@@ -37,6 +40,11 @@ pub(crate) fn prepare_added_cloths(
         let mesh = meshes
             .get(&mesh_handle.0)
             .expect("adding Cloth requires a loaded Mesh");
+        let external_friction = friction.map_or(0.0, |friction| friction.coefficient);
+        if !external_friction.is_finite() || external_friction < 0.0 {
+            warn!(?entity, "Cloth external friction must be finite and nonnegative");
+            continue;
+        }
         let prepared = match super::mesh::prepare_mesh(
             mesh,
             transform,
@@ -63,7 +71,7 @@ pub(crate) fn prepare_added_cloths(
             collision_margin: config.collision_margin,
             double_sided: u32::from(config.double_sided),
             bend_count: prepared.bend_constraints.len() as u32,
-            padding: 0,
+            external_friction,
         };
 
         info!(
@@ -76,6 +84,7 @@ pub(crate) fn prepare_added_cloths(
             bend_colors,
             fixed = prepared.attachments.len(),
             tethers = prepared.tethers.len(),
+            external_friction,
             substeps = settings.substeps,
             iterations = settings.iterations,
             "XPBD cloth prepared"
