@@ -115,7 +115,7 @@ pub(crate) struct FixedAttachment {
 ///     substep_dt: f32,
 ///     particle_count: u32,
 ///     stretch_count: u32,
-///     attachment_count: u32,
+///     substeps: u32,
 ///     collision_margin: f32,
 ///     double_sided: u32,
 ///     bend_count: u32,
@@ -132,7 +132,8 @@ pub(crate) struct StepParams {
     pub substep_dt: f32,
     pub particle_count: u32,
     pub stretch_count: u32,
-    pub attachment_count: u32,
+    /// Divides external surface displacement per tick into per-substep motion.
+    pub substeps: u32,
     /// World-space contact thickness, in meters.
     pub collision_margin: f32,
     /// Zero for an outward-wound solid shell, one for a two-sided surface.
@@ -207,7 +208,7 @@ mod tests {
         assert_eq!(offset_of!(StepParams, substep_dt), 16);
         assert_eq!(offset_of!(StepParams, particle_count), 20);
         assert_eq!(offset_of!(StepParams, stretch_count), 24);
-        assert_eq!(offset_of!(StepParams, attachment_count), 28);
+        assert_eq!(offset_of!(StepParams, substeps), 28);
         assert_eq!(offset_of!(StepParams, collision_margin), 32);
         assert_eq!(offset_of!(StepParams, double_sided), 36);
         assert_eq!(offset_of!(StepParams, bend_count), 40);

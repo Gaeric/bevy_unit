@@ -14,6 +14,7 @@ use bevy::{
 
 use crate::{
     collision::{
+        motion::ContactMotionBatch,
         refit::{ColliderRefit, ColliderRefitPipeline},
         transform::{ColliderTransform, ColliderTransformPipeline},
     },
@@ -159,6 +160,7 @@ impl ConstraintSweep<'_> {
 pub(crate) fn simulate_cloths(
     mut context: RenderContext,
     ticks: Res<ClothTicks>,
+    contact_motion: Res<ContactMotionBatch>,
     cache: Res<PipelineCache>,
     integration_pipelines: Res<ClothIntegrationPipelines>,
     colored_gs_pipelines: Res<ColoredGsPipelines>,
@@ -286,7 +288,11 @@ pub(crate) fn simulate_cloths(
             .map(|(binding, _, _, _)| &binding.0)
             .collect();
         let solve_contact = if step_params.external_friction > 0.0 && !collider_bindings.is_empty() {
+            // A delayed cloth cannot use this batch's surface displacement for older ticks.
+            tick_cursor = tick_cursor.max(contact_motion.start_tick);
             let Some(pipeline) = frictional_contact else {
+                // A later frame cannot reconstruct this batch's surface motion.
+                simulation.tick_cursor = Some(ticks.requested);
                 continue;
             };
             pipeline

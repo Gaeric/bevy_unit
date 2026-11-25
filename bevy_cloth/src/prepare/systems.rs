@@ -67,7 +67,7 @@ pub(crate) fn prepare_added_cloths(
             substep_dt: time.timestep().as_secs_f32() / settings.substeps as f32,
             particle_count: prepared.particles.len() as u32,
             stretch_count: prepared.stretch_constraints.len() as u32,
-            attachment_count: prepared.attachments.len() as u32,
+            substeps: settings.substeps,
             collision_margin: config.collision_margin,
             double_sided: u32::from(config.double_sided),
             bend_count: prepared.bend_constraints.len() as u32,

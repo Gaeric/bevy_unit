@@ -1,5 +1,6 @@
 mod bvh;
 pub(crate) mod gpu;
+pub(crate) mod motion;
 mod prepare;
 pub(crate) mod refit;
 pub(crate) mod transform;

@@ -74,6 +74,8 @@ impl ContactBindGroupLayout {
                         storage_buffer_read_only_sized(false, NonZeroU64::new(4)),
                         storage_buffer_read_only_sized(false, NonZeroU64::new(32)),
                         storage_buffer_read_only_sized(false, NonZeroU64::new(4)),
+                        uniform_buffer_sized(false, NonZeroU64::new(64)),
+                        storage_buffer_read_only_sized(false, NonZeroU64::new(16)),
                     ),
                 ),
             ),
@@ -111,6 +113,8 @@ impl ContactBindGroupLayout {
                 collider.indices.as_entire_binding(),
                 collider.nodes.as_entire_binding(),
                 collider.triangle_refs.as_entire_binding(),
+                collider.motion.delta_per_tick.as_entire_binding(),
+                collider.local_positions.as_entire_binding(),
             )),
         ))
     }

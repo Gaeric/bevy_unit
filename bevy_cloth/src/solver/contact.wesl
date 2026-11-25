@@ -1,6 +1,6 @@
 import super::layout::{Particle, StepParams};
 import super::super::collision::bvh_query::{
-    closest_hit, QueryHit, QUERY_OK, INVALID_TRIANGLE, finite_scalar, finite_vector,
+    closest_hit, QueryHit, QUERY_OK, INVALID_TRIANGLE, indices, finite_scalar, finite_vector,
 };
 
 @group(0) @binding(0)
@@ -11,6 +11,12 @@ var<storage, read_write> particles: array<Particle>;
 
 @group(0) @binding(2)
 var<storage, read> previous_positions: array<vec4<f32>>;
+
+@group(1) @binding(4)
+var<uniform> surface_delta_per_tick: mat4x4<f32>;
+
+@group(1) @binding(5)
+var<storage, read> local_positions: array<vec4<f32>>;
 
 // Solid-shell contact signs the nearest distance using the winning face winding.
 // Two-sided contact keeps the particle on its current side of the surface.
@@ -49,7 +55,7 @@ fn contact_correction(position: vec3<f32>, hit: QueryHit) -> vec3<f32> {
     return correction_length * normal;
 }
 
-fn tangential_correction(index: u32, position: vec3<f32>, correction: vec3<f32>) -> vec3<f32> {
+fn tangential_correction(index: u32, position: vec3<f32>, hit: QueryHit, correction: vec3<f32>) -> vec3<f32> {
     if step_params.external_friction == 0.0 {
         return vec3<f32>(0.0);
     }
@@ -58,7 +64,16 @@ fn tangential_correction(index: u32, position: vec3<f32>, correction: vec3<f32>)
         return vec3<f32>(0.0);
     }
 
-    let relative_motion = position - previous_positions[index].xyz;
+    // Follow the same material point: triangle ID and barycentrics from the
+    // current BVH hit, evaluated against the change in the collider's pose.
+    let base = 3u * hit.triangle_id;
+    let a = local_positions[indices[base]].xyz;
+    let b = local_positions[indices[base + 1u]].xyz;
+    let c = local_positions[indices[base + 2u]].xyz;
+    let local_point = a + hit.barycentric.y * (b - a) + hit.barycentric.z * (c - a);
+    let surface_motion = (surface_delta_per_tick * vec4<f32>(local_point, 1.0)).xyz
+        / f32(step_params.substeps);
+    let relative_motion = (position - previous_positions[index].xyz) - surface_motion;
     let normal = correction / depth;
     let tangent = relative_motion - normal * dot(relative_motion, normal);
     let tangent_length = length(tangent);
@@ -93,6 +108,6 @@ fn solve_contact(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let position = particles[index].position;
     let hit = closest_hit(position);
     let normal_delta = contact_correction(position, hit);
-    let tangent_delta = tangential_correction(index, position, normal_delta);
+    let tangent_delta = tangential_correction(index, position, hit, normal_delta);
     particles[index].position = position + normal_delta + tangent_delta;
 }

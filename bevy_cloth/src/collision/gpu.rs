@@ -12,7 +12,10 @@ use bevy::{
 
 use crate::solver::bindings::ContactBindGroupLayout;
 
-use super::{PreparedCollider, refit::ColliderRefit, transform::ColliderTransformBindGroup};
+use super::{
+    PreparedCollider, motion::ColliderContactMotion, refit::ColliderRefit,
+    transform::ColliderTransformBindGroup,
+};
 
 /// Buffers owned by one collider entity. Initial local bounds are refitted in place.
 #[derive(Component)]
@@ -24,6 +27,7 @@ pub(crate) struct GpuCollider {
     pub indices: Buffer,
     pub nodes: Buffer,
     pub triangle_refs: Buffer,
+    pub motion: ColliderContactMotion,
 
     pub vertex_count: u32,
     pub triangle_count: u32,
@@ -65,6 +69,7 @@ impl GpuCollider {
                 contents: bytemuck::cast_slice(&prepared.bvh.triangle_refs),
                 usage: BufferUsages::STORAGE,
             }),
+            motion: ColliderContactMotion::new(device),
             vertex_count: prepared.local_positions.len() as u32,
             triangle_count: (prepared.indices.len() / 3) as u32,
             node_count: prepared.bvh.nodes.len() as u32,

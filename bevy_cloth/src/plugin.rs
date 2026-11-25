@@ -17,7 +17,9 @@ use bevy::{
 
 use crate::{
     collision::{
-        self, PreparedCollider, gpu as collider_gpu, refit as collider_refit,
+        self, PreparedCollider, gpu as collider_gpu,
+        motion::{ContactMotionBatch, prepare_contact_motion},
+        refit as collider_refit,
         transform as collider_transform,
     },
     components::{ClothStepSettings, CollisionGroup},
@@ -83,6 +85,7 @@ impl Plugin for ClothPlugin {
             .extra_buffer_usages |= BufferUsages::STORAGE;
 
         render_app
+            .init_resource::<ContactMotionBatch>()
             .insert_resource(bindings::ClothIntegrationBindGroupLayout::new())
             .insert_resource(bindings::ClothStretchBindGroupLayout::new())
             .insert_resource(bindings::ClothBendBindGroupLayout::new())
@@ -128,6 +131,7 @@ impl Plugin for ClothPlugin {
                 (
                     collider_transform::transform_collider_vertices,
                     collider_refit::refit_colliders,
+                    prepare_contact_motion,
                     tick::simulate_cloths,
                     output::output_cloths,
                 )

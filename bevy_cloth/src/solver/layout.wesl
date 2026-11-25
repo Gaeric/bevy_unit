@@ -31,7 +31,7 @@ struct StepParams {
     substep_dt: f32,
     particle_count: u32,
     stretch_count: u32,
-    attachment_count: u32,
+    substeps: u32,
     collision_margin: f32,
     double_sided: u32,
     bend_count: u32,
