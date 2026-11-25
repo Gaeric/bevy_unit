@@ -27,7 +27,8 @@ struct StepParams {
     attachment_count: u32,
     collision_margin: f32,
     double_sided: u32,
-    padding: vec2<u32>,
+    bend_count: u32,
+    padding: u32,
 };
 
 struct ConstraintRangeParams {

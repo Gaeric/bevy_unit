@@ -4,12 +4,12 @@ use bevy::{mesh::PrimitiveTopology, prelude::*};
 use std::collections::BTreeSet;
 
 use crate::{
-    components::Cloth,
+    components::{Cloth, ClothSolver},
     solver::layout::{FixedAttachment as FixedAttachmentData, Particle, StretchConstraint},
 };
 
 use super::{
-    ColoredGsSchedule, ConstraintColorRange, PreparedCloth,
+    ColoredGsSchedule, ConstraintColorRange, ConstraintSchedule, JacobiSchedule, PreparedCloth,
     bending::{color_bending, prepare_bending},
 };
 
@@ -189,11 +189,12 @@ fn build_normal_adjacency(particle_count: usize, indices: &[u32]) -> (Vec<u32>, 
     (offsets, pairs)
 }
 
-/// Prepare particles, constraints and the Colored GS schedule.
+/// Prepare particles, constraints and the selected solver schedule.
 pub(crate) fn prepare_mesh(
     mesh: &Mesh,
     transform: &GlobalTransform,
     config: &Cloth,
+    solver: ClothSolver,
 ) -> Result<PreparedCloth, String> {
     let (positions, indices) = validate_inputs(mesh, transform, config)?;
 
@@ -241,13 +242,25 @@ pub(crate) fn prepare_mesh(
     // Rest angles, like rest lengths, use geometry before attachment targets.
     let bend_constraints = prepare_bending(&particles, &indices, config.bend_compliance)?;
 
-    // Only the GS schedule reorders constraints; the rest values do not change.
-    let (stretch_constraints, stretch_colors) =
-        color_stretch(particles.len(), stretch_constraints)?;
-    let (bend_constraints, bend_colors) = color_bending(particles.len(), bend_constraints)?;
-    let schedule = ColoredGsSchedule {
-        stretch_colors,
-        bend_colors,
+    let (stretch_constraints, bend_constraints, schedule) = match solver {
+        ClothSolver::ColoredGs => {
+            let (stretch, stretch_colors) = color_stretch(particles.len(), stretch_constraints)?;
+            let (bend, bend_colors) = color_bending(particles.len(), bend_constraints)?;
+            let schedule = ConstraintSchedule::ColoredGs(ColoredGsSchedule {
+                stretch_colors,
+                bend_colors,
+            });
+            (stretch, bend, schedule)
+        }
+        ClothSolver::Jacobi => {
+            let schedule =
+                JacobiSchedule::new(particles.len(), &stretch_constraints, &bend_constraints)?;
+            (
+                stretch_constraints,
+                bend_constraints,
+                ConstraintSchedule::Jacobi(schedule),
+            )
+        }
     };
 
     // Fixed targets affect the initial state, not the rest geometry.
@@ -320,6 +333,7 @@ mod tests {
             &hinge_mesh(),
             &GlobalTransform::IDENTITY,
             &config(),
+            ClothSolver::default(),
         )
         .unwrap();
         let edges: Vec<_> = prepared
@@ -327,7 +341,10 @@ mod tests {
             .iter()
             .map(|edge| edge.particles)
             .collect();
-        let ranges: Vec<_> = prepared.schedule
+        let ConstraintSchedule::ColoredGs(schedule) = &prepared.schedule else {
+            panic!("expected Colored GS by default");
+        };
+        let ranges: Vec<_> = schedule
             .stretch_colors
             .iter()
             .map(|range| (range.start, range.count))
@@ -349,12 +366,15 @@ mod tests {
             particle: 2,
             position: transform.transform_point(Vec3::new(0.0, 1.0, 1.0)),
         });
-        let prepared = prepare_mesh(&mesh, &transform, &config).unwrap();
+        let prepared = prepare_mesh(&mesh, &transform, &config, ClothSolver::ColoredGs).unwrap();
         assert_eq!(prepared.bend_constraints.len(), 1);
         assert!(prepared.bend_constraints[0].rest_angle.abs() < 1e-6);
         assert_eq!(prepared.bend_constraints[0].compliance, 0.125);
-        assert_eq!(prepared.schedule.bend_colors.len(), 1);
-        let bend_range = prepared.schedule.bend_colors[0];
+        let ConstraintSchedule::ColoredGs(schedule) = &prepared.schedule else {
+            panic!("expected Colored GS schedule");
+        };
+        assert_eq!(schedule.bend_colors.len(), 1);
+        let bend_range = schedule.bend_colors[0];
         assert_eq!((bend_range.start, bend_range.count), (0, 1));
         assert_eq!(
             prepared.particles[2].position,
@@ -368,12 +388,58 @@ mod tests {
     }
 
     #[test]
+    fn jacobi_uses_the_same_constraints_and_gathers_both_types() {
+        let mesh = hinge_mesh();
+        let mut config = config();
+        config.attachments.push(FixedAttachment {
+            particle: 2,
+            position: Vec3::new(0.0, 1.0, 1.0),
+        });
+        let prepare =
+            |solver| prepare_mesh(&mesh, &GlobalTransform::IDENTITY, &config, solver).unwrap();
+        let gs = prepare(ClothSolver::ColoredGs);
+        let jacobi = prepare(ClothSolver::Jacobi);
+
+        let sorted_stretches = |cloth: &PreparedCloth| {
+            let mut edges = cloth.stretch_constraints.clone();
+            edges.sort_by_key(|edge| edge.particles);
+            edges
+        };
+        assert_eq!(
+            bytemuck::cast_slice::<_, u8>(&sorted_stretches(&gs)),
+            bytemuck::cast_slice::<_, u8>(&sorted_stretches(&jacobi))
+        );
+        assert_eq!(
+            bytemuck::cast_slice::<_, u8>(&gs.bend_constraints),
+            bytemuck::cast_slice::<_, u8>(&jacobi.bend_constraints)
+        );
+        assert_eq!(jacobi.particles[2].position, [0.0, 1.0, 1.0]);
+        assert_eq!(jacobi.particles[2].inv_mass, 0.0);
+
+        let ConstraintSchedule::Jacobi(schedule) = &jacobi.schedule else {
+            panic!("expected Jacobi schedule");
+        };
+        // Five stretch edges followed by hinge endpoints [2, 3, 0, 1].
+        assert_eq!(schedule.offsets, [0, 4, 8, 11, 14]);
+        assert_eq!(
+            schedule.slots,
+            [0, 2, 4, 12, 1, 6, 8, 13, 3, 7, 10, 5, 9, 11]
+        );
+    }
+
+    #[test]
     fn invalid_bend_compliance_is_rejected() {
         let mesh = hinge_mesh();
         for compliance in [-1.0, f32::NAN, f32::INFINITY] {
             let mut config = config();
             config.bend_compliance = compliance;
-            let error = prepare_mesh(&mesh, &GlobalTransform::IDENTITY, &config).unwrap_err();
+            let error = prepare_mesh(
+                &mesh,
+                &GlobalTransform::IDENTITY,
+                &config,
+                ClothSolver::default(),
+            )
+            .unwrap_err();
             assert!(error.contains("bend_compliance"));
         }
     }

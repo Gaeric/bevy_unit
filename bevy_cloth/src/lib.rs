@@ -10,5 +10,7 @@ mod solver;
 pub mod legacy;
 pub mod reference;
 
-pub use components::{Cloth, ClothStepSettings, CollisionGroup, FixedAttachment, MeshCollider};
+pub use components::{
+    Cloth, ClothSolver, ClothStepSettings, CollisionGroup, FixedAttachment, MeshCollider,
+};
 pub use plugin::ClothPlugin;

@@ -5,7 +5,7 @@ use bevy::{
     render::{render_resource::PipelineCache, renderer::RenderDevice},
 };
 
-use crate::prepare::PreparedCloth;
+use crate::prepare::{ConstraintSchedule, PreparedCloth};
 
 use super::{
     bindings::{
@@ -13,9 +13,16 @@ use super::{
         ColoredGsBindGroups, ContactBindGroupLayout,
     },
     gpu::{ClothBuffers, ColoredGsRangeBuffers},
+    jacobi::{JacobiBindGroups, JacobiLayouts},
     layout::StepParams,
     tick::ClothSimulation,
 };
+
+#[derive(Component)]
+pub(crate) enum ConstraintBindGroups {
+    ColoredGs(ColoredGsBindGroups),
+    Jacobi(Option<JacobiBindGroups>),
+}
 
 pub(crate) fn upload_cloths(
     mut commands: Commands,
@@ -25,6 +32,7 @@ pub(crate) fn upload_cloths(
     stretch_layout: Res<ClothStretchBindGroupLayout>,
     contact_layout: Res<ContactBindGroupLayout>,
     bend_layout: Res<ClothBendBindGroupLayout>,
+    jacobi_layouts: Res<JacobiLayouts>,
     cloths: Query<(Entity, &PreparedCloth, &StepParams), Added<PreparedCloth>>,
 ) {
     for (entity, prepared, step_params) in &cloths {
@@ -32,21 +40,33 @@ pub(crate) fn upload_cloths(
         let integration = integration_layout.create_bind_group(&device, &cache, &cloth_buffers);
         let contact_bind_group =
             contact_layout.create_cloth_bind_group(&device, &cache, &cloth_buffers);
-        let ranges = ColoredGsRangeBuffers::new(&device, &prepared.schedule);
-        let stretch =
-            stretch_layout.create_bind_group(&device, &cache, &cloth_buffers, &ranges.stretch);
-        let bend = cloth_buffers.bending.as_ref().map(|buffers| {
-            let range = ranges
-                .bend
-                .as_ref()
-                .expect("prepared bends have color ranges");
-            bend_layout.create_bind_group(&device, &cache, &cloth_buffers, buffers, range)
-        });
+        let constraints = match &prepared.schedule {
+            ConstraintSchedule::ColoredGs(schedule) => {
+                let ranges = ColoredGsRangeBuffers::new(&device, schedule);
+                let stretch = stretch_layout.create_bind_group(
+                    &device,
+                    &cache,
+                    &cloth_buffers,
+                    &ranges.stretch,
+                );
+                let bend = cloth_buffers.bending.as_ref().map(|buffers| {
+                    let range = ranges
+                        .bend
+                        .as_ref()
+                        .expect("prepared bends have color ranges");
+                    bend_layout.create_bind_group(&device, &cache, &cloth_buffers, buffers, range)
+                });
+                ConstraintBindGroups::ColoredGs(ColoredGsBindGroups { stretch, bend })
+            }
+            ConstraintSchedule::Jacobi(schedule) => ConstraintBindGroups::Jacobi(
+                jacobi_layouts.create_bind_groups(&device, &cache, &cloth_buffers, schedule),
+            ),
+        };
 
         commands.entity(entity).insert((
             cloth_buffers,
             integration,
-            ColoredGsBindGroups { stretch, bend },
+            constraints,
             contact_bind_group,
             ClothSimulation::default(),
         ));
@@ -56,8 +76,6 @@ pub(crate) fn upload_cloths(
             particles = prepared.particles.len(),
             stretch = prepared.stretch_constraints.len(),
             bend = prepared.bend_constraints.len(),
-            colors = prepared.schedule.stretch_colors.len(),
-            bend_colors = prepared.schedule.bend_colors.len(),
             "XPBD cloth GPU data and binding initialized"
         );
     }

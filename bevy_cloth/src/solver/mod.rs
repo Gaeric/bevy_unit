@@ -2,6 +2,7 @@
 
 pub(crate) mod bindings;
 pub(crate) mod gpu;
+pub(crate) mod jacobi;
 pub(crate) mod layout;
 pub(crate) mod pipeline;
 pub(crate) mod tick;

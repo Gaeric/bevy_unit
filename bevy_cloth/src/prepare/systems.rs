@@ -1,7 +1,8 @@
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
 use crate::{
-    components::{Cloth, ClothStepSettings},
+    components::{Cloth, ClothSolver, ClothStepSettings},
+    prepare::ConstraintSchedule,
     solver::layout::StepParams,
 };
 
@@ -18,11 +19,12 @@ pub(crate) fn prepare_added_cloths(
             &GlobalTransform,
             &Cloth,
             &ClothStepSettings,
+            &ClothSolver,
         ),
         Added<Cloth>,
     >,
 ) {
-    for (entity, mesh_handle, transform, config, settings) in &cloths {
+    for (entity, mesh_handle, transform, config, settings, solver) in &cloths {
         if !settings.gravity.is_finite() || settings.substeps == 0 || settings.iterations == 0 {
             warn!(
                 ?entity,
@@ -34,8 +36,12 @@ pub(crate) fn prepare_added_cloths(
         let mesh = meshes
             .get(&mesh_handle.0)
             .expect("adding Cloth requires a loaded Mesh");
-        let prepared =
-            super::mesh::prepare_mesh(mesh, transform, config).expect("cloth preparation failed");
+        let prepared = super::mesh::prepare_mesh(mesh, transform, config, *solver)
+            .expect("cloth preparation failed");
+        let (stretch_colors, bend_colors) = match &prepared.schedule {
+            ConstraintSchedule::ColoredGs(gs) => (gs.stretch_colors.len(), gs.bend_colors.len()),
+            ConstraintSchedule::Jacobi(_) => (0, 0),
+        };
         let step_params = StepParams {
             gravity: settings.gravity.extend(0.0).to_array(),
             substep_dt: time.timestep().as_secs_f32() / settings.substeps as f32,
@@ -44,16 +50,19 @@ pub(crate) fn prepare_added_cloths(
             attachment_count: prepared.attachments.len() as u32,
             collision_margin: config.collision_margin,
             double_sided: u32::from(config.double_sided),
-            padding: [0; 2],
+            bend_count: prepared.bend_constraints.len() as u32,
+            padding: 0,
         };
 
         info!(
             ?entity,
             particles = prepared.particles.len(),
             stretch = prepared.stretch_constraints.len(),
-            colors = prepared.schedule.stretch_colors.len(),
+            ?solver,
+            colors = stretch_colors,
             bend = prepared.bend_constraints.len(),
-            bend_colors = prepared.schedule.bend_colors.len(),
+            bend_colors,
+            fixed = prepared.attachments.len(),
             substeps = settings.substeps,
             iterations = settings.iterations,
             "XPBD cloth prepared"

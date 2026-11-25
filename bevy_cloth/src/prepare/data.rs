@@ -5,6 +5,8 @@ use bevy::{
 
 use crate::solver::layout::{BendConstraint, FixedAttachment, Particle, StretchConstraint};
 
+use super::jacobi::JacobiSchedule;
+
 /// A color's contiguous range in a reordered constraint array.
 ///
 /// Used only by the CPU to record dispatches; not uploaded as GPU storage data.
@@ -21,6 +23,13 @@ pub(crate) struct ConstraintColorRange {
 pub(crate) struct ColoredGsSchedule {
     pub stretch_colors: Vec<ConstraintColorRange>,
     pub bend_colors: Vec<ConstraintColorRange>,
+}
+
+/// Only the chosen solver's scheduling data is prepared and extracted.
+#[derive(Clone, Debug)]
+pub(crate) enum ConstraintSchedule {
+    ColoredGs(ColoredGsSchedule),
+    Jacobi(JacobiSchedule),
 }
 
 /// Initial cloth data prepared on the CPU.
@@ -51,7 +60,7 @@ pub(crate) struct PreparedCloth {
     /// Fixed particles and their world-space targets.
     pub attachments: Vec<FixedAttachment>,
 
-    pub schedule: ColoredGsSchedule,
+    pub schedule: ConstraintSchedule,
 
     /// CSR boundaries: vertex i uses normal_pairs[normal_offsets[i]..normal_offsets[i + 1]].
     pub normal_offsets: Vec<u32>,

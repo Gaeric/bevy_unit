@@ -15,19 +15,18 @@ use bevy::{
 use crate::{
     collision::{refit::ColliderRefitPipeline, transform::ColliderTransformPipeline},
     components::{ClothStepSettings, CollisionGroup},
-    prepare::{ColoredGsSchedule, ConstraintColorRange, PreparedCloth},
+    prepare::{ColoredGsSchedule, ConstraintColorRange, ConstraintSchedule, PreparedCloth},
 };
 
 use super::{
-    bindings::{
-        ClothContactBindGroup, ClothIntegrationBindGroup, ColliderContactBindGroup,
-        ColoredGsBindGroups,
-    },
+    bindings::{ClothContactBindGroup, ClothIntegrationBindGroup, ColliderContactBindGroup},
     gpu::{ClothBuffers, constraint_range_param_stride},
+    jacobi::{JacobiPipelines, JacobiSweep},
     layout::StepParams,
     pipeline::{
         ClothContactPipeline, ClothIntegrationPipelines, ColoredGsPipelines, WORKGROUP_SIZE,
     },
+    upload::ConstraintBindGroups,
 };
 
 /// Total number of simulation ticks requested by Main World.
@@ -112,6 +111,32 @@ fn record_colored_gs_sweep(
     }
 }
 
+enum ConstraintSweep<'a> {
+    ColoredGs {
+        schedule: &'a ColoredGsSchedule,
+        stretch: (&'a ComputePipeline, &'a BindGroup),
+        bend: Option<(&'a ComputePipeline, &'a BindGroup)>,
+        range_param_stride: u32,
+    },
+    Jacobi(JacobiSweep<'a>),
+    Empty,
+}
+
+impl ConstraintSweep<'_> {
+    fn record(&self, pass: &mut ComputePass<'_>) {
+        match self {
+            Self::ColoredGs {
+                schedule,
+                stretch,
+                bend,
+                range_param_stride,
+            } => record_colored_gs_sweep(pass, schedule, *stretch, *bend, *range_param_stride),
+            Self::Jacobi(sweep) => sweep.record(pass),
+            Self::Empty => {}
+        }
+    }
+}
+
 /// Record pending ticks after collider transformation/refit and before rendering.
 pub(crate) fn simulate_cloths(
     mut context: RenderContext,
@@ -119,6 +144,7 @@ pub(crate) fn simulate_cloths(
     cache: Res<PipelineCache>,
     integration_pipelines: Res<ClothIntegrationPipelines>,
     colored_gs_pipelines: Res<ColoredGsPipelines>,
+    jacobi_pipelines: Res<JacobiPipelines>,
     contact_pipeline: Res<ClothContactPipeline>,
     transform_pipeline: Res<ColliderTransformPipeline>,
     refit_pipeline: Res<ColliderRefitPipeline>,
@@ -127,7 +153,7 @@ pub(crate) fn simulate_cloths(
         &ClothBuffers,
         &ClothIntegrationBindGroup,
         &ClothContactBindGroup,
-        &ColoredGsBindGroups,
+        &ConstraintBindGroups,
         &PreparedCloth,
         &StepParams,
         &ClothStepSettings,
@@ -136,28 +162,19 @@ pub(crate) fn simulate_cloths(
     )>,
 ) {
     // Check compilation once at the entry; transform/refit commands precede this system.
-    let (
-        Some(_),
-        Some(_),
-        Some(_),
-        Some(predict),
-        Some(solve_contact),
-        Some(solve_stretch),
-        Some(update_velocity),
-    ) = (
+    let (Some(_), Some(_), Some(_), Some(predict), Some(solve_contact), Some(update_velocity)) = (
         cache.get_compute_pipeline(transform_pipeline.transform_vertices),
         cache.get_compute_pipeline(refit_pipeline.leaves),
         cache.get_compute_pipeline(refit_pipeline.internal),
         cache.get_compute_pipeline(integration_pipelines.predict),
         cache.get_compute_pipeline(contact_pipeline.solve_contact),
-        cache.get_compute_pipeline(colored_gs_pipelines.solve_stretch),
         cache.get_compute_pipeline(integration_pipelines.update_velocity),
-    )
-    else {
+    ) else {
         return;
     };
 
     let range_param_stride = constraint_range_param_stride(context.render_device());
+    let solve_stretch = cache.get_compute_pipeline(colored_gs_pipelines.solve_stretch);
     let solve_bending = cache.get_compute_pipeline(colored_gs_pipelines.solve_bending);
 
     for (
@@ -172,13 +189,41 @@ pub(crate) fn simulate_cloths(
         mut simulation,
     ) in &mut cloths
     {
-        let bend = if let Some(binding) = &constraint_bindings.bend {
-            let Some(pipeline) = solve_bending else {
-                continue;
-            };
-            Some((pipeline, binding))
-        } else {
-            None
+        let sweep = match (&prepared.schedule, constraint_bindings) {
+            (
+                ConstraintSchedule::ColoredGs(schedule),
+                ConstraintBindGroups::ColoredGs(bindings),
+            ) => {
+                let Some(stretch) = solve_stretch else {
+                    continue;
+                };
+                let bend = if let Some(binding) = &bindings.bend {
+                    let Some(pipeline) = solve_bending else {
+                        continue;
+                    };
+                    Some((pipeline, binding))
+                } else {
+                    None
+                };
+                ConstraintSweep::ColoredGs {
+                    schedule,
+                    stretch: (stretch, &bindings.stretch),
+                    bend,
+                    range_param_stride,
+                }
+            }
+            (ConstraintSchedule::Jacobi(_), ConstraintBindGroups::Jacobi(Some(bindings))) => {
+                let Some(sweep) =
+                    JacobiSweep::ready(&cache, &jacobi_pipelines, bindings, step_params)
+                else {
+                    continue;
+                };
+                ConstraintSweep::Jacobi(sweep)
+            }
+            (ConstraintSchedule::Jacobi(_), ConstraintBindGroups::Jacobi(None)) => {
+                ConstraintSweep::Empty
+            }
+            _ => unreachable!("constraint bindings are built from the prepared schedule"),
         };
         let Some(mut tick_cursor) = simulation.tick_cursor else {
             // Start here instead of replaying ticks requested during loading.
@@ -237,13 +282,7 @@ pub(crate) fn simulate_cloths(
                 );
 
                 for _ in 0..settings.iterations {
-                    record_colored_gs_sweep(
-                        &mut pass,
-                        &prepared.schedule,
-                        (solve_stretch, &constraint_bindings.stretch),
-                        bend,
-                        range_param_stride,
-                    );
+                    sweep.record(&mut pass);
                 }
 
                 pass.set_pipeline(update_velocity);

@@ -25,6 +25,7 @@ use crate::{
     prepare::{self, PreparedCloth},
     solver::{
         bindings,
+        jacobi::{JacobiLayouts, init_jacobi_pipelines},
         layout::StepParams,
         pipeline,
         tick::{self, ClothTicks},
@@ -43,6 +44,7 @@ impl Plugin for ClothPlugin {
         embedded_asset!(app, "solver/contact.wesl");
         embedded_asset!(app, "solver/bending.wesl");
         embedded_asset!(app, "solver/constraint_math.wesl");
+        embedded_asset!(app, "solver/jacobi.wesl");
         embedded_asset!(app, "output/output.wesl");
         embedded_asset!(app, "collision/bvh_query.wesl");
         embedded_asset!(app, "collision/collider_transform.wesl");
@@ -83,6 +85,7 @@ impl Plugin for ClothPlugin {
             .insert_resource(bindings::ClothIntegrationBindGroupLayout::new())
             .insert_resource(bindings::ClothStretchBindGroupLayout::new())
             .insert_resource(bindings::ClothBendBindGroupLayout::new())
+            .insert_resource(JacobiLayouts::new())
             .insert_resource(ClothOutputBindGroupLayout::new())
             .insert_resource(bindings::ContactBindGroupLayout::new())
             .add_systems(
@@ -97,6 +100,7 @@ impl Plugin for ClothPlugin {
                 (
                     pipeline::init_integration_pipelines,
                     pipeline::init_colored_gs_pipelines,
+                    init_jacobi_pipelines,
                     init_output_pipeline,
                     pipeline::init_contact_pipeline,
                     collider_transform::init_transform_pipeline,

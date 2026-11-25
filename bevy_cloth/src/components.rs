@@ -11,7 +11,7 @@ use bevy::{
 /// CPU-readable. Each mesh vertex corresponds to one particle; no welding is
 /// implied. Initial data is prepared once; later input changes do not rebuild it.
 #[derive(Component, Debug)]
-#[require(ClothStepSettings)]
+#[require(ClothStepSettings, ClothSolver)]
 pub struct Cloth {
     /// Mass of each free particle
     pub particle_mass: f32,
@@ -24,6 +24,15 @@ pub struct Cloth {
     pub collision_margin: f32,
     /// Resolve contact on both sides of the triangle surface.
     pub double_sided: bool,
+}
+
+/// Per-cloth constraint sweep strategy. Set when adding `Cloth`; later edits
+/// do not rebuild solver data. Both strategies use the same XPBD constraints.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ClothSolver {
+    #[default]
+    ColoredGs,
+    Jacobi,
 }
 
 /// A particle constrained to a fixed world-space position, not a distance limit.
@@ -69,8 +78,7 @@ pub struct MeshCollider;
 
 /// Cloth and collider match by exact group equality, not a bit mask.
 ///
-/// Absence of this component means group 0. Matching will be consumed when
-/// contact solving is connected; changing groups does not rebuild geometry.
+/// Absence of this component means group 0. Changing groups does not rebuild geometry.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, ExtractComponent)]
 #[extract_app(RenderApp)]
 #[extract_component_filter(Changed<CollisionGroup>)]

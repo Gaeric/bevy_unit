@@ -6,16 +6,16 @@
 //! - velocities: `array<vec4<f32>>`, 16-byte stride; xyz is velocity, w is zero.
 //! - previous_positions: `array<vec4<f32>>`, 16-byte stride; xyz is the position
 //!   saved before prediction in each substep, w is zero. Used to update velocity.
-//! - stretch_constraints: `array<StretchConstraint>`, 16-byte stride; read-only, reordered by color.
+//! - stretch_constraints: `array<StretchConstraint>`, 16-byte stride; read-only, reordered by color for GS.
 //! - stretch_lambdas: `array<f32>`, 4-byte stride; one accumulated XPBD lambda per
 //!   reordered stretch constraint. Clear at each substep start, accumulate across
 //!   constraint iterations within that substep. No cross-substep warm starting.
-//! - bend_constraints: `array<BendConstraint>`, 32-byte stride; read-only, independently color-reordered.
+//! - bend_constraints: `array<BendConstraint>`, 32-byte stride; read-only, independently color-reordered for GS.
 //! - bend_lambdas: `array<f32>`, reset per substep, accumulated across bend iterations.
 //! - attachments: `array<FixedAttachment>`, 16-byte stride; read-only fixed targets.
 //!
 //! Particle, velocity and previous-position arrays share particle indices.
-//! Stretch and lambda arrays share reordered constraint indices.
+//! Each constraint array and its lambda array share constraint indices.
 //! Previous positions and lambdas are GPU runtime state, not CPU mesh inputs.
 //! Initialize previous positions from the prepared particle positions and lambdas
 //! to zero when creating an instance. Fixed particles keep their target positions
@@ -105,7 +105,8 @@ pub(crate) struct FixedAttachment {
 ///     attachment_count: u32,
 ///     collision_margin: f32,
 ///     double_sided: u32,
-///     padding: vec2<u32>,
+///     bend_count: u32,
+///     padding: u32,
 /// }
 #[repr(C)]
 #[derive(Component, Clone, Copy, Debug, Pod, Zeroable, ExtractComponent)]
@@ -123,7 +124,9 @@ pub(crate) struct StepParams {
     pub collision_margin: f32,
     /// Zero for an outward-wound solid shell, one for a two-sided surface.
     pub double_sided: u32,
-    pub padding: [u32; 2],
+    /// Number of dihedral constraints dispatched by Jacobi.
+    pub bend_count: u32,
+    pub padding: u32,
 }
 
 /// Constraint range for one color dispatch. Uniform payload size: 16 bytes.
@@ -188,7 +191,8 @@ mod tests {
         assert_eq!(offset_of!(StepParams, attachment_count), 28);
         assert_eq!(offset_of!(StepParams, collision_margin), 32);
         assert_eq!(offset_of!(StepParams, double_sided), 36);
-        assert_eq!(offset_of!(StepParams, padding), 40);
+        assert_eq!(offset_of!(StepParams, bend_count), 40);
+        assert_eq!(offset_of!(StepParams, padding), 44);
 
         assert_eq!(size_of::<ConstraintRangeParams>(), 16);
         assert_eq!(offset_of!(ConstraintRangeParams, start), 0);
