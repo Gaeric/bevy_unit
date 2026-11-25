@@ -21,7 +21,7 @@ use crate::prepare::JacobiSchedule;
 
 use super::{
     gpu::ClothBuffers,
-    layout::{BendConstraint, Particle, StepParams, StretchConstraint},
+    layout::{BendConstraint, Particle, StepParams, StretchConstraint, TetherConstraint},
     pipeline::WORKGROUP_SIZE,
 };
 
@@ -29,6 +29,7 @@ use super::{
 pub(crate) struct JacobiLayouts {
     stretch: BindGroupLayoutDescriptor,
     bend: BindGroupLayoutDescriptor,
+    tethers: BindGroupLayoutDescriptor,
     apply: BindGroupLayoutDescriptor,
 }
 
@@ -80,6 +81,26 @@ impl JacobiLayouts {
                         ),
                         (6, lambda),
                         (7, corrections),
+                    ),
+                ),
+            ),
+            tethers: BindGroupLayoutDescriptor::new(
+                "xpbd Jacobi tether layout",
+                &BindGroupLayoutEntries::with_indices(
+                    ShaderStages::COMPUTE,
+                    (
+                        (0, step_params),
+                        (1, snapshot),
+                        (2, offsets),
+                        (7, corrections),
+                        (
+                            10,
+                            storage_buffer_read_only_sized(
+                                false,
+                                NonZeroU64::new(size_of::<TetherConstraint>() as u64),
+                            ),
+                        ),
+                        (11, lambda),
                     ),
                 ),
             ),
@@ -159,6 +180,20 @@ impl JacobiLayouts {
                 )),
             )
         });
+        let tethers = cloth.tethers.as_ref().map(|buffers| {
+            device.create_bind_group(
+                "xpbd Jacobi tethers",
+                &cache.get_bind_group_layout(&self.tethers),
+                &BindGroupEntries::with_indices((
+                    (0, cloth.step_params.as_entire_binding()),
+                    (1, cloth.particles.as_entire_binding()),
+                    (2, offsets.as_entire_binding()),
+                    (7, corrections.as_entire_binding()),
+                    (10, buffers.constraints.as_entire_binding()),
+                    (11, buffers.lambdas.as_entire_binding()),
+                )),
+            )
+        });
         let apply = device.create_bind_group(
             "xpbd Jacobi apply",
             &cache.get_bind_group_layout(&self.apply),
@@ -173,6 +208,7 @@ impl JacobiLayouts {
         Some(JacobiBindGroups {
             stretch,
             bend,
+            tethers,
             apply,
         })
     }
@@ -181,6 +217,7 @@ impl JacobiLayouts {
 pub(crate) struct JacobiBindGroups {
     stretch: BindGroup,
     bend: Option<BindGroup>,
+    tethers: Option<BindGroup>,
     apply: BindGroup,
 }
 
@@ -188,6 +225,7 @@ pub(crate) struct JacobiBindGroups {
 pub(crate) struct JacobiPipelines {
     stretch: CachedComputePipelineId,
     bend: CachedComputePipelineId,
+    tethers: CachedComputePipelineId,
     apply: CachedComputePipelineId,
 }
 
@@ -210,6 +248,7 @@ pub(crate) fn init_jacobi_pipelines(
     commands.insert_resource(JacobiPipelines {
         stretch: queue("solve_stretch_jacobi", &layouts.stretch),
         bend: queue("solve_bend_jacobi", &layouts.bend),
+        tethers: queue("solve_tethers_jacobi", &layouts.tethers),
         apply: queue("apply_jacobi", &layouts.apply),
     });
 }
@@ -231,6 +270,7 @@ impl Dispatch<'_> {
 pub(crate) struct JacobiSweep<'a> {
     stretch: Dispatch<'a>,
     bend: Option<Dispatch<'a>>,
+    tethers: Option<Dispatch<'a>>,
     apply: Dispatch<'a>,
 }
 
@@ -240,6 +280,7 @@ impl<'a> JacobiSweep<'a> {
         pipelines: &JacobiPipelines,
         bindings: &'a JacobiBindGroups,
         step: &StepParams,
+        tether_count: u32,
     ) -> Option<Self> {
         let dispatch = |id, bind_group, count: u32| {
             Some(Dispatch {
@@ -252,9 +293,14 @@ impl<'a> JacobiSweep<'a> {
             Some(binding) => Some(dispatch(pipelines.bend, binding, step.bend_count)?),
             None => None,
         };
+        let tethers = match &bindings.tethers {
+            Some(binding) => Some(dispatch(pipelines.tethers, binding, tether_count)?),
+            None => None,
+        };
         Some(Self {
             stretch: dispatch(pipelines.stretch, &bindings.stretch, step.stretch_count)?,
             bend,
+            tethers,
             apply: dispatch(pipelines.apply, &bindings.apply, step.particle_count)?,
         })
     }
@@ -263,6 +309,9 @@ impl<'a> JacobiSweep<'a> {
         self.stretch.record(pass);
         if let Some(bend) = &self.bend {
             bend.record(pass);
+        }
+        if let Some(tethers) = &self.tethers {
+            tethers.record(pass);
         }
         self.apply.record(pass);
     }

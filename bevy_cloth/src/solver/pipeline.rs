@@ -8,7 +8,7 @@ use bevy::{
 
 use super::bindings::{
     ClothBendBindGroupLayout, ClothIntegrationBindGroupLayout, ClothStretchBindGroupLayout,
-    ContactBindGroupLayout,
+    ClothTetherBindGroupLayout, ContactBindGroupLayout,
 };
 
 /// Must match the workgroup size of the simulation and output entry points.
@@ -49,7 +49,9 @@ pub(crate) struct ColoredGsPipelines {
     pub solve_stretch: CachedComputePipelineId,
     /// Only cloths with dihedral constraints wait for this pipeline.
     pub solve_bending: CachedComputePipelineId,
-    /// Keep the shared WESL import alive for constraint shaders.
+    /// Only cloths with LRA constraints wait for this pipeline.
+    pub solve_tethers: CachedComputePipelineId,
+    /// Keep the shared WESL import alive for both solver paths.
     _constraint_math_shader: Handle<Shader>,
 }
 
@@ -59,6 +61,7 @@ pub(crate) fn init_colored_gs_pipelines(
     cache: Res<PipelineCache>,
     stretch_layout: Res<ClothStretchBindGroupLayout>,
     bend_layout: Res<ClothBendBindGroupLayout>,
+    tether_layout: Res<ClothTetherBindGroupLayout>,
 ) {
     let solve_stretch = cache.queue_compute_pipeline(ComputePipelineDescriptor {
         label: Some("xpbd solve_stretch".into()),
@@ -74,9 +77,17 @@ pub(crate) fn init_colored_gs_pipelines(
         entry_point: Some("solve_bending".into()),
         ..default()
     });
+    let solve_tethers = cache.queue_compute_pipeline(ComputePipelineDescriptor {
+        label: Some("xpbd GS solve_tethers".into()),
+        layout: vec![tether_layout.descriptor.clone()],
+        shader: load_embedded_asset!(asset_server.as_ref(), "tether.wesl"),
+        entry_point: Some("solve_tethers".into()),
+        ..default()
+    });
     commands.insert_resource(ColoredGsPipelines {
         solve_stretch,
         solve_bending,
+        solve_tethers,
         _constraint_math_shader: load_embedded_asset!(
             asset_server.as_ref(),
             "constraint_math.wesl"

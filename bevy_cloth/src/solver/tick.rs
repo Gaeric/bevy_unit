@@ -85,12 +85,13 @@ fn record_colors(
     }
 }
 
-/// A complete in-place sweep: stretch colors followed by bend colors.
+/// A complete in-place sweep: stretch colors, bend colors, then optional tethers.
 fn record_colored_gs_sweep(
     pass: &mut ComputePass<'_>,
     schedule: &ColoredGsSchedule,
     (stretch_pipeline, stretch_bind_group): (&ComputePipeline, &BindGroup),
     bend: Option<(&ComputePipeline, &BindGroup)>,
+    tethers: Option<(&ComputePipeline, &BindGroup, u32)>,
     range_param_stride: u32,
 ) {
     record_colors(
@@ -109,6 +110,11 @@ fn record_colored_gs_sweep(
             range_param_stride,
         );
     }
+    if let Some((pipeline, bind_group, workgroups)) = tethers {
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, bind_group, &[]);
+        pass.dispatch_workgroups(workgroups, 1, 1);
+    }
 }
 
 enum ConstraintSweep<'a> {
@@ -116,6 +122,7 @@ enum ConstraintSweep<'a> {
         schedule: &'a ColoredGsSchedule,
         stretch: (&'a ComputePipeline, &'a BindGroup),
         bend: Option<(&'a ComputePipeline, &'a BindGroup)>,
+        tethers: Option<(&'a ComputePipeline, &'a BindGroup, u32)>,
         range_param_stride: u32,
     },
     Jacobi(JacobiSweep<'a>),
@@ -129,8 +136,16 @@ impl ConstraintSweep<'_> {
                 schedule,
                 stretch,
                 bend,
+                tethers,
                 range_param_stride,
-            } => record_colored_gs_sweep(pass, schedule, *stretch, *bend, *range_param_stride),
+            } => record_colored_gs_sweep(
+                pass,
+                schedule,
+                *stretch,
+                *bend,
+                *tethers,
+                *range_param_stride,
+            ),
             Self::Jacobi(sweep) => sweep.record(pass),
             Self::Empty => {}
         }
@@ -176,6 +191,7 @@ pub(crate) fn simulate_cloths(
     let range_param_stride = constraint_range_param_stride(context.render_device());
     let solve_stretch = cache.get_compute_pipeline(colored_gs_pipelines.solve_stretch);
     let solve_bending = cache.get_compute_pipeline(colored_gs_pipelines.solve_bending);
+    let solve_tethers = cache.get_compute_pipeline(colored_gs_pipelines.solve_tethers);
 
     for (
         cloth_buffers,
@@ -189,6 +205,7 @@ pub(crate) fn simulate_cloths(
         mut simulation,
     ) in &mut cloths
     {
+        let tether_count = prepared.tethers.len() as u32;
         let sweep = match (&prepared.schedule, constraint_bindings) {
             (
                 ConstraintSchedule::ColoredGs(schedule),
@@ -205,17 +222,30 @@ pub(crate) fn simulate_cloths(
                 } else {
                     None
                 };
+                let tethers = if let Some(binding) = &bindings.tethers {
+                    let Some(pipeline) = solve_tethers else {
+                        continue;
+                    };
+                    Some((pipeline, binding, tether_count.div_ceil(WORKGROUP_SIZE)))
+                } else {
+                    None
+                };
                 ConstraintSweep::ColoredGs {
                     schedule,
                     stretch: (stretch, &bindings.stretch),
                     bend,
+                    tethers,
                     range_param_stride,
                 }
             }
             (ConstraintSchedule::Jacobi(_), ConstraintBindGroups::Jacobi(Some(bindings))) => {
-                let Some(sweep) =
-                    JacobiSweep::ready(&cache, &jacobi_pipelines, bindings, step_params)
-                else {
+                let Some(sweep) = JacobiSweep::ready(
+                    &cache,
+                    &jacobi_pipelines,
+                    bindings,
+                    step_params,
+                    tether_count,
+                ) else {
                     continue;
                 };
                 ConstraintSweep::Jacobi(sweep)
@@ -262,6 +292,9 @@ pub(crate) fn simulate_cloths(
                 encoder.clear_buffer(&cloth_buffers.stretch_lambdas, 0, None);
                 if let Some(bend_buffers) = &cloth_buffers.bending {
                     encoder.clear_buffer(&bend_buffers.lambdas, 0, None);
+                }
+                if let Some(tethers) = &cloth_buffers.tethers {
+                    encoder.clear_buffer(&tethers.lambdas, 0, None);
                 }
 
                 let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {

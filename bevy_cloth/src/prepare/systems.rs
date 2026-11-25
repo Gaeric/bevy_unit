@@ -1,7 +1,7 @@
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
 use crate::{
-    components::{Cloth, ClothSolver, ClothStepSettings},
+    components::{Cloth, ClothLongRangeAttachments, ClothSolver, ClothStepSettings},
     prepare::ConstraintSchedule,
     solver::layout::StepParams,
 };
@@ -20,11 +20,12 @@ pub(crate) fn prepare_added_cloths(
             &Cloth,
             &ClothStepSettings,
             &ClothSolver,
+            Option<&ClothLongRangeAttachments>,
         ),
         Added<Cloth>,
     >,
 ) {
-    for (entity, mesh_handle, transform, config, settings, solver) in &cloths {
+    for (entity, mesh_handle, transform, config, settings, solver, long_range) in &cloths {
         if !settings.gravity.is_finite() || settings.substeps == 0 || settings.iterations == 0 {
             warn!(
                 ?entity,
@@ -36,8 +37,19 @@ pub(crate) fn prepare_added_cloths(
         let mesh = meshes
             .get(&mesh_handle.0)
             .expect("adding Cloth requires a loaded Mesh");
-        let prepared = super::mesh::prepare_mesh(mesh, transform, config, *solver)
-            .expect("cloth preparation failed");
+        let prepared = match super::mesh::prepare_mesh(
+            mesh,
+            transform,
+            config,
+            *solver,
+            long_range.copied(),
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                warn!(?entity, %error, "XPBD cloth preparation failed");
+                continue;
+            }
+        };
         let (stretch_colors, bend_colors) = match &prepared.schedule {
             ConstraintSchedule::ColoredGs(gs) => (gs.stretch_colors.len(), gs.bend_colors.len()),
             ConstraintSchedule::Jacobi(_) => (0, 0),
@@ -63,6 +75,7 @@ pub(crate) fn prepare_added_cloths(
             bend = prepared.bend_constraints.len(),
             bend_colors,
             fixed = prepared.attachments.len(),
+            tethers = prepared.tethers.len(),
             substeps = settings.substeps,
             iterations = settings.iterations,
             "XPBD cloth prepared"

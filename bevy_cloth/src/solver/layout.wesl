@@ -19,6 +19,13 @@ struct BendConstraint {
     padding: vec2<u32>,
 };
 
+struct TetherConstraint {
+    particle: u32,
+    anchor: u32,
+    max_distance: f32,
+    compliance: f32,
+};
+
 struct StepParams {
     gravity: vec4<f32>,
     substep_dt: f32,

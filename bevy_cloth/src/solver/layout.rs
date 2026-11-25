@@ -6,16 +6,18 @@
 //! - velocities: `array<vec4<f32>>`, 16-byte stride; xyz is velocity, w is zero.
 //! - previous_positions: `array<vec4<f32>>`, 16-byte stride; xyz is the position
 //!   saved before prediction in each substep, w is zero. Used to update velocity.
-//! - stretch_constraints: `array<StretchConstraint>`, 16-byte stride; read-only, reordered by color for GS.
+//! - stretch_constraints: `array<StretchConstraint>`, 16-byte stride; read-only, reordered by color.
 //! - stretch_lambdas: `array<f32>`, 4-byte stride; one accumulated XPBD lambda per
 //!   reordered stretch constraint. Clear at each substep start, accumulate across
 //!   constraint iterations within that substep. No cross-substep warm starting.
-//! - bend_constraints: `array<BendConstraint>`, 32-byte stride; read-only, independently color-reordered for GS.
+//! - bend_constraints: `array<BendConstraint>`, 32-byte stride; read-only, independently color-reordered.
 //! - bend_lambdas: `array<f32>`, reset per substep, accumulated across bend iterations.
+//! - tethers: `array<TetherConstraint>`, 16-byte stride, read-only. Tether lambdas
+//!   follow the same lifecycle as bend lambdas.
 //! - attachments: `array<FixedAttachment>`, 16-byte stride; read-only fixed targets.
 //!
 //! Particle, velocity and previous-position arrays share particle indices.
-//! Each constraint array and its lambda array share constraint indices.
+//! Stretch and lambda arrays share reordered constraint indices.
 //! Previous positions and lambdas are GPU runtime state, not CPU mesh inputs.
 //! Initialize previous positions from the prepared particle positions and lambdas
 //! to zero when creating an instance. Fixed particles keep their target positions
@@ -78,6 +80,17 @@ pub(crate) struct BendConstraint {
     pub padding: [u32; 2],
 }
 
+/// One unilateral distance limit. Only the free particle receives corrections.
+/// Array element stride: 16 bytes.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
+pub(crate) struct TetherConstraint {
+    pub particle: u32,
+    pub anchor: u32,
+    pub max_distance: f32,
+    pub compliance: f32,
+}
+
 /// A fixed attachment holds one particle at a world-space target.
 ///
 /// WGSL equivalent:
@@ -124,7 +137,7 @@ pub(crate) struct StepParams {
     pub collision_margin: f32,
     /// Zero for an outward-wound solid shell, one for a two-sided surface.
     pub double_sided: u32,
-    /// Number of dihedral constraints dispatched by Jacobi.
+    /// Used to locate the tether correction slots after the bend slots in Jacobi.
     pub bend_count: u32,
     pub padding: u32,
 }
@@ -170,6 +183,12 @@ mod tests {
         assert_eq!(offset_of!(BendConstraint, rest_angle), 16);
         assert_eq!(offset_of!(BendConstraint, compliance), 20);
         assert_eq!(offset_of!(BendConstraint, padding), 24);
+
+        assert_eq!(size_of::<TetherConstraint>(), 16);
+        assert_eq!(offset_of!(TetherConstraint, particle), 0);
+        assert_eq!(offset_of!(TetherConstraint, anchor), 4);
+        assert_eq!(offset_of!(TetherConstraint, max_distance), 8);
+        assert_eq!(offset_of!(TetherConstraint, compliance), 12);
 
         assert_eq!(size_of::<FixedAttachment>(), 16);
         assert_eq!(offset_of!(FixedAttachment, target), 0);

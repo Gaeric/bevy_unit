@@ -35,6 +35,15 @@ pub enum ClothSolver {
     Jacobi,
 }
 
+/// Opt-in long-range attachments. Add alongside `Cloth`; later edits do not
+/// rebuild the cloth. Without this component no tethers are generated.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct ClothLongRangeAttachments {
+    /// XPBD compliance of the maximum-distance constraints, in m/N.
+    /// Must be finite and nonnegative; zero makes the limit rigid.
+    pub compliance: f32,
+}
+
 /// A particle constrained to a fixed world-space position, not a distance limit.
 #[derive(Clone, Copy, Debug)]
 pub struct FixedAttachment {

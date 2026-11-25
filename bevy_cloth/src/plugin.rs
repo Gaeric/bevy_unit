@@ -45,6 +45,7 @@ impl Plugin for ClothPlugin {
         embedded_asset!(app, "solver/bending.wesl");
         embedded_asset!(app, "solver/constraint_math.wesl");
         embedded_asset!(app, "solver/jacobi.wesl");
+        embedded_asset!(app, "solver/tether.wesl");
         embedded_asset!(app, "output/output.wesl");
         embedded_asset!(app, "collision/bvh_query.wesl");
         embedded_asset!(app, "collision/collider_transform.wesl");
@@ -85,6 +86,7 @@ impl Plugin for ClothPlugin {
             .insert_resource(bindings::ClothIntegrationBindGroupLayout::new())
             .insert_resource(bindings::ClothStretchBindGroupLayout::new())
             .insert_resource(bindings::ClothBendBindGroupLayout::new())
+            .insert_resource(bindings::ClothTetherBindGroupLayout::new())
             .insert_resource(JacobiLayouts::new())
             .insert_resource(ClothOutputBindGroupLayout::new())
             .insert_resource(bindings::ContactBindGroupLayout::new())

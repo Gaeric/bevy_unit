@@ -4,13 +4,14 @@ use bevy::{mesh::PrimitiveTopology, prelude::*};
 use std::collections::BTreeSet;
 
 use crate::{
-    components::{Cloth, ClothSolver},
+    components::{Cloth, ClothLongRangeAttachments, ClothSolver},
     solver::layout::{FixedAttachment as FixedAttachmentData, Particle, StretchConstraint},
 };
 
 use super::{
     ColoredGsSchedule, ConstraintColorRange, ConstraintSchedule, JacobiSchedule, PreparedCloth,
     bending::{color_bending, prepare_bending},
+    tether::prepare_tethers,
 };
 
 /// Validate all inputs before preparing particles and constraints.
@@ -195,6 +196,7 @@ pub(crate) fn prepare_mesh(
     transform: &GlobalTransform,
     config: &Cloth,
     solver: ClothSolver,
+    long_range: Option<ClothLongRangeAttachments>,
 ) -> Result<PreparedCloth, String> {
     let (positions, indices) = validate_inputs(mesh, transform, config)?;
 
@@ -242,6 +244,16 @@ pub(crate) fn prepare_mesh(
     // Rest angles, like rest lengths, use geometry before attachment targets.
     let bend_constraints = prepare_bending(&particles, &indices, config.bend_compliance)?;
 
+    let tethers = match long_range {
+        Some(settings) => prepare_tethers(
+            particles.len(),
+            &stretch_constraints,
+            &config.attachments,
+            settings,
+        )?,
+        None => Vec::new(),
+    };
+
     let (stretch_constraints, bend_constraints, schedule) = match solver {
         ClothSolver::ColoredGs => {
             let (stretch, stretch_colors) = color_stretch(particles.len(), stretch_constraints)?;
@@ -253,8 +265,12 @@ pub(crate) fn prepare_mesh(
             (stretch, bend, schedule)
         }
         ClothSolver::Jacobi => {
-            let schedule =
-                JacobiSchedule::new(particles.len(), &stretch_constraints, &bend_constraints)?;
+            let schedule = JacobiSchedule::new(
+                particles.len(),
+                &stretch_constraints,
+                &bend_constraints,
+                &tethers,
+            )?;
             (
                 stretch_constraints,
                 bend_constraints,
@@ -286,6 +302,7 @@ pub(crate) fn prepare_mesh(
         velocities,
         stretch_constraints,
         bend_constraints,
+        tethers,
         attachments,
         schedule,
         normal_offsets,
@@ -334,8 +351,10 @@ mod tests {
             &GlobalTransform::IDENTITY,
             &config(),
             ClothSolver::default(),
+            None,
         )
         .unwrap();
+        assert!(prepared.tethers.is_empty());
         let edges: Vec<_> = prepared
             .stretch_constraints
             .iter()
@@ -366,7 +385,7 @@ mod tests {
             particle: 2,
             position: transform.transform_point(Vec3::new(0.0, 1.0, 1.0)),
         });
-        let prepared = prepare_mesh(&mesh, &transform, &config, ClothSolver::ColoredGs).unwrap();
+        let prepared = prepare_mesh(&mesh, &transform, &config, ClothSolver::ColoredGs, None).unwrap();
         assert_eq!(prepared.bend_constraints.len(), 1);
         assert!(prepared.bend_constraints[0].rest_angle.abs() < 1e-6);
         assert_eq!(prepared.bend_constraints[0].compliance, 0.125);
@@ -395,8 +414,9 @@ mod tests {
             particle: 2,
             position: Vec3::new(0.0, 1.0, 1.0),
         });
-        let prepare =
-            |solver| prepare_mesh(&mesh, &GlobalTransform::IDENTITY, &config, solver).unwrap();
+        let prepare = |solver| {
+            prepare_mesh(&mesh, &GlobalTransform::IDENTITY, &config, solver, None).unwrap()
+        };
         let gs = prepare(ClothSolver::ColoredGs);
         let jacobi = prepare(ClothSolver::Jacobi);
 
@@ -428,6 +448,49 @@ mod tests {
     }
 
     #[test]
+    fn both_solvers_use_the_same_rest_tethers_and_jacobi_gathers_only_free_ends() {
+        let mesh = hinge_mesh();
+        let mut config = config();
+        config.attachments.push(FixedAttachment {
+            particle: 2,
+            position: Vec3::new(0.0, 1.0, 5.0),
+        });
+        let prepare = |solver, long_range| {
+            prepare_mesh(
+                &mesh,
+                &GlobalTransform::IDENTITY,
+                &config,
+                solver,
+                long_range,
+            )
+            .unwrap()
+        };
+        let long_range = Some(ClothLongRangeAttachments { compliance: 0.25 });
+        let gs = prepare(ClothSolver::ColoredGs, long_range);
+        let jacobi = prepare(ClothSolver::Jacobi, long_range);
+        assert!(prepare(ClothSolver::Jacobi, None).tethers.is_empty());
+        assert_eq!(gs.tethers, jacobi.tethers);
+        let paths: Vec<_> = jacobi
+            .tethers
+            .iter()
+            .map(|tether| (tether.particle, tether.anchor, tether.max_distance))
+            .collect();
+        // Anchor target is out of the rest plane. Particle 3 reaches anchor 2
+        // through particle 0; both rest edges have length 1.
+        assert_eq!(jacobi.particles[2].position, [0.0, 1.0, 5.0]);
+        assert_eq!(paths, [(0, 2, 1.0), (1, 2, 2.0_f32.sqrt()), (3, 2, 2.0)]);
+
+        let ConstraintSchedule::Jacobi(schedule) = &jacobi.schedule else {
+            panic!("expected Jacobi schedule");
+        };
+        assert_eq!(schedule.offsets, [0, 5, 10, 13, 17]);
+        assert_eq!(
+            schedule.slots,
+            [0, 2, 4, 12, 14, 1, 6, 8, 13, 15, 3, 7, 10, 5, 9, 11, 16]
+        );
+    }
+
+    #[test]
     fn invalid_bend_compliance_is_rejected() {
         let mesh = hinge_mesh();
         for compliance in [-1.0, f32::NAN, f32::INFINITY] {
@@ -438,6 +501,7 @@ mod tests {
                 &GlobalTransform::IDENTITY,
                 &config,
                 ClothSolver::default(),
+                None,
             )
             .unwrap_err();
             assert!(error.contains("bend_compliance"));

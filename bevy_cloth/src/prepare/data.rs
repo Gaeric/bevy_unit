@@ -3,7 +3,9 @@ use bevy::{
     render::{RenderApp, extract_component::ExtractComponent},
 };
 
-use crate::solver::layout::{BendConstraint, FixedAttachment, Particle, StretchConstraint};
+use crate::solver::layout::{
+    BendConstraint, FixedAttachment, Particle, StretchConstraint, TetherConstraint,
+};
 
 use super::jacobi::JacobiSchedule;
 
@@ -56,6 +58,9 @@ pub(crate) struct PreparedCloth {
 
     /// Complete dihedral constraints, ordered for the chosen schedule.
     pub bend_constraints: Vec<BendConstraint>,
+
+    /// One distance limit per reachable free particle, if LRA was enabled.
+    pub tethers: Vec<TetherConstraint>,
 
     /// Fixed particles and their world-space targets.
     pub attachments: Vec<FixedAttachment>,

@@ -1,4 +1,5 @@
-// Shared constraint geometry and XPBD update.
+// Constraint geometry and XPBD update, shared by both sweep schedules.
+import super::layout::{Particle, TetherConstraint};
 
 struct StretchEvaluation {
     direction: vec3<f32>,
@@ -70,7 +71,6 @@ fn evaluate_bend(
         error += two_pi;
     }
 
-    // Gradients of the signed atan2 angle, not the unsigned acos angle.
     let scaled0 = area0 / area0_squared;
     let scaled1 = area1 / area1_squared;
     let g0 = -edge_length * scaled0;
@@ -82,4 +82,32 @@ fn evaluate_bend(
 
 fn xpbd_delta_lambda(error: f32, lambda: f32, alpha: f32, denominator: f32) -> f32 {
     return (-error - alpha * lambda) / denominator;
+}
+
+struct TetherUpdate {
+    lambda: f32,
+    correction: vec3<f32>,
+};
+
+fn solve_tether(
+    particle: Particle, anchor_position: vec3<f32>, constraint: TetherConstraint,
+    lambda: f32, dt: f32, degree: f32,
+) -> TetherUpdate {
+    if particle.inv_mass == 0.0 {
+        return TetherUpdate(0.0, vec3<f32>(0.0));
+    }
+    let evaluation = evaluate_stretch(particle.position, anchor_position, constraint.max_distance);
+    if !evaluation.valid {
+        // Coincident endpoints satisfy the limit and have no correction direction.
+        return TetherUpdate(0.0, vec3<f32>(0.0));
+    }
+    let alpha = constraint.compliance / (dt * dt);
+    let denominator = alpha + degree * particle.inv_mass;
+    let trial_delta = xpbd_delta_lambda(evaluation.error, lambda, alpha, denominator);
+    // For C = distance - limit <= 0, tension is a nonpositive multiplier.
+    // A slack tether may release previous tension, never accumulate compression.
+    let next_lambda = min(lambda + trial_delta, 0.0);
+    let delta_lambda = next_lambda - lambda;
+    let correction = particle.inv_mass * delta_lambda * evaluation.direction;
+    return TetherUpdate(next_lambda, correction);
 }

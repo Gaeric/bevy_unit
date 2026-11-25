@@ -10,7 +10,7 @@ use crate::prepare::{ConstraintSchedule, PreparedCloth};
 use super::{
     bindings::{
         ClothBendBindGroupLayout, ClothIntegrationBindGroupLayout, ClothStretchBindGroupLayout,
-        ColoredGsBindGroups, ContactBindGroupLayout,
+        ClothTetherBindGroupLayout, ColoredGsBindGroups, ContactBindGroupLayout,
     },
     gpu::{ClothBuffers, ColoredGsRangeBuffers},
     jacobi::{JacobiBindGroups, JacobiLayouts},
@@ -32,6 +32,7 @@ pub(crate) fn upload_cloths(
     stretch_layout: Res<ClothStretchBindGroupLayout>,
     contact_layout: Res<ContactBindGroupLayout>,
     bend_layout: Res<ClothBendBindGroupLayout>,
+    tether_layout: Res<ClothTetherBindGroupLayout>,
     jacobi_layouts: Res<JacobiLayouts>,
     cloths: Query<(Entity, &PreparedCloth, &StepParams), Added<PreparedCloth>>,
 ) {
@@ -56,7 +57,14 @@ pub(crate) fn upload_cloths(
                         .expect("prepared bends have color ranges");
                     bend_layout.create_bind_group(&device, &cache, &cloth_buffers, buffers, range)
                 });
-                ConstraintBindGroups::ColoredGs(ColoredGsBindGroups { stretch, bend })
+                let tethers = cloth_buffers.tethers.as_ref().map(|buffers| {
+                    tether_layout.create_bind_group(&device, &cache, &cloth_buffers, buffers)
+                });
+                ConstraintBindGroups::ColoredGs(ColoredGsBindGroups {
+                    stretch,
+                    bend,
+                    tethers,
+                })
             }
             ConstraintSchedule::Jacobi(schedule) => ConstraintBindGroups::Jacobi(
                 jacobi_layouts.create_bind_groups(&device, &cache, &cloth_buffers, schedule),
@@ -76,6 +84,7 @@ pub(crate) fn upload_cloths(
             particles = prepared.particles.len(),
             stretch = prepared.stretch_constraints.len(),
             bend = prepared.bend_constraints.len(),
+            tethers = prepared.tethers.len(),
             "XPBD cloth GPU data and binding initialized"
         );
     }

@@ -18,8 +18,11 @@ use std::{mem::size_of, num::NonZeroU64};
 use crate::collision::gpu::GpuCollider;
 
 use super::{
-    gpu::{BendConstraintBuffers, ClothBuffers},
-    layout::{BendConstraint, ConstraintRangeParams, Particle, StepParams, StretchConstraint},
+    gpu::{BendConstraintBuffers, ClothBuffers, TetherBuffers},
+    layout::{
+        BendConstraint, ConstraintRangeParams, Particle, StepParams, StretchConstraint,
+        TetherConstraint,
+    },
 };
 
 /// Group 0 for contact: one cloth's parameters and writable particles.
@@ -165,6 +168,54 @@ impl ClothIntegrationBindGroupLayout {
 pub(crate) struct ColoredGsBindGroups {
     pub stretch: BindGroup,
     pub bend: Option<BindGroup>,
+    pub tethers: Option<BindGroup>,
+}
+
+/// Tethers form a single in-place dispatch and need no dynamic color offset.
+#[derive(Resource)]
+pub(crate) struct ClothTetherBindGroupLayout {
+    pub descriptor: BindGroupLayoutDescriptor,
+}
+
+impl ClothTetherBindGroupLayout {
+    pub fn new() -> Self {
+        Self {
+            descriptor: BindGroupLayoutDescriptor::new(
+                "xpbd GS tether layout",
+                &BindGroupLayoutEntries::sequential(
+                    ShaderStages::COMPUTE,
+                    (
+                        uniform_buffer_sized(false, NonZeroU64::new(size_of::<StepParams>() as u64)),
+                        storage_buffer_sized(false, NonZeroU64::new(size_of::<Particle>() as u64)),
+                        storage_buffer_read_only_sized(
+                            false,
+                            NonZeroU64::new(size_of::<TetherConstraint>() as u64),
+                        ),
+                        storage_buffer_sized(false, NonZeroU64::new(4)),
+                    ),
+                ),
+            ),
+        }
+    }
+
+    pub fn create_bind_group(
+        &self,
+        device: &RenderDevice,
+        cache: &PipelineCache,
+        cloth: &ClothBuffers,
+        tethers: &TetherBuffers,
+    ) -> BindGroup {
+        device.create_bind_group(
+            "xpbd GS tethers",
+            &cache.get_bind_group_layout(&self.descriptor),
+            &BindGroupEntries::sequential((
+                cloth.step_params.as_entire_binding(),
+                cloth.particles.as_entire_binding(),
+                tethers.constraints.as_entire_binding(),
+                tethers.lambdas.as_entire_binding(),
+            )),
+        )
+    }
 }
 
 #[derive(Resource)]

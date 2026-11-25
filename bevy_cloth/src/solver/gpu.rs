@@ -21,6 +21,12 @@ pub(crate) struct BendConstraintBuffers {
     pub lambdas: Buffer,
 }
 
+/// Present only when at least one free particle has a reachable anchor.
+pub(crate) struct TetherBuffers {
+    pub constraints: Buffer,
+    pub lambdas: Buffer,
+}
+
 /// Per-color uniform slots used only for Colored GS dispatches.
 pub(crate) struct ColoredGsRangeBuffers {
     pub stretch: Buffer,
@@ -36,6 +42,7 @@ pub(crate) struct ClothBuffers {
     pub stretch_constraints: Buffer,
     pub stretch_lambdas: Buffer,
     pub bending: Option<BendConstraintBuffers>,
+    pub tethers: Option<TetherBuffers>,
     pub step_params: Buffer,
 }
 
@@ -72,6 +79,22 @@ impl ClothBuffers {
             }
         });
 
+        let tethers = (!prepared.tethers.is_empty()).then(|| {
+            let lambdas = vec![0.0_f32; prepared.tethers.len()];
+            TetherBuffers {
+                constraints: device.create_buffer_with_data(&BufferInitDescriptor {
+                    label: Some("xpbd tether constraints"),
+                    contents: bytemuck::cast_slice(&prepared.tethers),
+                    usage: BufferUsages::STORAGE,
+                }),
+                lambdas: device.create_buffer_with_data(&BufferInitDescriptor {
+                    label: Some("xpbd tether lambdas"),
+                    contents: bytemuck::cast_slice(&lambdas),
+                    usage: storage,
+                }),
+            }
+        });
+
         Self {
             particles: device.create_buffer_with_data(&BufferInitDescriptor {
                 label: Some("xpbd particles"),
@@ -99,6 +122,7 @@ impl ClothBuffers {
                 usage: storage,
             }),
             bending,
+            tethers,
             step_params: device.create_buffer_with_data(&BufferInitDescriptor {
                 label: Some("xpbd step params"),
                 contents: bytemuck::bytes_of(step_params),

@@ -1,7 +1,7 @@
 // One thread per constraint writes its lambda and endpoint corrections. Only
 // apply_jacobi writes positions, after all constraint dispatches have finished.
-import super::layout::{Particle, StretchConstraint, BendConstraint, StepParams};
-import super::constraint_math::{evaluate_stretch, evaluate_bend, xpbd_delta_lambda};
+import super::layout::{Particle, StretchConstraint, BendConstraint, TetherConstraint, StepParams};
+import super::constraint_math::{evaluate_stretch, evaluate_bend, xpbd_delta_lambda, solve_tether};
 
 @group(0) @binding(0) var<uniform> step_params: StepParams;
 @group(0) @binding(1) var<storage, read> snapshot: array<Particle>;
@@ -13,6 +13,8 @@ import super::constraint_math::{evaluate_stretch, evaluate_bend, xpbd_delta_lamb
 @group(0) @binding(7) var<storage, read_write> corrections: array<vec4<f32>>;
 @group(0) @binding(8) var<storage, read_write> particles: array<Particle>;
 @group(0) @binding(9) var<storage, read> incidences: array<u32>;
+@group(0) @binding(10) var<storage, read> tethers: array<TetherConstraint>;
+@group(0) @binding(11) var<storage, read_write> tether_lambdas: array<f32>;
 
 fn degree(particle: u32) -> f32 {
     return f32(incident_offsets[particle + 1u] - incident_offsets[particle]);
@@ -93,6 +95,22 @@ fn solve_bend_jacobi(@builtin(global_invocation_id) invocation: vec3<u32>) {
     corrections[slot + 1u] = vec4<f32>(b.inv_mass * delta_lambda * evaluation.g1, 0.0);
     corrections[slot + 2u] = vec4<f32>(c.inv_mass * delta_lambda * evaluation.g2, 0.0);
     corrections[slot + 3u] = vec4<f32>(d.inv_mass * delta_lambda * evaluation.g3, 0.0);
+}
+
+@compute @workgroup_size(64)
+fn solve_tethers_jacobi(@builtin(global_invocation_id) invocation: vec3<u32>) {
+    let index = invocation.x;
+    if index >= arrayLength(&tethers) {
+        return;
+    }
+    let tether = tethers[index];
+    let update = solve_tether(
+        snapshot[tether.particle], snapshot[tether.anchor].position, tether,
+        tether_lambdas[index], step_params.substep_dt, degree(tether.particle),
+    );
+    let slot = 2u * step_params.stretch_count + 4u * step_params.bend_count + index;
+    tether_lambdas[index] = update.lambda;
+    corrections[slot] = vec4<f32>(update.correction, 0.0);
 }
 
 @compute @workgroup_size(64)
