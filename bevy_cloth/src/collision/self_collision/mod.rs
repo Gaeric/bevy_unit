@@ -1,14 +1,18 @@
-//! Internal candidate search for discrete particle contact within one cloth.
+//! Opt-in, discrete particle contact within one cloth.
 //!
-//! Rows use raw Mesh vertex IDs and exclude pairs within one diameter at rest.
-//! The GPU stages only read cloth particles; no pass is scheduled by the cloth solver yet.
+//! Particle IDs are raw Mesh vertex IDs. Pairs within one diameter at rest are
+//! excluded, including distinct vertices split at seams and nearby separate layers.
+//! This does not weld splits, reconnect the mesh, or provide vertex-triangle,
+//! edge-edge, continuous, or inter-cloth contact. Later constraints can reintroduce
+//! overlaps. Like the other cloth inputs, settings are captured at preparation.
 
-// The GPU resources are intentionally not registered until normal projection is connected.
-#![allow(dead_code)]
-
+mod diagnostics;
 mod pipeline;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use diagnostics::report_self_collision_stats;
+pub(crate) use pipeline::{SelfCollisionPipeline, init_self_collision_pipeline};
 
 use bevy::{
     prelude::Component,
@@ -21,15 +25,14 @@ use bevy::{
     },
 };
 use bytemuck::{Pod, Zeroable};
-use std::mem::size_of;
+use std::{mem::size_of, sync::atomic::Ordering};
 
-use crate::solver::{gpu::ClothBuffers, layout::Particle};
+use crate::{components::ClothSelfCollision, solver::{gpu::ClothBuffers, layout::Particle}};
 
-use self::pipeline::{SelfCollisionPipeline, Stage};
+use self::{diagnostics::Telemetry, pipeline::Stage};
 
 // Matches all self-contact shader entry points.
 const LANES: u32 = 64;
-const CANDIDATE_STATS_BYTES: u64 = 4 * size_of::<u32>() as u64;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -44,14 +47,15 @@ struct Params {
 
 /// Captured before fixed targets are applied. No pair matrix is stored.
 #[derive(Clone, Debug)]
-struct PreparedSelfCollision {
+pub(crate) struct PreparedSelfCollision {
     params: Params,
     rest_positions: Vec<[f32; 4]>,
     candidate_words: u32,
 }
 
 impl PreparedSelfCollision {
-    fn new(diameter: f32, neighbor_capacity: u32, particles: &[Particle]) -> Result<Self, String> {
+    pub fn new(settings: ClothSelfCollision, particles: &[Particle]) -> Result<Self, String> {
+        let ClothSelfCollision { diameter, neighbor_capacity } = settings;
         let cell_width = 2.0 * diameter;
         if !diameter.is_normal() || diameter <= 0.0 || !cell_width.is_finite() {
             return Err("self-contact diameter must be positive, normal, and finite when doubled".into());
@@ -135,18 +139,21 @@ fn create_scan_levels(
 
 /// Per-cloth GPU buffers are retained by the bind groups that use them.
 #[derive(Component)]
-struct SelfCollision {
+pub(crate) struct SelfCollision {
     clear: BindGroup,
     count: BindGroup,
     scatter: BindGroup,
     candidates: BindGroup,
+    gather: BindGroup,
+    apply: BindGroup,
     scan: Vec<ScanLevel>,
     particle_workgroups: u32,
     bucket_workgroups: u32,
+    telemetry: Telemetry,
 }
 
 impl SelfCollision {
-    fn new(
+    pub fn new(
         device: &RenderDevice,
         cache: &PipelineCache,
         pipeline: &SelfCollisionPipeline,
@@ -185,22 +192,28 @@ impl SelfCollision {
         let cursors = allocate_storage(device, "self-contact bucket cursors", bucket_bytes);
         let ids = allocate_storage(device, "self-contact bucket IDs", u64::from(params.particle_count) * 4);
         let rows = allocate_storage(device, "self-contact candidates", candidate_bytes);
-        let stats = allocate_storage(device, "self-contact candidate statistics", CANDIDATE_STATS_BYTES);
+        let corrections = allocate_storage(device, "self-contact corrections", particle_bytes);
+        let telemetry = Telemetry::new(device, params.capacity);
+        let stats = &telemetry.stats;
+
         let (scan, offsets) = create_scan_levels(device, cache, pipeline, &counts, params.bucket_count);
         let bind = |stage: &Stage, buffers: &[&Buffer]| stage.bind(device, cache, buffers);
         let particles = &cloth.particles;
         Ok(Self {
-            clear: bind(&pipeline.clear, &[&uniform, &counts, &cursors, &stats]),
-            count: bind(&pipeline.count, &[&uniform, particles, &counts, &stats]),
+            clear: bind(&pipeline.clear, &[&uniform, &counts, &cursors, stats]),
+            count: bind(&pipeline.count, &[&uniform, particles, &counts, stats]),
             scatter: bind(&pipeline.scatter, &[&uniform, particles, &cursors, &offsets, &ids]),
-            candidates: bind(&pipeline.candidates, &[&uniform, particles, &counts, &offsets, &ids, &rest, &rows, &stats]),
+            candidates: bind(&pipeline.candidates, &[&uniform, particles, &counts, &offsets, &ids, &rest, &rows, stats]),
+            gather: bind(&pipeline.gather, &[&uniform, particles, &rest, &rows, &corrections]),
+            apply: bind(&pipeline.apply, &[&uniform, &corrections, particles, stats]),
             scan,
             particle_workgroups,
             bucket_workgroups,
+            telemetry,
         })
     }
 
-    fn ready<'a>(
+    pub fn ready<'a>(
         &'a self,
         cache: &'a PipelineCache,
         pipeline: &SelfCollisionPipeline,
@@ -213,11 +226,13 @@ impl SelfCollision {
             add_offsets: pipeline.add_offsets.ready(cache)?,
             scatter: pipeline.scatter.ready(cache)?,
             candidates: pipeline.candidates.ready(cache)?,
+            gather: pipeline.gather.ready(cache)?,
+            apply: pipeline.apply.ready(cache)?,
         })
     }
 }
 
-struct SelfCollisionStep<'a> {
+pub(crate) struct SelfCollisionStep<'a> {
     cloth: &'a SelfCollision,
     clear: &'a ComputePipeline,
     count: &'a ComputePipeline,
@@ -225,11 +240,13 @@ struct SelfCollisionStep<'a> {
     add_offsets: &'a ComputePipeline,
     scatter: &'a ComputePipeline,
     candidates: &'a ComputePipeline,
+    gather: &'a ComputePipeline,
+    apply: &'a ComputePipeline,
 }
 
 impl SelfCollisionStep<'_> {
-    /// Build capped candidate rows without modifying the particle snapshot.
-    fn record(&self, pass: &mut ComputePass<'_>) {
+    /// Record once per substep, after external contacts and before the internal constraints.
+    pub fn record(&self, pass: &mut ComputePass<'_>) {
         let cloth = self.cloth;
         let groups = cloth.particle_workgroups;
         dispatch(pass, self.clear, &cloth.clear, cloth.bucket_workgroups);
@@ -244,6 +261,10 @@ impl SelfCollisionStep<'_> {
         }
         dispatch(pass, self.scatter, &cloth.scatter, groups);
         dispatch(pass, self.candidates, &cloth.candidates, groups);
+        // Particles are still the post-external-contact snapshot. Only apply writes them.
+        dispatch(pass, self.gather, &cloth.gather, groups);
+        dispatch(pass, self.apply, &cloth.apply, groups);
+        cloth.telemetry.dirty.store(true, Ordering::Relaxed);
     }
 }
 

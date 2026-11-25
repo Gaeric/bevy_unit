@@ -4,7 +4,8 @@ use bevy::{mesh::PrimitiveTopology, prelude::*};
 use std::collections::BTreeSet;
 
 use crate::{
-    components::{Cloth, ClothLongRangeAttachments, ClothSolver},
+    collision::self_collision::PreparedSelfCollision,
+    components::{Cloth, ClothLongRangeAttachments, ClothSelfCollision, ClothSolver},
     solver::layout::{FixedAttachment as FixedAttachmentData, Particle, StretchConstraint},
 };
 
@@ -197,6 +198,7 @@ pub(crate) fn prepare_mesh(
     config: &Cloth,
     solver: ClothSolver,
     long_range: Option<ClothLongRangeAttachments>,
+    self_collision: Option<ClothSelfCollision>,
 ) -> Result<PreparedCloth, String> {
     let (positions, indices) = validate_inputs(mesh, transform, config)?;
 
@@ -212,6 +214,9 @@ pub(crate) fn prepare_mesh(
         .collect();
 
     let velocities = vec![[0.0; 4]; particles.len()];
+    let self_collision = self_collision
+        .map(|settings| PreparedSelfCollision::new(settings, &particles))
+        .transpose()?;
 
     // Extract unique undirected edges. Self-connections add no constraint.
     let mut edges = BTreeSet::new();
@@ -305,6 +310,7 @@ pub(crate) fn prepare_mesh(
         tethers,
         attachments,
         schedule,
+        self_collision,
         normal_offsets,
         normal_pairs,
     })
@@ -352,6 +358,7 @@ mod tests {
             &config(),
             ClothSolver::default(),
             None,
+            None,
         )
         .unwrap();
         assert!(prepared.tethers.is_empty());
@@ -385,7 +392,8 @@ mod tests {
             particle: 2,
             position: transform.transform_point(Vec3::new(0.0, 1.0, 1.0)),
         });
-        let prepared = prepare_mesh(&mesh, &transform, &config, ClothSolver::ColoredGs, None).unwrap();
+        let prepared = prepare_mesh(&mesh, &transform, &config, ClothSolver::ColoredGs, None, None)
+            .unwrap();
         assert_eq!(prepared.bend_constraints.len(), 1);
         assert!(prepared.bend_constraints[0].rest_angle.abs() < 1e-6);
         assert_eq!(prepared.bend_constraints[0].compliance, 0.125);
@@ -415,7 +423,7 @@ mod tests {
             position: Vec3::new(0.0, 1.0, 1.0),
         });
         let prepare = |solver| {
-            prepare_mesh(&mesh, &GlobalTransform::IDENTITY, &config, solver, None).unwrap()
+            prepare_mesh(&mesh, &GlobalTransform::IDENTITY, &config, solver, None, None).unwrap()
         };
         let gs = prepare(ClothSolver::ColoredGs);
         let jacobi = prepare(ClothSolver::Jacobi);
@@ -462,6 +470,7 @@ mod tests {
                 &config,
                 solver,
                 long_range,
+                None,
             )
             .unwrap()
         };
@@ -501,6 +510,7 @@ mod tests {
                 &GlobalTransform::IDENTITY,
                 &config,
                 ClothSolver::default(),
+                None,
                 None,
             )
             .unwrap_err();

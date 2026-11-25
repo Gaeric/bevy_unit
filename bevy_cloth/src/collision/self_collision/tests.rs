@@ -1,9 +1,9 @@
-//! CPU models for candidate search; these tests do not execute or validate WESL.
+//! CPU models for later validation; these tests do not execute or validate WESL.
 
-use glam::Vec3;
+use glam::{DVec3, Vec3};
 
 use super::{LANES, PreparedSelfCollision};
-use crate::solver::layout::Particle;
+use crate::{components::ClothSelfCollision, solver::layout::Particle};
 
 #[derive(Clone, Copy)]
 struct Point {
@@ -194,13 +194,57 @@ fn hierarchical_scan_matches_prefix_with_partial_blocks() {
     }
 }
 
+// Independent once-per-pair scatter oracle for the snapshot correction contract.
+fn corrections(points: &[Point], rows: &[Vec<usize>]) -> Vec<DVec3> {
+    let mut result = vec![DVec3::ZERO; points.len()];
+    for (i, row) in rows.iter().enumerate() {
+        for &j in row.iter().filter(|&&j| j > i && rows[j].contains(&i)) {
+            let a = points[i];
+            let b = points[j];
+            let delta = a.current.as_dvec3() - b.current.as_dvec3();
+            let normal = delta.try_normalize().unwrap_or_else(|| {
+                (a.rest.as_dvec3() - b.rest.as_dvec3()).normalize()
+            });
+            let depth = 1.0 - delta.length();
+            let relative = normal * depth;
+            let weights = f64::from(a.inv_mass) + f64::from(b.inv_mass);
+            let pair_degree = rows[i].len().max(rows[j].len()) as f64;
+            result[i] += relative * (f64::from(a.inv_mass) / weights / pair_degree);
+            result[j] -= relative * (f64::from(b.inv_mass) / weights / pair_degree);
+        }
+    }
+    result
+}
+
+#[test]
+fn reciprocity_skips_dropped_pairs_and_fixed_endpoint_stays_fixed() {
+    let points = [point(0.0, 0.0, 0.0), point(0.0, 2.0, 1.0), point(0.0, 4.0, 2.0)];
+    let candidates = hash_candidates(&points, 1.0, 1, 1);
+    assert_eq!(candidates.rows, [vec![1], vec![0], vec![0]]);
+    assert_eq!(candidates.overflow_rows, 3);
+    assert_eq!(corrections(&points, &candidates.rows),
+        [DVec3::ZERO, DVec3::X, DVec3::ZERO]);
+}
+
+#[test]
+fn crowded_pairs_use_the_same_damping_at_both_ends() {
+    let points = [point(0.0, 0.0, 1.0), point(0.75, 2.0, 1.0), point(-0.75, 4.0, 1.0)];
+    let candidates = hash_candidates(&points, 1.0, 2, 2);
+    assert_eq!(candidates.rows, [vec![1, 2], vec![0], vec![0]]);
+    assert_eq!(corrections(&points, &candidates.rows),
+        [DVec3::ZERO, DVec3::X * 0.0625, -DVec3::X * 0.0625]);
+}
+
 #[test]
 fn preparation_keeps_raw_rest_positions_and_bounds_candidate_indices() {
     let particles = [Particle { position: [2.0, 3.0, 4.0], inv_mass: 1.0 }; 2];
-    let prepared = PreparedSelfCollision::new(0.125, u32::MAX, &particles)
-        .expect("capacity clamps to the number of other particles");
+    let prepared = PreparedSelfCollision::new(ClothSelfCollision {
+        diameter: 0.125, neighbor_capacity: u32::MAX,
+    }, &particles).expect("capacity clamps to the number of other particles");
     assert_eq!(prepared.params.capacity, 1);
     assert_eq!(prepared.candidate_words, 4);
     assert_eq!(prepared.rest_positions, [[2.0, 3.0, 4.0, 0.0]; 2]);
-    assert!(PreparedSelfCollision::new(0.125, 0, &particles).is_err());
+    assert!(PreparedSelfCollision::new(ClothSelfCollision {
+        diameter: 0.125, neighbor_capacity: 0,
+    }, &particles).is_err());
 }

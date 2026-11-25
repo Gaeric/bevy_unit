@@ -5,7 +5,10 @@ use bevy::{
     render::{render_resource::PipelineCache, renderer::RenderDevice},
 };
 
-use crate::prepare::{ConstraintSchedule, PreparedCloth};
+use crate::{
+    collision::self_collision::{SelfCollision, SelfCollisionPipeline},
+    prepare::{ConstraintSchedule, PreparedCloth},
+};
 
 use super::{
     bindings::{
@@ -34,10 +37,27 @@ pub(crate) fn upload_cloths(
     bend_layout: Res<ClothBendBindGroupLayout>,
     tether_layout: Res<ClothTetherBindGroupLayout>,
     jacobi_layouts: Res<JacobiLayouts>,
+    self_collision_pipeline: Res<SelfCollisionPipeline>,
     cloths: Query<(Entity, &PreparedCloth, &StepParams), Added<PreparedCloth>>,
 ) {
     for (entity, prepared, step_params) in &cloths {
         let cloth_buffers = ClothBuffers::new(&device, prepared, step_params);
+        let self_collision = match &prepared.self_collision {
+            Some(data) => match SelfCollision::new(
+                &device,
+                &cache,
+                &self_collision_pipeline,
+                &cloth_buffers,
+                data,
+            ) {
+                Ok(buffers) => Some(buffers),
+                Err(error) => {
+                    warn!(?entity, %error, "XPBD cloth GPU self-contact preparation failed");
+                    continue;
+                }
+            },
+            None => None,
+        };
         let integration = integration_layout.create_bind_group(&device, &cache, &cloth_buffers);
         let contact_bind_group =
             contact_layout.create_cloth_bind_group(&device, &cache, &cloth_buffers);
@@ -71,13 +91,19 @@ pub(crate) fn upload_cloths(
             ),
         };
 
-        commands.entity(entity).insert((
+        let mut entity_commands = commands.entity(entity);
+        entity_commands.insert((
             cloth_buffers,
             integration,
             constraints,
             contact_bind_group,
             ClothSimulation::default(),
         ));
+        if let Some(self_collision) = self_collision {
+            entity_commands.insert(self_collision);
+        } else {
+            entity_commands.remove::<SelfCollision>();
+        }
 
         info!(
             ?entity,
@@ -85,6 +111,7 @@ pub(crate) fn upload_cloths(
             stretch = prepared.stretch_constraints.len(),
             bend = prepared.bend_constraints.len(),
             tethers = prepared.tethers.len(),
+            self_collision = prepared.self_collision.is_some(),
             "XPBD cloth GPU data and binding initialized"
         );
     }

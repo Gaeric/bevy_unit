@@ -1,4 +1,4 @@
-// Shared hash/query ABI. All world-space distances use the prepared cloth's units.
+// Shared hash/query/contact ABI. All world-space distances use the prepared cloth's units.
 struct SelfContactParams {
     particle_count: u32,
     bucket_count: u32,
@@ -42,7 +42,8 @@ const SUBSTEPS: u32 = 0u;
 const MAX_REQUIRED: u32 = 1u;
 const OVERFLOW_ROWS: u32 = 2u;
 const INVALID_PARTICLES: u32 = 3u;
-@group(0) @binding(8) var<storage, read_write> stats: array<atomic<u32>, 4>;
+const INVALID_CORRECTIONS: u32 = 4u;
+@group(0) @binding(8) var<storage, read_write> stats: array<atomic<u32>, 5>;
 
 // Cumulative telemetry must not wrap back to zero if readback is delayed.
 fn bump_stat(index: u32) {

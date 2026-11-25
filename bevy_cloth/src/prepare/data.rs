@@ -3,8 +3,9 @@ use bevy::{
     render::{RenderApp, extract_component::ExtractComponent},
 };
 
-use crate::solver::layout::{
-    BendConstraint, FixedAttachment, Particle, StretchConstraint, TetherConstraint,
+use crate::{
+    collision::self_collision::PreparedSelfCollision,
+    solver::layout::{BendConstraint, FixedAttachment, Particle, StretchConstraint, TetherConstraint},
 };
 
 use super::jacobi::JacobiSchedule;
@@ -66,6 +67,8 @@ pub(crate) struct PreparedCloth {
     pub attachments: Vec<FixedAttachment>,
 
     pub schedule: ConstraintSchedule,
+
+    pub self_collision: Option<PreparedSelfCollision>,
 
     /// CSR boundaries: vertex i uses normal_pairs[normal_offsets[i]..normal_offsets[i + 1]].
     pub normal_offsets: Vec<u32>,

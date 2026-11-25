@@ -2,7 +2,8 @@ use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
 use crate::{
     components::{
-        Cloth, ClothExternalFriction, ClothLongRangeAttachments, ClothSolver, ClothStepSettings,
+        Cloth, ClothExternalFriction, ClothLongRangeAttachments, ClothSelfCollision, ClothSolver,
+        ClothStepSettings,
     },
     prepare::ConstraintSchedule,
     solver::layout::StepParams,
@@ -24,11 +25,15 @@ pub(crate) fn prepare_added_cloths(
             &ClothSolver,
             Option<&ClothLongRangeAttachments>,
             Option<&ClothExternalFriction>,
+            Option<&ClothSelfCollision>,
         ),
         Added<Cloth>,
     >,
 ) {
-    for (entity, mesh_handle, transform, config, settings, solver, long_range, friction) in &cloths {
+    for (
+        entity, mesh_handle, transform, config, settings, solver, long_range, friction, self_collision,
+    ) in &cloths
+    {
         if !settings.gravity.is_finite() || settings.substeps == 0 || settings.iterations == 0 {
             warn!(
                 ?entity,
@@ -51,6 +56,7 @@ pub(crate) fn prepare_added_cloths(
             config,
             *solver,
             long_range.copied(),
+            self_collision.copied(),
         ) {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -85,6 +91,7 @@ pub(crate) fn prepare_added_cloths(
             fixed = prepared.attachments.len(),
             tethers = prepared.tethers.len(),
             external_friction,
+            self_collision = prepared.self_collision.is_some(),
             substeps = settings.substeps,
             iterations = settings.iterations,
             "XPBD cloth prepared"

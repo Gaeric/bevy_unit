@@ -20,6 +20,7 @@ use crate::{
         self, PreparedCollider, gpu as collider_gpu,
         motion::{ContactMotionBatch, prepare_contact_motion},
         refit as collider_refit,
+        self_collision::{init_self_collision_pipeline, report_self_collision_stats},
         transform as collider_transform,
     },
     components::{ClothStepSettings, CollisionGroup},
@@ -52,6 +53,10 @@ impl Plugin for ClothPlugin {
         embedded_asset!(app, "collision/bvh_query.wesl");
         embedded_asset!(app, "collision/collider_transform.wesl");
         embedded_asset!(app, "collision/collider_refit.wesl");
+        embedded_asset!(app, "collision/self_collision/self_layout.wesl");
+        embedded_asset!(app, "collision/self_collision/hash.wesl");
+        embedded_asset!(app, "collision/self_collision/scan.wesl");
+        embedded_asset!(app, "collision/self_collision/contact.wesl");
 
         app.init_resource::<ClothTicks>()
             .add_plugins((
@@ -110,6 +115,7 @@ impl Plugin for ClothPlugin {
                     pipeline::init_contact_pipeline,
                     collider_transform::init_transform_pipeline,
                     collider_refit::init_refit_pipeline,
+                    init_self_collision_pipeline,
                 ),
             )
             .add_systems(
@@ -133,6 +139,7 @@ impl Plugin for ClothPlugin {
                     collider_refit::refit_colliders,
                     prepare_contact_motion,
                     tick::simulate_cloths,
+                    report_self_collision_stats,
                     output::output_cloths,
                 )
                     .chain()

@@ -16,6 +16,7 @@ use crate::{
     collision::{
         motion::ContactMotionBatch,
         refit::{ColliderRefit, ColliderRefitPipeline},
+        self_collision::{SelfCollision, SelfCollisionPipeline},
         transform::{ColliderTransform, ColliderTransformPipeline},
     },
     components::{ClothStepSettings, CollisionGroup},
@@ -168,6 +169,7 @@ pub(crate) fn simulate_cloths(
     contact_pipeline: Res<ClothContactPipeline>,
     transform_pipeline: Res<ColliderTransformPipeline>,
     refit_pipeline: Res<ColliderRefitPipeline>,
+    self_collision_pipeline: Res<SelfCollisionPipeline>,
     colliders: Query<(
         &ColliderContactBindGroup,
         &ColliderTransform,
@@ -183,6 +185,7 @@ pub(crate) fn simulate_cloths(
         &StepParams,
         &ClothStepSettings,
         Option<&CollisionGroup>,
+        Option<&SelfCollision>,
         &mut ClothSimulation,
     )>,
 ) {
@@ -220,9 +223,19 @@ pub(crate) fn simulate_cloths(
         step_params,
         settings,
         collision_group,
+        self_collision,
         mut simulation,
     ) in &mut cloths
     {
+        let self_contact = match self_collision {
+            Some(collision) => {
+                let Some(step) = collision.ready(&cache, &self_collision_pipeline) else {
+                    continue;
+                };
+                Some(step)
+            }
+            None => None,
+        };
         let tether_count = prepared.tethers.len() as u32;
         let sweep = match (&prepared.schedule, constraint_bindings) {
             (
@@ -345,6 +358,10 @@ pub(crate) fn simulate_cloths(
                     &collider_bindings,
                     particle_workgroups,
                 );
+
+                if let Some(contact) = &self_contact {
+                    contact.record(&mut pass);
+                }
 
                 for _ in 0..settings.iterations {
                     sweep.record(&mut pass);

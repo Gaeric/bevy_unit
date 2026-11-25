@@ -53,6 +53,18 @@ pub struct ClothExternalFriction {
     pub coefficient: f32,
 }
 
+/// Opt-in discrete particle contact within one cloth. Add alongside `Cloth`;
+/// later edits do not change the simulation. Pairs already within one diameter
+/// in the raw rest mesh are excluded.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct ClothSelfCollision {
+    /// World-space minimum pair separation, in meters.
+    pub diameter: f32,
+    /// Maximum cached candidate IDs per particle. Overflow is reported; a pair
+    /// is solved only if both particles retain each other.
+    pub neighbor_capacity: u32,
+}
+
 /// A particle constrained to a fixed world-space position, not a distance limit.
 #[derive(Clone, Copy, Debug)]
 pub struct FixedAttachment {

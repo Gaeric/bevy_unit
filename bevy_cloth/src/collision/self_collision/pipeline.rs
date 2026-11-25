@@ -13,7 +13,7 @@ use bevy::{
 };
 use std::{mem::size_of, num::NonZeroU64};
 
-use super::{CANDIDATE_STATS_BYTES, Params};
+use super::{Params, diagnostics::STATS_BYTES};
 
 const WORD: u64 = 4;
 const VECTOR: u64 = 16; // Particle or vec4<f32>.
@@ -45,18 +45,20 @@ impl Stage {
 }
 
 #[derive(Resource)]
-pub(super) struct SelfCollisionPipeline {
+pub(crate) struct SelfCollisionPipeline {
     pub(super) clear: Stage,
     pub(super) count: Stage,
     pub(super) scan_blocks: Stage,
     pub(super) add_offsets: Stage,
     pub(super) scatter: Stage,
     pub(super) candidates: Stage,
+    pub(super) gather: Stage,
+    pub(super) apply: Stage,
     // Bevy's WESL resolver needs shader imports loaded with live handles.
     _imports: [Handle<Shader>; 2],
 }
 
-pub(super) fn init_self_collision_pipeline(
+pub(crate) fn init_self_collision_pipeline(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     cache: Res<PipelineCache>,
@@ -65,6 +67,7 @@ pub(super) fn init_self_collision_pipeline(
     let particle_layout = asset_server.load("embedded://bevy_cloth/solver/layout.wesl");
     let hash = asset_server.load("embedded://bevy_cloth/collision/self_collision/hash.wesl");
     let scan = asset_server.load("embedded://bevy_cloth/collision/self_collision/scan.wesl");
+    let contact = asset_server.load("embedded://bevy_cloth/collision/self_collision/contact.wesl");
 
     let queue = |shader: &Handle<Shader>, entry: &'static str, bindings: &[BindGroupLayoutEntry]| {
         let label = format!("cloth self-contact {entry}");
@@ -80,7 +83,7 @@ pub(super) fn init_self_collision_pipeline(
     };
 
     let params = binding(0, BufferBindingType::Uniform, size_of::<Params>() as u64);
-    let stats = write(8, CANDIDATE_STATS_BYTES);
+    let stats = write(8, STATS_BYTES);
     let particle_snapshot = read(1, VECTOR);
     let bucket_counts = write(2, WORD); // WGSL atomicLoad also requires writable storage.
     let cursors = write(3, WORD);
@@ -96,6 +99,10 @@ pub(super) fn init_self_collision_pipeline(
             params, particle_snapshot, bucket_counts, offsets, bucket_ids, read(6, VECTOR),
             write(7, WORD), stats,
         ]),
+        gather: queue(&contact, "gather_self_contact", &[
+            params, particle_snapshot, read(3, VECTOR), read(4, WORD), write(5, VECTOR),
+        ]),
+        apply: queue(&contact, "apply_self_contact", &[params, read(6, VECTOR), write(7, VECTOR), stats]),
         _imports: [common, particle_layout],
     });
 }
