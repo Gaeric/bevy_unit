@@ -51,9 +51,9 @@ pub(crate) fn prepare_added_cloths(
             ?entity,
             particles = prepared.particles.len(),
             stretch = prepared.stretch_constraints.len(),
-            colors = prepared.stretch_colors.len(),
+            colors = prepared.schedule.stretch_colors.len(),
             bend = prepared.bend_constraints.len(),
-            bend_colors = prepared.bend_colors.len(),
+            bend_colors = prepared.schedule.bend_colors.len(),
             substeps = settings.substeps,
             iterations = settings.iterations,
             "XPBD cloth prepared"

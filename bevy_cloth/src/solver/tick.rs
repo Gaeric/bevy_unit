@@ -195,14 +195,14 @@ pub(crate) fn simulate_cloths(
 
                 for _ in 0..settings.iterations {
                     pass.set_pipeline(solve_stretch);
-                    for (color, range) in prepared.stretch_colors.iter().enumerate() {
+                    for (color, range) in prepared.schedule.stretch_colors.iter().enumerate() {
                         let offset = color as u32 * range_param_stride;
                         pass.set_bind_group(0, &cloth_bind_group.0, &[offset]);
                         pass.dispatch_workgroups(range.count.div_ceil(WORKGROUP_SIZE), 1, 1);
                     }
                     if let Some((_, bend_pipeline, bend_bind_group)) = bending {
                         pass.set_pipeline(bend_pipeline);
-                        for (color, range) in prepared.bend_colors.iter().enumerate() {
+                        for (color, range) in prepared.schedule.bend_colors.iter().enumerate() {
                             let offset = color as u32 * range_param_stride;
                             pass.set_bind_group(0, &bend_bind_group.0, &[offset]);
                             pass.dispatch_workgroups(range.count.div_ceil(WORKGROUP_SIZE), 1, 1);

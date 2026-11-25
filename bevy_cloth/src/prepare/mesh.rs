@@ -8,7 +8,10 @@ use crate::{
     solver::layout::{FixedAttachment as FixedAttachmentData, Particle, StretchConstraint},
 };
 
-use super::{ConstraintColorRange, PreparedCloth, bending::prepare_bending};
+use super::{
+    ColoredGsSchedule, ConstraintColorRange, PreparedCloth,
+    bending::{color_bending, prepare_bending},
+};
 
 /// Validate all inputs before preparing particles and constraints.
 ///
@@ -186,7 +189,7 @@ fn build_normal_adjacency(particle_count: usize, indices: &[u32]) -> (Vec<u32>, 
     (offsets, pairs)
 }
 
-/// Prepare particles and stretch constraints from validated inputs.
+/// Prepare particles, constraints and the Colored GS schedule.
 pub(crate) fn prepare_mesh(
     mesh: &Mesh,
     transform: &GlobalTransform,
@@ -221,7 +224,7 @@ pub(crate) fn prepare_mesh(
     }
 
     // Measure rest lengths before applying attachment targets.
-    let stretch_constraints = edges
+    let stretch_constraints: Vec<_> = edges
         .into_iter()
         .map(|[i, j]| {
             let a = Vec3::from(particles[i as usize].position);
@@ -235,13 +238,17 @@ pub(crate) fn prepare_mesh(
         })
         .collect();
 
-    // Reorder constraints by color and record each color's range.
+    // Rest angles, like rest lengths, use geometry before attachment targets.
+    let bend_constraints = prepare_bending(&particles, &indices, config.bend_compliance)?;
+
+    // Only the GS schedule reorders constraints; the rest values do not change.
     let (stretch_constraints, stretch_colors) =
         color_stretch(particles.len(), stretch_constraints)?;
-
-    // Rest angles, like rest lengths, use geometry before attachment targets.
-    let (bend_constraints, bend_colors) =
-        prepare_bending(&particles, &indices, config.bend_compliance)?;
+    let (bend_constraints, bend_colors) = color_bending(particles.len(), bend_constraints)?;
+    let schedule = ColoredGsSchedule {
+        stretch_colors,
+        bend_colors,
+    };
 
     // Fixed targets affect the initial state, not the rest geometry.
     let mut attachments = Vec::with_capacity(config.attachments.len());
@@ -266,9 +273,8 @@ pub(crate) fn prepare_mesh(
         velocities,
         stretch_constraints,
         bend_constraints,
-        bend_colors,
         attachments,
-        stretch_colors,
+        schedule,
         normal_offsets,
         normal_pairs,
     })
@@ -309,6 +315,28 @@ mod tests {
     }
 
     #[test]
+    fn colored_gs_keeps_hinge_edges_in_first_fit_dispatch_order() {
+        let prepared = prepare_mesh(
+            &hinge_mesh(),
+            &GlobalTransform::IDENTITY,
+            &config(),
+        )
+        .unwrap();
+        let edges: Vec<_> = prepared
+            .stretch_constraints
+            .iter()
+            .map(|edge| edge.particles)
+            .collect();
+        let ranges: Vec<_> = prepared.schedule
+            .stretch_colors
+            .iter()
+            .map(|range| (range.start, range.count))
+            .collect();
+        assert_eq!(edges, [[0, 1], [0, 2], [1, 3], [0, 3], [1, 2]]);
+        assert_eq!(ranges, [(0, 1), (1, 2), (3, 2)]);
+    }
+
+    #[test]
     fn bend_rest_angle_uses_world_geometry_before_attachment_targets() {
         let mesh = hinge_mesh();
         let transform = GlobalTransform::from(Transform {
@@ -325,7 +353,9 @@ mod tests {
         assert_eq!(prepared.bend_constraints.len(), 1);
         assert!(prepared.bend_constraints[0].rest_angle.abs() < 1e-6);
         assert_eq!(prepared.bend_constraints[0].compliance, 0.125);
-        assert_eq!(prepared.bend_colors[0].count, 1);
+        assert_eq!(prepared.schedule.bend_colors.len(), 1);
+        let bend_range = prepared.schedule.bend_colors[0];
+        assert_eq!((bend_range.start, bend_range.count), (0, 1));
         assert_eq!(
             prepared.particles[2].position,
             config.attachments[0].position.to_array()
@@ -333,8 +363,7 @@ mod tests {
         assert_eq!(prepared.particles[2].inv_mass, 0.0);
 
         // Preparing this changed shape as rest geometry yields a nonzero fold.
-        let (changed, _) =
-            prepare_bending(&prepared.particles, &[2, 0, 1, 3, 1, 0], 0.125).unwrap();
+        let changed = prepare_bending(&prepared.particles, &[2, 0, 1, 3, 1, 0], 0.125).unwrap();
         assert!(changed[0].rest_angle.abs() > 0.1);
     }
 

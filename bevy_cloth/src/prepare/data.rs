@@ -15,12 +15,20 @@ pub(crate) struct ConstraintColorRange {
     pub count: u32,
 }
 
+/// CPU dispatch order for one Colored GS sweep. Each range indexes its own
+/// reordered constraint array; bend colors run after all stretch colors.
+#[derive(Clone, Debug)]
+pub(crate) struct ColoredGsSchedule {
+    pub stretch_colors: Vec<ConstraintColorRange>,
+    pub bend_colors: Vec<ConstraintColorRange>,
+}
+
 /// Initial cloth data prepared on the CPU.
 ///
 /// Particle indices map one-to-one to source Mesh vertex indices; no welding.
 /// All positions are world-space.
 /// This struct owns CPU vectors; it is not a GPU buffer payload. Upload each
-/// array's element bytes separately and retain colors on the CPU for dispatch.
+/// array's element bytes separately. GS color ranges also stay on the CPU for dispatch.
 /// GPU previous-position and lambda buffers are initialized separately.
 /// Cloned into Render World only when added, not on subsequent frames.
 #[derive(Component, Clone, Debug, ExtractComponent)]
@@ -34,20 +42,16 @@ pub(crate) struct PreparedCloth {
     /// Uses the same indices as particles, with a 16-byte array element stride.
     pub velocities: Vec<[f32; 4]>,
 
-    /// Complete stretch constraints, arranged contiguously by color.
+    /// Complete stretch constraints, ordered for the chosen schedule.
     pub stretch_constraints: Vec<StretchConstraint>,
 
-    /// Initial dihedral constraints, arranged contiguously by their own colors.
+    /// Complete dihedral constraints, ordered for the chosen schedule.
     pub bend_constraints: Vec<BendConstraint>,
-
-    /// Bend colors; dispatched after stretch colors in each iteration.
-    pub bend_colors: Vec<ConstraintColorRange>,
 
     /// Fixed particles and their world-space targets.
     pub attachments: Vec<FixedAttachment>,
 
-    /// Stretch colors in execution order.
-    pub stretch_colors: Vec<ConstraintColorRange>,
+    pub schedule: ColoredGsSchedule,
 
     /// CSR boundaries: vertex i uses normal_pairs[normal_offsets[i]..normal_offsets[i + 1]].
     pub normal_offsets: Vec<u32>,

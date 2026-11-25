@@ -20,7 +20,7 @@ pub(crate) fn prepare_bending(
     particles: &[Particle],
     indices: &[u32],
     compliance: f32,
-) -> Result<(Vec<BendConstraint>, Vec<ConstraintColorRange>), String> {
+) -> Result<Vec<BendConstraint>, String> {
     let mut edges: BTreeMap<[u32; 2], Vec<EdgeFace>> = BTreeMap::new();
 
     for triangle in indices.chunks_exact(3) {
@@ -63,7 +63,7 @@ pub(crate) fn prepare_bending(
         });
     }
 
-    color_bending(particles.len(), bends)
+    Ok(bends)
 }
 
 /// Signed angle around p2 -> p3. Swapping the two faces also reverses the edge,
@@ -104,7 +104,7 @@ fn triangle_normal(a: DVec3, b: DVec3, c: DVec3) -> Option<DVec3> {
 
 /// Greedy coloring, independent of stretch colors. Even fixed particles count
 /// as conflicts so scheduling does not depend on a shader's writeback behavior.
-fn color_bending(
+pub(super) fn color_bending(
     particle_count: usize,
     bends: Vec<BendConstraint>,
 ) -> Result<(Vec<BendConstraint>, Vec<ConstraintColorRange>), String> {
@@ -174,21 +174,19 @@ mod tests {
     fn boundary_only_and_empty_inputs_have_no_bends() {
         let points = hinge(0.0);
         for indices in [&[][..], &HINGE_INDICES[..3]] {
-            let (bends, colors) = prepare_bending(&points, indices, 0.0).unwrap();
+            let bends = prepare_bending(&points, indices, 0.0).unwrap();
             assert!(bends.is_empty());
-            assert!(colors.is_empty());
         }
     }
 
     #[test]
     fn flat_hinge_preserves_indices_compliance_and_zero_angle() {
-        let (bends, colors) = prepare_bending(&hinge(0.0), &HINGE_INDICES, 0.125).unwrap();
+        let bends = prepare_bending(&hinge(0.0), &HINGE_INDICES, 0.125).unwrap();
         assert_eq!(bends.len(), 1);
         assert_eq!(bends[0].particles, [2, 3, 0, 1]);
         close(bends[0].rest_angle, 0.0);
         assert_eq!(bends[0].compliance, 0.125);
         assert_eq!(bends[0].padding, [0; 2]);
-        assert_eq!((colors[0].start, colors[0].count), (0, 1));
     }
 
     #[test]
@@ -196,7 +194,7 @@ mod tests {
         for angle in [-1.2, -0.4, 0.4, 1.2] {
             let points = hinge(angle);
             for indices in [HINGE_INDICES, [3, 1, 0, 2, 0, 1], [0, 1, 2, 1, 0, 3]] {
-                let (bends, _) = prepare_bending(&points, &indices, 0.0).unwrap();
+                let bends = prepare_bending(&points, &indices, 0.0).unwrap();
                 assert_eq!(bends.len(), 1);
                 close(bends[0].rest_angle, angle);
             }
@@ -210,7 +208,7 @@ mod tests {
             for particle in &mut points {
                 particle.position = (Vec3::from_array(particle.position) * scale).to_array();
             }
-            let (bends, _) = prepare_bending(&points, &HINGE_INDICES, 0.0).unwrap();
+            let bends = prepare_bending(&points, &HINGE_INDICES, 0.0).unwrap();
             assert_eq!(bends.len(), 1);
             close(bends[0].rest_angle, 0.7);
         }
@@ -235,9 +233,8 @@ mod tests {
             [0.0, -1.0, 0.0],
             [0.0, 0.0, 1.0],
         ]);
-        let (bends, colors) = prepare_bending(&points, &[2, 0, 1, 3, 1, 0, 4, 0, 1], 0.0).unwrap();
+        let bends = prepare_bending(&points, &[2, 0, 1, 3, 1, 0, 4, 0, 1], 0.0).unwrap();
         assert!(bends.is_empty());
-        assert!(colors.is_empty());
     }
 
     #[test]
@@ -250,10 +247,10 @@ mod tests {
             let mut points = hinge(0.0);
             points[2].position = opposite;
             points[1].position = edge_end;
-            let (bends, _) = prepare_bending(&points, &HINGE_INDICES, 0.0).unwrap();
+            let bends = prepare_bending(&points, &HINGE_INDICES, 0.0).unwrap();
             assert!(bends.is_empty());
         }
-        let (bends, _) = prepare_bending(&hinge(0.0), &[2, 0, 1, 2, 1, 0], 0.0).unwrap();
+        let bends = prepare_bending(&hinge(0.0), &[2, 0, 1, 2, 1, 0], 0.0).unwrap();
         assert!(bends.is_empty());
     }
 
@@ -263,7 +260,7 @@ mod tests {
         let disconnected = vec![
             points[2], points[0], points[1], points[3], points[1], points[0],
         ];
-        let (bends, _) = prepare_bending(&disconnected, &[0, 1, 2, 3, 4, 5], 0.0).unwrap();
+        let bends = prepare_bending(&disconnected, &[0, 1, 2, 3, 4, 5], 0.0).unwrap();
         assert!(bends.is_empty());
     }
 
@@ -300,7 +297,8 @@ mod tests {
             .filter_map(|(edge, count)| (count == 2).then_some(edge))
             .collect();
         assert_eq!(expected.len(), 8);
-        let (bends, colors) = prepare_bending(&points, &indices, 0.0).unwrap();
+        let bends = prepare_bending(&points, &indices, 0.0).unwrap();
+        let (bends, colors) = color_bending(points.len(), bends).unwrap();
         assert_eq!(bends.len(), expected.len());
         let actual: BTreeSet<_> = bends
             .iter()

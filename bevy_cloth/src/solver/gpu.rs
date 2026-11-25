@@ -52,13 +52,13 @@ impl ClothBuffers {
 
         // Separate color arrays share the same dynamic-uniform slot format.
         let stride = constraint_range_param_stride(device) as usize;
-        let range_bytes = pack_constraint_range_params(&prepared.stretch_colors, stride);
+        let range_bytes = pack_constraint_range_params(&prepared.schedule.stretch_colors, stride);
 
         let storage = BufferUsages::STORAGE | BufferUsages::COPY_DST;
         let uniform = BufferUsages::UNIFORM | BufferUsages::COPY_DST;
         let bending = (!prepared.bend_constraints.is_empty()).then(|| {
             let lambdas = vec![0.0_f32; prepared.bend_constraints.len()];
-            let ranges = pack_constraint_range_params(&prepared.bend_colors, stride);
+            let ranges = pack_constraint_range_params(&prepared.schedule.bend_colors, stride);
             BendConstraintBuffers {
                 constraints: device.create_buffer_with_data(&BufferInitDescriptor {
                     label: Some("xpbd bend constraints"),
