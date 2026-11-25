@@ -49,6 +49,8 @@ pub(crate) struct ColoredGsPipelines {
     pub solve_stretch: CachedComputePipelineId,
     /// Only cloths with dihedral constraints wait for this pipeline.
     pub solve_bending: CachedComputePipelineId,
+    /// Keep the shared WESL import alive for constraint shaders.
+    _constraint_math_shader: Handle<Shader>,
 }
 
 pub(crate) fn init_colored_gs_pipelines(
@@ -75,6 +77,10 @@ pub(crate) fn init_colored_gs_pipelines(
     commands.insert_resource(ColoredGsPipelines {
         solve_stretch,
         solve_bending,
+        _constraint_math_shader: load_embedded_asset!(
+            asset_server.as_ref(),
+            "constraint_math.wesl"
+        ),
     });
 }
 

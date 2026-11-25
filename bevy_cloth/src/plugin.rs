@@ -42,6 +42,7 @@ impl Plugin for ClothPlugin {
         embedded_asset!(app, "solver/stretch.wesl");
         embedded_asset!(app, "solver/contact.wesl");
         embedded_asset!(app, "solver/bending.wesl");
+        embedded_asset!(app, "solver/constraint_math.wesl");
         embedded_asset!(app, "output/output.wesl");
         embedded_asset!(app, "collision/bvh_query.wesl");
         embedded_asset!(app, "collision/collider_transform.wesl");

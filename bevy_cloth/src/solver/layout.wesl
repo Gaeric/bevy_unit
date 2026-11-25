@@ -11,6 +11,14 @@ struct StretchConstraint {
     compliance: f32,
 };
 
+// Matches the 32-byte BendConstraint ABI in layout.rs.
+struct BendConstraint {
+    particles: vec4<u32>,
+    rest_angle: f32,
+    compliance: f32,
+    padding: vec2<u32>,
+};
+
 struct StepParams {
     gravity: vec4<f32>,
     substep_dt: f32,

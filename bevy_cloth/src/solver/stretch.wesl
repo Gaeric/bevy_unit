@@ -1,4 +1,5 @@
 import super::layout::{Particle, StretchConstraint, StepParams, ConstraintRangeParams};
+import super::constraint_math::{evaluate_stretch, xpbd_delta_lambda};
 
 // Shared by particle and stretch stages.
 
@@ -41,22 +42,16 @@ fn solve_stretch(@builtin(global_invocation_id) invocation: vec3<u32>) {
         return;
     }
 
-    let separation = particle_a.position - particle_b.position;
-    let distance = length(separation);
-
-    // Coincident endpoints have no defined constraint direction.
-    if distance == 0.0 {
+    let evaluation = evaluate_stretch(particle_a.position, particle_b.position, constraint.rest_length);
+    if !evaluation.valid {
         return;
     }
 
-    let normal = separation / distance;
-    let error = distance - constraint.rest_length;
+    let normal = evaluation.direction;
     let dt = step_params.substep_dt;
     let alpha = constraint.compliance / (dt * dt);
     let lambda = stretch_lambdas[index];
-
-    let delta_lambda =
-        (-error - alpha * lambda) / (weight_a + weight_b + alpha);
+    let delta_lambda = xpbd_delta_lambda(evaluation.error, lambda, alpha, weight_a + weight_b + alpha);
 
     stretch_lambdas[index] = lambda + delta_lambda;
 
