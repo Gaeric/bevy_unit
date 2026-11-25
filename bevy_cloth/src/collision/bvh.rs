@@ -203,13 +203,12 @@ pub(super) fn build_triangle_bvh(
     let mut internal_nodes = Vec::new();
     let mut refit_layers = Vec::new();
 
-    for (depth, node_ids) in internal_by_depth.into_iter().enumerate().rev() {
+    for node_ids in internal_by_depth.into_iter().rev() {
         if node_ids.is_empty() {
             continue;
         }
 
         refit_layers.push(BvhRefitLayer {
-            depth: depth as u32,
             first: internal_nodes.len() as u32,
             count: node_ids.len() as u32,
         });
@@ -312,13 +311,13 @@ mod tests {
 
         for layer in &tree.refit_layers {
             assert!(layer.count > 0);
-            assert!(layer.depth < previous_depth);
             assert_eq!(layer.first, next);
-
-            previous_depth = layer.depth;
             next += layer.count;
 
             let ids = &tree.internal_nodes[layer.first as usize..next as usize];
+            let layer_depth = depths[ids[0] as usize];
+            assert!(layer_depth < previous_depth);
+            previous_depth = layer_depth;
 
             // Validate the whole layer before marking it ready: no same-layer
             // parent/child dependency may rely on sequential CPU iteration.
@@ -327,7 +326,7 @@ mod tests {
 
                 assert!(!node.is_leaf());
                 assert!(!ready[id as usize]);
-                assert_eq!(depths[id as usize], layer.depth);
+                assert_eq!(depths[id as usize], layer_depth);
                 assert!(ready[node.first_index as usize]);
                 assert!(ready[node.first_index as usize + 1]);
             }
