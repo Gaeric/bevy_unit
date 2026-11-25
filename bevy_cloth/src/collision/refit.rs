@@ -95,6 +95,12 @@ pub(crate) struct ColliderRefit {
     recorded_transform: Option<Mat4>,
 }
 
+impl ColliderRefit {
+    pub(crate) fn is_current(&self, pose: Mat4) -> bool {
+        self.recorded_transform == Some(pose)
+    }
+}
+
 pub(crate) fn prepare_refits(
     mut commands: Commands,
     device: Res<RenderDevice>,

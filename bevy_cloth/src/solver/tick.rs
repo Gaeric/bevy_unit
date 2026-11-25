@@ -13,7 +13,10 @@ use bevy::{
 };
 
 use crate::{
-    collision::{refit::ColliderRefitPipeline, transform::ColliderTransformPipeline},
+    collision::{
+        refit::{ColliderRefit, ColliderRefitPipeline},
+        transform::{ColliderTransform, ColliderTransformPipeline},
+    },
     components::{ClothStepSettings, CollisionGroup},
     prepare::{ColoredGsSchedule, ConstraintColorRange, ConstraintSchedule, PreparedCloth},
 };
@@ -163,7 +166,12 @@ pub(crate) fn simulate_cloths(
     contact_pipeline: Res<ClothContactPipeline>,
     transform_pipeline: Res<ColliderTransformPipeline>,
     refit_pipeline: Res<ColliderRefitPipeline>,
-    colliders: Query<(&ColliderContactBindGroup, Option<&CollisionGroup>)>,
+    colliders: Query<(
+        &ColliderContactBindGroup,
+        &ColliderTransform,
+        &ColliderRefit,
+        Option<&CollisionGroup>,
+    )>,
     mut cloths: Query<(
         &ClothBuffers,
         &ClothIntegrationBindGroup,
@@ -264,8 +272,10 @@ pub(crate) fn simulate_cloths(
         let cloth_group = collision_group.copied().unwrap_or_default();
         let collider_bindings: Vec<_> = colliders
             .iter()
-            .filter(|(_, group)| group.copied().unwrap_or_default() == cloth_group)
-            .map(|(binding, _)| &binding.0)
+            .filter(|(_, pose, refit, group)| {
+                refit.is_current(pose.0) && group.copied().unwrap_or_default() == cloth_group
+            })
+            .map(|(binding, _, _, _)| &binding.0)
             .collect();
 
         while tick_cursor < ticks.requested {
