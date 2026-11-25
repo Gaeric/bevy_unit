@@ -77,7 +77,7 @@ path = "tests/legacy/solver_smoke.rs"
 
 [dependencies]
 # fps overlay in the examples; `fps_overlay` is behind bevy_dev_tools' `render` feature in 0.20
-bevy = { version = "0.20.0", features = [
+bevy = { version = "0.20.1", features = [
         "bevy_dev_tools",
         "render_dev_tools",
         "jpeg",

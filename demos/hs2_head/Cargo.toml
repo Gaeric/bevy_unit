@@ -6,7 +6,7 @@ edition = "2024"
 # `cargo run -p hs2_head --features dlss -- --raytracing --dlss`.
 
 [dependencies]
-bevy = { version = "0.20.0", features = [
+bevy = { version = "0.20.1", features = [
         "wayland",
         "dynamic_linking",
         "hotpatching",
