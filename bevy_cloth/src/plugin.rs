@@ -79,6 +79,7 @@ impl Plugin for ClothPlugin {
             .extra_buffer_usages |= BufferUsages::STORAGE;
 
         render_app
+            .insert_resource(bindings::ClothIntegrationBindGroupLayout::new())
             .insert_resource(bindings::ClothStretchBindGroupLayout::new())
             .insert_resource(bindings::ClothBendBindGroupLayout::new())
             .insert_resource(ClothOutputBindGroupLayout::new())
@@ -93,8 +94,8 @@ impl Plugin for ClothPlugin {
             .add_systems(
                 RenderStartup,
                 (
-                    pipeline::init_pipelines,
-                    pipeline::init_bend_pipeline,
+                    pipeline::init_integration_pipelines,
+                    pipeline::init_colored_gs_pipelines,
                     init_output_pipeline,
                     pipeline::init_contact_pipeline,
                     collider_transform::init_transform_pipeline,

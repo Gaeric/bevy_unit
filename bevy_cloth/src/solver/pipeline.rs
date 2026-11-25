@@ -7,7 +7,8 @@ use bevy::{
 };
 
 use super::bindings::{
-    ClothBendBindGroupLayout, ClothStretchBindGroupLayout, ContactBindGroupLayout,
+    ClothBendBindGroupLayout, ClothIntegrationBindGroupLayout, ClothStretchBindGroupLayout,
+    ContactBindGroupLayout,
 };
 
 /// Must match the workgroup size of the simulation and output entry points.
@@ -42,66 +43,71 @@ pub(crate) fn init_contact_pipeline(
     });
 }
 
-/// Only cloths with dihedral constraints wait for this pipeline.
+/// Pipelines used by one Colored GS sweep, shared by all cloth instances.
 #[derive(Resource)]
-pub(crate) struct ClothBendPipeline {
+pub(crate) struct ColoredGsPipelines {
+    pub solve_stretch: CachedComputePipelineId,
+    /// Only cloths with dihedral constraints wait for this pipeline.
     pub solve_bending: CachedComputePipelineId,
 }
 
-pub(crate) fn init_bend_pipeline(
+pub(crate) fn init_colored_gs_pipelines(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     cache: Res<PipelineCache>,
-    layout: Res<ClothBendBindGroupLayout>,
+    stretch_layout: Res<ClothStretchBindGroupLayout>,
+    bend_layout: Res<ClothBendBindGroupLayout>,
 ) {
+    let solve_stretch = cache.queue_compute_pipeline(ComputePipelineDescriptor {
+        label: Some("xpbd solve_stretch".into()),
+        layout: vec![stretch_layout.descriptor.clone()],
+        shader: load_embedded_asset!(asset_server.as_ref(), "stretch.wesl"),
+        entry_point: Some("solve_stretch".into()),
+        ..default()
+    });
     let solve_bending = cache.queue_compute_pipeline(ComputePipelineDescriptor {
         label: Some("xpbd solve_bending".into()),
-        layout: vec![layout.descriptor.clone()],
+        layout: vec![bend_layout.descriptor.clone()],
         shader: load_embedded_asset!(asset_server.as_ref(), "bending.wesl"),
         entry_point: Some("solve_bending".into()),
         ..default()
     });
-    commands.insert_resource(ClothBendPipeline { solve_bending });
+    commands.insert_resource(ColoredGsPipelines {
+        solve_stretch,
+        solve_bending,
+    });
 }
 
-/// Prediction, stretch solving and velocity update sharing one binding interface.
+/// Common prediction and velocity-update pipelines, independent of the sweep.
 #[derive(Resource)]
-pub(crate) struct ClothStretchPipelines {
+pub(crate) struct ClothIntegrationPipelines {
     pub predict: CachedComputePipelineId,
-    pub solve_stretch: CachedComputePipelineId,
     pub update_velocity: CachedComputePipelineId,
     /// Keep the shared WESL data definitions available to all importing shaders.
     _layout_shader: Handle<Shader>,
 }
 
-pub(crate) fn init_pipelines(
+pub(crate) fn init_integration_pipelines(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     cache: Res<PipelineCache>,
-    layout: Res<ClothStretchBindGroupLayout>,
+    layout: Res<ClothIntegrationBindGroupLayout>,
 ) {
     let layout_shader = load_embedded_asset!(asset_server.as_ref(), "layout.wesl");
     let integration_shader = load_embedded_asset!(asset_server.as_ref(), "integration.wesl");
-    let stretch_shader = load_embedded_asset!(asset_server.as_ref(), "stretch.wesl");
 
-    let [predict, solve_stretch, update_velocity] = [
-        ("predict", integration_shader.clone()),
-        ("solve_stretch", stretch_shader),
-        ("update_velocity", integration_shader),
-    ]
-    .map(|(entry_point, shader)| {
+    let [predict, update_velocity] = ["predict", "update_velocity"].map(|entry_point| {
         cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: Some(format!("xpbd {entry_point}").into()),
             layout: vec![layout.descriptor.clone()],
-            shader,
+            shader: integration_shader.clone(),
             entry_point: Some(entry_point.into()),
             ..default()
         })
     });
 
-    commands.insert_resource(ClothStretchPipelines {
+    commands.insert_resource(ClothIntegrationPipelines {
         predict,
-        solve_stretch,
         update_velocity,
         _layout_shader: layout_shader,
     });

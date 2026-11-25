@@ -9,17 +9,22 @@ use bevy::{
 };
 use std::mem::size_of;
 
-use crate::prepare::{ConstraintColorRange, PreparedCloth};
+use crate::prepare::{ColoredGsSchedule, ConstraintColorRange, PreparedCloth};
 
 use super::layout::{ConstraintRangeParams, StepParams};
 
 /// Present only when the prepared cloth has dihedral constraints.
-/// Lambda indices follow the color-reordered bend array, not the source edges.
-/// Cleared at each substep start, accumulated across colored bend iterations.
+/// Lambda indices follow the uploaded bend array, not the source edges.
+/// Cleared at each substep start, accumulated across constraint iterations.
 pub(crate) struct BendConstraintBuffers {
     pub constraints: Buffer,
     pub lambdas: Buffer,
-    pub range_params: Buffer,
+}
+
+/// Per-color uniform slots used only for Colored GS dispatches.
+pub(crate) struct ColoredGsRangeBuffers {
+    pub stretch: Buffer,
+    pub bend: Option<Buffer>,
 }
 
 /// Owns only the data buffers uploaded to the GPU.
@@ -32,7 +37,6 @@ pub(crate) struct ClothBuffers {
     pub stretch_lambdas: Buffer,
     pub bending: Option<BendConstraintBuffers>,
     pub step_params: Buffer,
-    pub stretch_range_params: Buffer,
 }
 
 impl ClothBuffers {
@@ -50,15 +54,10 @@ impl ClothBuffers {
             .collect();
         let stretch_lambdas = vec![0.0_f32; prepared.stretch_constraints.len()];
 
-        // Separate color arrays share the same dynamic-uniform slot format.
-        let stride = constraint_range_param_stride(device) as usize;
-        let range_bytes = pack_constraint_range_params(&prepared.schedule.stretch_colors, stride);
-
         let storage = BufferUsages::STORAGE | BufferUsages::COPY_DST;
         let uniform = BufferUsages::UNIFORM | BufferUsages::COPY_DST;
         let bending = (!prepared.bend_constraints.is_empty()).then(|| {
             let lambdas = vec![0.0_f32; prepared.bend_constraints.len()];
-            let ranges = pack_constraint_range_params(&prepared.schedule.bend_colors, stride);
             BendConstraintBuffers {
                 constraints: device.create_buffer_with_data(&BufferInitDescriptor {
                     label: Some("xpbd bend constraints"),
@@ -69,11 +68,6 @@ impl ClothBuffers {
                     label: Some("xpbd bend lambdas"),
                     contents: bytemuck::cast_slice(&lambdas),
                     usage: storage,
-                }),
-                range_params: device.create_buffer_with_data(&BufferInitDescriptor {
-                    label: Some("xpbd bend group params"),
-                    contents: &ranges,
-                    usage: BufferUsages::UNIFORM,
                 }),
             }
         });
@@ -110,12 +104,28 @@ impl ClothBuffers {
                 contents: bytemuck::bytes_of(step_params),
                 usage: uniform,
             }),
-            stretch_range_params: device.create_buffer_with_data(&BufferInitDescriptor {
-                label: Some("xpbd group params"),
-                contents: &range_bytes,
-                usage: uniform,
-            }),
         }
+    }
+}
+
+impl ColoredGsRangeBuffers {
+    pub fn new(device: &RenderDevice, schedule: &ColoredGsSchedule) -> Self {
+        let stride = constraint_range_param_stride(device) as usize;
+        let stretch_bytes = pack_constraint_range_params(&schedule.stretch_colors, stride);
+        let stretch = device.create_buffer_with_data(&BufferInitDescriptor {
+            label: Some("xpbd stretch group params"),
+            contents: &stretch_bytes,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+        let bend = (!schedule.bend_colors.is_empty()).then(|| {
+            let bytes = pack_constraint_range_params(&schedule.bend_colors, stride);
+            device.create_buffer_with_data(&BufferInitDescriptor {
+                label: Some("xpbd bend group params"),
+                contents: &bytes,
+                usage: BufferUsages::UNIFORM,
+            })
+        });
+        Self { stretch, bend }
     }
 }
 

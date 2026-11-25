@@ -15,16 +15,19 @@ use bevy::{
 use crate::{
     collision::{refit::ColliderRefitPipeline, transform::ColliderTransformPipeline},
     components::{ClothStepSettings, CollisionGroup},
-    prepare::PreparedCloth,
+    prepare::{ColoredGsSchedule, ConstraintColorRange, PreparedCloth},
 };
 
 use super::{
     bindings::{
-        ClothBendBindGroup, ClothContactBindGroup, ClothStretchBindGroup, ColliderContactBindGroup,
+        ClothContactBindGroup, ClothIntegrationBindGroup, ColliderContactBindGroup,
+        ColoredGsBindGroups,
     },
     gpu::{ClothBuffers, constraint_range_param_stride},
     layout::StepParams,
-    pipeline::{ClothBendPipeline, ClothContactPipeline, ClothStretchPipelines, WORKGROUP_SIZE},
+    pipeline::{
+        ClothContactPipeline, ClothIntegrationPipelines, ColoredGsPipelines, WORKGROUP_SIZE,
+    },
 };
 
 /// Total number of simulation ticks requested by Main World.
@@ -68,22 +71,63 @@ fn record_contacts(
     }
 }
 
+fn record_colors(
+    pass: &mut ComputePass<'_>,
+    pipeline: &ComputePipeline,
+    bind_group: &BindGroup,
+    colors: &[ConstraintColorRange],
+    range_param_stride: u32,
+) {
+    pass.set_pipeline(pipeline);
+    for (color, range) in colors.iter().enumerate() {
+        let offset = color as u32 * range_param_stride;
+        pass.set_bind_group(0, bind_group, &[offset]);
+        pass.dispatch_workgroups(range.count.div_ceil(WORKGROUP_SIZE), 1, 1);
+    }
+}
+
+/// A complete in-place sweep: stretch colors followed by bend colors.
+fn record_colored_gs_sweep(
+    pass: &mut ComputePass<'_>,
+    schedule: &ColoredGsSchedule,
+    (stretch_pipeline, stretch_bind_group): (&ComputePipeline, &BindGroup),
+    bend: Option<(&ComputePipeline, &BindGroup)>,
+    range_param_stride: u32,
+) {
+    record_colors(
+        pass,
+        stretch_pipeline,
+        stretch_bind_group,
+        &schedule.stretch_colors,
+        range_param_stride,
+    );
+    if let Some((pipeline, bind_group)) = bend {
+        record_colors(
+            pass,
+            pipeline,
+            bind_group,
+            &schedule.bend_colors,
+            range_param_stride,
+        );
+    }
+}
+
 /// Record pending ticks after collider transformation/refit and before rendering.
 pub(crate) fn simulate_cloths(
     mut context: RenderContext,
     ticks: Res<ClothTicks>,
     cache: Res<PipelineCache>,
-    pipelines: Res<ClothStretchPipelines>,
-    bend_pipeline: Res<ClothBendPipeline>,
+    integration_pipelines: Res<ClothIntegrationPipelines>,
+    colored_gs_pipelines: Res<ColoredGsPipelines>,
     contact_pipeline: Res<ClothContactPipeline>,
     transform_pipeline: Res<ColliderTransformPipeline>,
     refit_pipeline: Res<ColliderRefitPipeline>,
     colliders: Query<(&ColliderContactBindGroup, Option<&CollisionGroup>)>,
     mut cloths: Query<(
         &ClothBuffers,
-        &ClothStretchBindGroup,
+        &ClothIntegrationBindGroup,
         &ClothContactBindGroup,
-        Option<&ClothBendBindGroup>,
+        &ColoredGsBindGroups,
         &PreparedCloth,
         &StepParams,
         &ClothStepSettings,
@@ -104,23 +148,23 @@ pub(crate) fn simulate_cloths(
         cache.get_compute_pipeline(transform_pipeline.transform_vertices),
         cache.get_compute_pipeline(refit_pipeline.leaves),
         cache.get_compute_pipeline(refit_pipeline.internal),
-        cache.get_compute_pipeline(pipelines.predict),
+        cache.get_compute_pipeline(integration_pipelines.predict),
         cache.get_compute_pipeline(contact_pipeline.solve_contact),
-        cache.get_compute_pipeline(pipelines.solve_stretch),
-        cache.get_compute_pipeline(pipelines.update_velocity),
+        cache.get_compute_pipeline(colored_gs_pipelines.solve_stretch),
+        cache.get_compute_pipeline(integration_pipelines.update_velocity),
     )
     else {
         return;
     };
 
     let range_param_stride = constraint_range_param_stride(context.render_device());
-    let solve_bending = cache.get_compute_pipeline(bend_pipeline.solve_bending);
+    let solve_bending = cache.get_compute_pipeline(colored_gs_pipelines.solve_bending);
 
     for (
         cloth_buffers,
-        cloth_bind_group,
+        integration,
         contact_bind_group,
-        bend_bind_group,
+        constraint_bindings,
         prepared,
         step_params,
         settings,
@@ -128,12 +172,11 @@ pub(crate) fn simulate_cloths(
         mut simulation,
     ) in &mut cloths
     {
-        let bending = if let Some(bend_buffers) = &cloth_buffers.bending {
-            let (Some(bend_pipeline), Some(bend_bind_group)) = (solve_bending, bend_bind_group)
-            else {
+        let bend = if let Some(binding) = &constraint_bindings.bend {
+            let Some(pipeline) = solve_bending else {
                 continue;
             };
-            Some((bend_buffers, bend_pipeline, bend_bind_group))
+            Some((pipeline, binding))
         } else {
             None
         };
@@ -172,7 +215,7 @@ pub(crate) fn simulate_cloths(
             for _ in 0..settings.substeps {
                 let encoder = context.command_encoder();
                 encoder.clear_buffer(&cloth_buffers.stretch_lambdas, 0, None);
-                if let Some((bend_buffers, _, _)) = bending {
+                if let Some(bend_buffers) = &cloth_buffers.bending {
                     encoder.clear_buffer(&bend_buffers.lambdas, 0, None);
                 }
 
@@ -182,7 +225,7 @@ pub(crate) fn simulate_cloths(
                 });
 
                 pass.set_pipeline(predict);
-                pass.set_bind_group(0, &cloth_bind_group.0, &[0]);
+                pass.set_bind_group(0, &integration.0, &[]);
                 pass.dispatch_workgroups(particle_workgroups, 1, 1);
 
                 record_contacts(
@@ -194,24 +237,17 @@ pub(crate) fn simulate_cloths(
                 );
 
                 for _ in 0..settings.iterations {
-                    pass.set_pipeline(solve_stretch);
-                    for (color, range) in prepared.schedule.stretch_colors.iter().enumerate() {
-                        let offset = color as u32 * range_param_stride;
-                        pass.set_bind_group(0, &cloth_bind_group.0, &[offset]);
-                        pass.dispatch_workgroups(range.count.div_ceil(WORKGROUP_SIZE), 1, 1);
-                    }
-                    if let Some((_, bend_pipeline, bend_bind_group)) = bending {
-                        pass.set_pipeline(bend_pipeline);
-                        for (color, range) in prepared.schedule.bend_colors.iter().enumerate() {
-                            let offset = color as u32 * range_param_stride;
-                            pass.set_bind_group(0, &bend_bind_group.0, &[offset]);
-                            pass.dispatch_workgroups(range.count.div_ceil(WORKGROUP_SIZE), 1, 1);
-                        }
-                    }
+                    record_colored_gs_sweep(
+                        &mut pass,
+                        &prepared.schedule,
+                        (solve_stretch, &constraint_bindings.stretch),
+                        bend,
+                        range_param_stride,
+                    );
                 }
 
                 pass.set_pipeline(update_velocity);
-                pass.set_bind_group(0, &cloth_bind_group.0, &[0]);
+                pass.set_bind_group(0, &integration.0, &[]);
                 pass.dispatch_workgroups(particle_workgroups, 1, 1);
             }
 
