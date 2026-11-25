@@ -60,6 +60,8 @@ pub struct ClothExternalFriction {
 pub struct ClothSelfCollision {
     /// World-space minimum pair separation, in meters.
     pub diameter: f32,
+    /// Finite, nonnegative tangential friction coefficient. Zero disables friction only.
+    pub friction: f32,
     /// Maximum cached candidate IDs per particle. Overflow is reported; a pair
     /// is solved only if both particles retain each other.
     pub neighbor_capacity: u32,

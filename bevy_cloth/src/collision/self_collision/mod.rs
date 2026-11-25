@@ -41,8 +41,9 @@ struct Params {
     bucket_count: u32,
     capacity: u32,
     diameter: f32,
+    friction: f32,
     cell_width: f32,
-    padding: [u32; 3],
+    padding: [u32; 2],
 }
 
 /// Captured before fixed targets are applied. No pair matrix is stored.
@@ -55,10 +56,13 @@ pub(crate) struct PreparedSelfCollision {
 
 impl PreparedSelfCollision {
     pub fn new(settings: ClothSelfCollision, particles: &[Particle]) -> Result<Self, String> {
-        let ClothSelfCollision { diameter, neighbor_capacity } = settings;
+        let ClothSelfCollision { diameter, friction, neighbor_capacity } = settings;
         let cell_width = 2.0 * diameter;
         if !diameter.is_normal() || diameter <= 0.0 || !cell_width.is_finite() {
             return Err("self-contact diameter must be positive, normal, and finite when doubled".into());
+        }
+        if !friction.is_finite() || friction < 0.0 || !(diameter + friction * diameter).is_finite() {
+            return Err("self-contact friction must be finite and nonnegative with finite correction bounds".into());
         }
         if neighbor_capacity == 0 {
             return Err("self-contact neighbor_capacity must be nonzero".into());
@@ -86,7 +90,7 @@ impl PreparedSelfCollision {
         }
         Ok(Self {
             params: Params { particle_count, bucket_count: particle_count, capacity, diameter,
-                cell_width, padding: [0; 3] },
+                friction, cell_width, padding: [0; 2] },
             rest_positions,
             candidate_words,
         })
@@ -168,7 +172,7 @@ impl SelfCollision {
             return Err("self-contact exceeds device dispatch size".into());
         }
         let particle_bytes = u64::from(params.particle_count) * size_of::<Particle>() as u64;
-        if cloth.particles.size() != particle_bytes {
+        if cloth.particles.size() != particle_bytes || cloth.previous_positions.size() != particle_bytes {
             return Err("self-contact rest and cloth GPU particle counts differ".into());
         }
         let candidate_bytes = u64::from(prepared.candidate_words) * 4;
@@ -204,7 +208,7 @@ impl SelfCollision {
             count: bind(&pipeline.count, &[&uniform, particles, &counts, stats]),
             scatter: bind(&pipeline.scatter, &[&uniform, particles, &cursors, &offsets, &ids]),
             candidates: bind(&pipeline.candidates, &[&uniform, particles, &counts, &offsets, &ids, &rest, &rows, stats]),
-            gather: bind(&pipeline.gather, &[&uniform, particles, &rest, &rows, &corrections]),
+            gather: bind(&pipeline.gather, &[&uniform, particles, &cloth.previous_positions, &rest, &rows, &corrections]),
             apply: bind(&pipeline.apply, &[&uniform, &corrections, particles, stats]),
             scan,
             particle_workgroups,

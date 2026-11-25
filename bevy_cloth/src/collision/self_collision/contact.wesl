@@ -2,6 +2,7 @@ import super::super::super::solver::layout::Particle;
 import super::self_layout::{params, finite3, largest_component, bump_stat, INVALID_CORRECTIONS};
 
 @group(0) @binding(1) var<storage, read> snapshot: array<Particle>;
+@group(0) @binding(2) var<storage, read> previous_positions: array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read> rest_positions: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read> candidates: array<u32>;
 @group(0) @binding(5) var<storage, read_write> gathered: array<vec4<f32>>;
@@ -49,6 +50,21 @@ fn pair_normal_correction(low: u32, high: u32, delta: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(fallback, params.diameter);
 }
 
+fn tangent_correction(low: u32, high: u32, delta: vec3<f32>, normal: vec3<f32>, depth: f32) -> vec3<f32> {
+    if params.friction == 0.0 || depth == 0.0 { return vec3<f32>(0.0); }
+    let previous_delta = previous_positions[low].xyz - previous_positions[high].xyz;
+    let motion = delta - previous_delta;
+    if !finite3(motion) { return vec3<f32>(0.0); }
+    let scale = largest_component(motion);
+    if scale == 0.0 { return vec3<f32>(0.0); }
+    let scaled_motion = motion / scale;
+    let tangent = scaled_motion - normal * dot(normal, scaled_motion);
+    let tangent_length = length(tangent);
+    if tangent_length == 0.0 { return vec3<f32>(0.0); }
+    let capped_length = min(scale * tangent_length, params.friction * depth);
+    return -tangent / tangent_length * capped_length;
+}
+
 @compute @workgroup_size(64)
 fn gather_self_contact(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let i = invocation.x;
@@ -67,7 +83,7 @@ fn gather_self_contact(@builtin(global_invocation_id) invocation: vec3<u32>) {
         let high = max(i, j);
         let delta = snapshot[low].position - snapshot[high].position;
         let contact = pair_normal_correction(low, high, delta);
-        let relative = contact.xyz * contact.w;
+        let relative = contact.xyz * contact.w + tangent_correction(low, high, delta, contact.xyz, contact.w);
         let other_weight = snapshot[j].inv_mass;
         let scale = max(weight, other_weight);
         let share = (weight / scale) / (weight / scale + other_weight / scale);

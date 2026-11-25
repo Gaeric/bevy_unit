@@ -4,10 +4,10 @@ struct SelfContactParams {
     bucket_count: u32,
     capacity: u32,
     diameter: f32,
+    friction: f32,
     cell_width: f32,
     pad0: u32,
     pad1: u32,
-    pad2: u32,
 };
 
 // For pairs at or inside the diameter, scaling first prevents a squared-length

@@ -195,7 +195,7 @@ fn hierarchical_scan_matches_prefix_with_partial_blocks() {
 }
 
 // Independent once-per-pair scatter oracle for the snapshot correction contract.
-fn corrections(points: &[Point], rows: &[Vec<usize>]) -> Vec<DVec3> {
+fn corrections(points: &[Point], previous: &[DVec3], rows: &[Vec<usize>], friction: f64) -> Vec<DVec3> {
     let mut result = vec![DVec3::ZERO; points.len()];
     for (i, row) in rows.iter().enumerate() {
         for &j in row.iter().filter(|&&j| j > i && rows[j].contains(&i)) {
@@ -206,7 +206,9 @@ fn corrections(points: &[Point], rows: &[Vec<usize>]) -> Vec<DVec3> {
                 (a.rest.as_dvec3() - b.rest.as_dvec3()).normalize()
             });
             let depth = 1.0 - delta.length();
-            let relative = normal * depth;
+            let motion = delta - (previous[i] - previous[j]);
+            let tangent = motion - normal * motion.dot(normal);
+            let relative = normal * depth - tangent.clamp_length_max(friction * depth);
             let weights = f64::from(a.inv_mass) + f64::from(b.inv_mass);
             let pair_degree = rows[i].len().max(rows[j].len()) as f64;
             result[i] += relative * (f64::from(a.inv_mass) / weights / pair_degree);
@@ -222,7 +224,7 @@ fn reciprocity_skips_dropped_pairs_and_fixed_endpoint_stays_fixed() {
     let candidates = hash_candidates(&points, 1.0, 1, 1);
     assert_eq!(candidates.rows, [vec![1], vec![0], vec![0]]);
     assert_eq!(candidates.overflow_rows, 3);
-    assert_eq!(corrections(&points, &candidates.rows),
+    assert_eq!(corrections(&points, &[DVec3::ZERO; 3], &candidates.rows, 0.0),
         [DVec3::ZERO, DVec3::X, DVec3::ZERO]);
 }
 
@@ -231,20 +233,29 @@ fn crowded_pairs_use_the_same_damping_at_both_ends() {
     let points = [point(0.0, 0.0, 1.0), point(0.75, 2.0, 1.0), point(-0.75, 4.0, 1.0)];
     let candidates = hash_candidates(&points, 1.0, 2, 2);
     assert_eq!(candidates.rows, [vec![1, 2], vec![0], vec![0]]);
-    assert_eq!(corrections(&points, &candidates.rows),
+    assert_eq!(corrections(&points, &[DVec3::ZERO; 3], &candidates.rows, 0.0),
         [DVec3::ZERO, DVec3::X * 0.0625, -DVec3::X * 0.0625]);
+}
+
+#[test]
+fn pair_relative_friction_is_capped_before_inverse_mass_split() {
+    let points = [point(0.5, 0.0, 1.0), point(0.0, 2.0, 3.0)];
+    let cached = hash_candidates(&points, 1.0, 1, 1);
+    let result = corrections(&points, &[DVec3::new(0.5, -2.0, 0.0), DVec3::ZERO], &cached.rows, 0.5);
+    assert_eq!(result[0] - result[1], DVec3::new(0.5, -0.25, 0.0));
+    assert_eq!(result[0] * 3.0, -result[1]);
 }
 
 #[test]
 fn preparation_keeps_raw_rest_positions_and_bounds_candidate_indices() {
     let particles = [Particle { position: [2.0, 3.0, 4.0], inv_mass: 1.0 }; 2];
     let prepared = PreparedSelfCollision::new(ClothSelfCollision {
-        diameter: 0.125, neighbor_capacity: u32::MAX,
+        diameter: 0.125, friction: 0.5, neighbor_capacity: u32::MAX,
     }, &particles).expect("capacity clamps to the number of other particles");
     assert_eq!(prepared.params.capacity, 1);
     assert_eq!(prepared.candidate_words, 4);
     assert_eq!(prepared.rest_positions, [[2.0, 3.0, 4.0, 0.0]; 2]);
     assert!(PreparedSelfCollision::new(ClothSelfCollision {
-        diameter: 0.125, neighbor_capacity: 0,
+        diameter: 0.125, friction: 0.5, neighbor_capacity: 0,
     }, &particles).is_err());
 }

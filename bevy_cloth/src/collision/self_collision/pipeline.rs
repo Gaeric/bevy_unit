@@ -100,7 +100,7 @@ pub(crate) fn init_self_collision_pipeline(
             write(7, WORD), stats,
         ]),
         gather: queue(&contact, "gather_self_contact", &[
-            params, particle_snapshot, read(3, VECTOR), read(4, WORD), write(5, VECTOR),
+            params, particle_snapshot, read(2, VECTOR), read(3, VECTOR), read(4, WORD), write(5, VECTOR),
         ]),
         apply: queue(&contact, "apply_self_contact", &[params, read(6, VECTOR), write(7, VECTOR), stats]),
         _imports: [common, particle_layout],
