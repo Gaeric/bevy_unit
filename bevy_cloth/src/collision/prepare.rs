@@ -6,7 +6,7 @@ use bevy::{
     render::{RenderApp, extract_component::ExtractComponent},
 };
 
-use crate::{components::MeshCollider, solver::bindings::ColliderContactBindGroup};
+use crate::components::MeshCollider;
 
 use super::{
     bvh::{TriangleBvh, build_triangle_bvh},
@@ -24,8 +24,7 @@ use super::{
     GpuCollider,
     ColliderTransform,
     ColliderTransformBindGroup,
-    ColliderRefit,
-    ColliderContactBindGroup
+    ColliderRefit
 ))]
 pub(crate) struct PreparedCollider {
     /// Local-space points in homogeneous coordinates; w is always one.

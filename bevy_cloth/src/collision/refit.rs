@@ -6,7 +6,7 @@ use bevy::{
     render::{
         render_resource::{
             BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
-            BindingResource, BufferBinding, BufferInitDescriptor, BufferUsages,
+            BindingResource, Buffer, BufferBinding, BufferId, BufferInitDescriptor, BufferUsages,
             CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor,
             PipelineCache, ShaderStages,
             binding_types::{
@@ -19,7 +19,7 @@ use bevy::{
 use bytemuck::{Pod, Zeroable};
 use std::num::NonZeroU64;
 
-use crate::solver::pipeline::WORKGROUP_SIZE;
+use crate::solver::{bindings::ContactBindGroupLayout, pipeline::WORKGROUP_SIZE};
 
 use super::{
     PreparedCollider,
@@ -84,31 +84,42 @@ pub(crate) fn init_refit_pipeline(
     });
 }
 
+struct GeometryBindings {
+    vertex_buffer: BufferId,
+    refit: BindGroup,
+    contact: BindGroup,
+    recorded_pose: Option<Mat4>,
+}
+
 /// Per-collider refit resources and progress, recreated with geometry buffers.
 #[derive(Component)]
 pub(crate) struct ColliderRefit {
-    /// Retains the refit node-list and parameter buffers as well as geometry bindings.
-    bind_group: BindGroup,
+    refit_nodes: Buffer,
+    refit_params: Buffer,
     /// Leaves first, then one dispatch per internal depth.
     counts: Vec<u32>,
-    /// Pose for which all refit commands have been recorded, not GPU completion.
-    recorded_transform: Option<Mat4>,
+    bindings: Option<GeometryBindings>,
+    current: bool,
 }
 
 impl ColliderRefit {
-    pub(crate) fn is_current(&self, pose: Mat4) -> bool {
-        self.recorded_transform == Some(pose)
+    /// The current vertices and bounds have both been recorded in command order.
+    /// Not a GPU completion signal.
+    pub(crate) fn ready(&self) -> Option<(&BindGroup, Mat4)> {
+        if !self.current {
+            return None;
+        }
+        let bindings = self.bindings.as_ref()?;
+        Some((&bindings.contact, bindings.recorded_pose?))
     }
 }
 
 pub(crate) fn prepare_refits(
     mut commands: Commands,
     device: Res<RenderDevice>,
-    cache: Res<PipelineCache>,
-    pipeline: Res<ColliderRefitPipeline>,
-    colliders: Query<(Entity, &PreparedCollider, &GpuCollider), Without<ColliderRefit>>,
+    colliders: Query<(Entity, &PreparedCollider), (With<GpuCollider>, Without<ColliderRefit>)>,
 ) {
-    for (entity, prepared, gpu) in &colliders {
+    for (entity, prepared) in &colliders {
         // One list avoids an empty internal-node buffer for a root-leaf tree.
         let mut refit_nodes = prepared.bvh.leaf_nodes.clone();
         let leaf_count = refit_nodes.len() as u32;
@@ -143,27 +154,47 @@ pub(crate) fn prepare_refits(
             usage: BufferUsages::UNIFORM,
         });
 
-        let bind_group = device.create_bind_group(
-            "xpbd collider refit bind group",
-            &cache.get_bind_group_layout(&pipeline.layout),
-            &BindGroupEntries::sequential((
-                gpu.world_positions.as_entire_binding(),
-                gpu.indices.as_entire_binding(),
-                gpu.nodes.as_entire_binding(),
-                gpu.triangle_refs.as_entire_binding(),
-                refit_nodes.as_entire_binding(),
-                BindingResource::Buffer(BufferBinding {
-                    buffer: &refit_params,
-                    offset: 0,
-                    size: NonZeroU64::new(size_of::<RefitParams>() as u64),
-                }),
-            )),
-        );
         commands.entity(entity).insert(ColliderRefit {
-            bind_group,
+            refit_nodes,
+            refit_params,
             counts: stages.iter().map(|params| params.count).collect(),
-            recorded_transform: None,
+            bindings: None,
+            current: false,
         });
+    }
+}
+
+impl ColliderRefit {
+    fn bind_geometry(
+        &self,
+        device: &RenderDevice,
+        cache: &PipelineCache,
+        pipeline: &ColliderRefitPipeline,
+        contact_layout: &ContactBindGroupLayout,
+        gpu: &GpuCollider,
+        positions: &Buffer,
+    ) -> GeometryBindings {
+        GeometryBindings {
+            vertex_buffer: positions.id(),
+            refit: device.create_bind_group(
+                "xpbd collider refit bind group",
+                &cache.get_bind_group_layout(&pipeline.layout),
+                &BindGroupEntries::sequential((
+                    positions.as_entire_binding(),
+                    gpu.indices.as_entire_binding(),
+                    gpu.nodes.as_entire_binding(),
+                    gpu.triangle_refs.as_entire_binding(),
+                    self.refit_nodes.as_entire_binding(),
+                    BindingResource::Buffer(BufferBinding {
+                        buffer: &self.refit_params,
+                        offset: 0,
+                        size: NonZeroU64::new(size_of::<RefitParams>() as u64),
+                    }),
+                )),
+            ),
+            contact: contact_layout.create_collider_bind_group(device, cache, gpu, positions),
+            recorded_pose: None,
+        }
     }
 }
 
@@ -172,25 +203,50 @@ pub(crate) fn refit_colliders(
     mut context: RenderContext,
     cache: Res<PipelineCache>,
     pipeline: Res<ColliderRefitPipeline>,
+    contact_layout: Res<ContactBindGroupLayout>,
     mut colliders: Query<(
-        &ColliderTransform,
-        &ColliderTransformBindGroup,
+        &GpuCollider,
+        Option<&ColliderTransform>,
+        Option<&ColliderTransformBindGroup>,
         &mut ColliderRefit,
     )>,
 ) {
-    let (Some(leaves), Some(internal)) = (
-        cache.get_compute_pipeline(pipeline.leaves),
-        cache.get_compute_pipeline(pipeline.internal),
-    ) else {
-        return;
-    };
+    let leaves = cache.get_compute_pipeline(pipeline.leaves);
+    let internal = cache.get_compute_pipeline(pipeline.internal);
     let stride = refit_param_stride(context.render_device());
 
-    for (transform, transformed, mut refit) in &mut colliders {
-        // A delayed refit must wait for world points from the current pose.
-        if transformed.recorded_transform != Some(transform.0)
-            || refit.recorded_transform == Some(transform.0)
+    for (gpu, transform, transformed, mut refit) in &mut colliders {
+        refit.current = false;
+        let (Some(leaves), Some(internal), Some(transform), Some(transformed)) =
+            (leaves, internal, transform, transformed)
+        else {
+            continue;
+        };
+        let pose = transform.0;
+        if transformed.recorded_transform != Some(pose) {
+            continue;
+        }
+        let positions = &gpu.world_positions;
+        let refit = refit.as_mut();
+        if refit
+            .bindings
+            .as_ref()
+            .is_none_or(|bindings| bindings.vertex_buffer != positions.id())
         {
+            refit.bindings = Some(refit.bind_geometry(
+                context.render_device(),
+                &cache,
+                &pipeline,
+                &contact_layout,
+                gpu,
+                positions,
+            ));
+        }
+        let Some(bindings) = &mut refit.bindings else {
+            continue;
+        };
+        if bindings.recorded_pose == Some(pose) {
+            refit.current = true;
             continue;
         }
 
@@ -202,9 +258,10 @@ pub(crate) fn refit_colliders(
             });
         for (stage, &count) in refit.counts.iter().enumerate() {
             pass.set_pipeline(if stage == 0 { leaves } else { internal });
-            pass.set_bind_group(0, &refit.bind_group, &[stage as u32 * stride]);
+            pass.set_bind_group(0, &bindings.refit, &[stage as u32 * stride]);
             pass.dispatch_workgroups(count.div_ceil(WORKGROUP_SIZE), 1, 1);
         }
-        refit.recorded_transform = Some(transform.0);
+        bindings.recorded_pose = Some(pose);
+        refit.current = true;
     }
 }

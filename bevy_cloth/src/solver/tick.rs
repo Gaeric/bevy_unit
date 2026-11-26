@@ -17,14 +17,14 @@ use crate::{
         motion::ContactMotionBatch,
         refit::{ColliderRefit, ColliderRefitPipeline},
         self_collision::{SelfCollision, SelfCollisionPipeline},
-        transform::{ColliderTransform, ColliderTransformPipeline},
+        transform::ColliderTransformPipeline,
     },
     components::{ClothStepSettings, CollisionGroup},
     prepare::{ColoredGsSchedule, ConstraintColorRange, ConstraintSchedule, PreparedCloth},
 };
 
 use super::{
-    bindings::{ClothContactBindGroup, ClothIntegrationBindGroup, ColliderContactBindGroup},
+    bindings::{ClothContactBindGroup, ClothIntegrationBindGroup},
     gpu::{ClothBuffers, constraint_range_param_stride},
     jacobi::{JacobiPipelines, JacobiSweep},
     layout::StepParams,
@@ -170,12 +170,7 @@ pub(crate) fn simulate_cloths(
     transform_pipeline: Res<ColliderTransformPipeline>,
     refit_pipeline: Res<ColliderRefitPipeline>,
     self_collision_pipeline: Res<SelfCollisionPipeline>,
-    colliders: Query<(
-        &ColliderContactBindGroup,
-        &ColliderTransform,
-        &ColliderRefit,
-        Option<&CollisionGroup>,
-    )>,
+    colliders: Query<(&ColliderRefit, Option<&CollisionGroup>)>,
     mut cloths: Query<(
         &ClothBuffers,
         &ClothIntegrationBindGroup,
@@ -295,10 +290,8 @@ pub(crate) fn simulate_cloths(
         let cloth_group = collision_group.copied().unwrap_or_default();
         let collider_bindings: Vec<_> = colliders
             .iter()
-            .filter(|(_, pose, refit, group)| {
-                refit.is_current(pose.0) && group.copied().unwrap_or_default() == cloth_group
-            })
-            .map(|(binding, _, _, _)| &binding.0)
+            .filter(|(_, group)| group.copied().unwrap_or_default() == cloth_group)
+            .filter_map(|(refit, _)| refit.ready().map(|(binding, _)| binding))
             .collect();
         let solve_contact = if step_params.external_friction > 0.0 && !collider_bindings.is_empty() {
             // A delayed cloth cannot use this batch's surface displacement for older ticks.

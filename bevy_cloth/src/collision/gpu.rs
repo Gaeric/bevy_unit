@@ -3,14 +3,10 @@
 use bevy::{
     prelude::*,
     render::{
-        render_resource::{
-            Buffer, BufferDescriptor, BufferInitDescriptor, BufferUsages, PipelineCache,
-        },
+        render_resource::{Buffer, BufferDescriptor, BufferInitDescriptor, BufferUsages},
         renderer::RenderDevice,
     },
 };
-
-use crate::solver::bindings::ContactBindGroupLayout;
 
 use super::{
     PreparedCollider, motion::ColliderContactMotion, refit::ColliderRefit,
@@ -81,13 +77,10 @@ impl GpuCollider {
 pub(crate) fn upload_colliders(
     mut commands: Commands,
     device: Res<RenderDevice>,
-    cache: Res<PipelineCache>,
-    contact_layout: Res<ContactBindGroupLayout>,
     colliders: Query<(Entity, &PreparedCollider), Changed<PreparedCollider>>,
 ) {
     for (entity, prepared) in &colliders {
         let gpu = GpuCollider::new(&device, prepared);
-        let contact_bind_group = contact_layout.create_collider_bind_group(&device, &cache, &gpu);
         info!(
             ?entity,
             vertices = gpu.vertex_count,
@@ -98,6 +91,6 @@ pub(crate) fn upload_colliders(
         commands
             .entity(entity)
             .remove::<(ColliderTransformBindGroup, ColliderRefit)>()
-            .insert((gpu, contact_bind_group));
+            .insert(gpu);
     }
 }

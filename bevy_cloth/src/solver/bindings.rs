@@ -29,10 +29,6 @@ use super::{
 #[derive(Component)]
 pub(crate) struct ClothContactBindGroup(pub BindGroup);
 
-/// Group 1 for contact: one collider's world-space geometry and BVH.
-#[derive(Component)]
-pub(crate) struct ColliderContactBindGroup(pub BindGroup);
-
 #[derive(Resource)]
 pub(crate) struct ContactBindGroupLayout {
     pub cloth: BindGroupLayoutDescriptor,
@@ -104,19 +100,20 @@ impl ContactBindGroupLayout {
         device: &RenderDevice,
         cache: &PipelineCache,
         collider: &GpuCollider,
-    ) -> ColliderContactBindGroup {
-        ColliderContactBindGroup(device.create_bind_group(
+        world_positions: &Buffer,
+    ) -> BindGroup {
+        device.create_bind_group(
             "xpbd contact collider bind group",
             &cache.get_bind_group_layout(&self.collider),
             &BindGroupEntries::sequential((
-                collider.world_positions.as_entire_binding(),
+                world_positions.as_entire_binding(),
                 collider.indices.as_entire_binding(),
                 collider.nodes.as_entire_binding(),
                 collider.triangle_refs.as_entire_binding(),
                 collider.motion.delta_per_tick.as_entire_binding(),
                 collider.local_positions.as_entire_binding(),
             )),
-        ))
+        )
     }
 }
 

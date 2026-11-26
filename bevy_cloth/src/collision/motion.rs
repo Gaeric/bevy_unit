@@ -10,7 +10,7 @@ use bevy::{
 
 use crate::solver::tick::ClothTicks;
 
-use super::{gpu::GpuCollider, refit::ColliderRefit, transform::ColliderTransform};
+use super::{gpu::GpuCollider, refit::ColliderRefit};
 
 /// Ticks older than this batch have no matching surface-motion sample.
 #[derive(Resource, Default)]
@@ -71,18 +71,18 @@ pub(crate) fn prepare_contact_motion(
     mut batch: ResMut<ContactMotionBatch>,
     mut observed_ticks: Local<u64>,
     queue: Res<RenderQueue>,
-    mut colliders: Query<(&mut GpuCollider, Option<&ColliderTransform>, Option<&ColliderRefit>)>,
+    mut colliders: Query<(&mut GpuCollider, Option<&ColliderRefit>)>,
 ) {
     batch.start_tick = *observed_ticks;
     let tick_count = ticks.requested.saturating_sub(batch.start_tick);
     *observed_ticks = ticks.requested;
-    for (mut gpu, pose, refit) in &mut colliders {
-        let Some(pose) = pose.filter(|pose| refit.is_some_and(|refit| refit.is_current(pose.0))) else {
+    for (mut gpu, refit) in &mut colliders {
+        let Some((_, pose)) = refit.and_then(ColliderRefit::ready) else {
             gpu.motion.previous_pose = None;
             continue;
         };
         if tick_count != 0 {
-            gpu.motion.advance(&queue, pose.0, tick_count);
+            gpu.motion.advance(&queue, pose, tick_count);
         }
     }
 }
