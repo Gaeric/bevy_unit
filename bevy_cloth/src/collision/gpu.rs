@@ -13,13 +13,17 @@ use super::{
     transform::ColliderTransformBindGroup,
 };
 
-/// Buffers owned by one collider entity. Initial local bounds are refitted in place.
-#[derive(Component)]
-pub(crate) struct GpuCollider {
+/// Vertex buffers needed only by the rigid transform path.
+pub(crate) struct RigidColliderVertices {
     pub local_positions: Buffer,
-    /// World-space points, valid after the transform dispatch has been recorded.
     pub world_positions: Buffer,
     pub world_from_local: Buffer,
+}
+
+/// Per-collider geometry. Skinned colliders borrow world positions from the producer.
+#[derive(Component)]
+pub(crate) struct GpuCollider {
+    pub rigid: Option<RigidColliderVertices>,
     pub indices: Buffer,
     pub nodes: Buffer,
     pub triangle_refs: Buffer,
@@ -32,7 +36,7 @@ pub(crate) struct GpuCollider {
 
 impl GpuCollider {
     fn new(device: &RenderDevice, prepared: &PreparedCollider) -> Self {
-        Self {
+        let rigid = (!prepared.skinned).then(|| RigidColliderVertices {
             local_positions: device.create_buffer_with_data(&BufferInitDescriptor {
                 label: Some("xpbd collider local positions"),
                 contents: bytemuck::cast_slice(&prepared.local_positions),
@@ -50,6 +54,9 @@ impl GpuCollider {
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
+        });
+        Self {
+            rigid,
             indices: device.create_buffer_with_data(&BufferInitDescriptor {
                 label: Some("xpbd collider indices"),
                 contents: bytemuck::cast_slice(&prepared.indices),
@@ -77,12 +84,20 @@ impl GpuCollider {
 pub(crate) fn upload_colliders(
     mut commands: Commands,
     device: Res<RenderDevice>,
+    skinning: Option<Res<crate::compute_skinning::ComputeSkinningResults>>,
     colliders: Query<(Entity, &PreparedCollider), Changed<PreparedCollider>>,
 ) {
     for (entity, prepared) in &colliders {
         let gpu = GpuCollider::new(&device, prepared);
+        if prepared.skinned && skinning.is_none() {
+            warn!(
+                ?entity,
+                "skinned MeshCollider requires ComputeSkinningPlugin"
+            );
+        }
         info!(
             ?entity,
+            skinned = prepared.skinned,
             vertices = gpu.vertex_count,
             triangles = gpu.triangle_count,
             nodes = gpu.node_count,

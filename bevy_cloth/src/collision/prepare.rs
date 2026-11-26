@@ -1,12 +1,13 @@
 //! Prepare local-space collider data on its entity for GPU upload.
 
 use bevy::{
+    asset::prelude::AssetChanged,
     mesh::PrimitiveTopology,
     prelude::*,
     render::{RenderApp, extract_component::ExtractComponent},
 };
 
-use crate::components::MeshCollider;
+use crate::{components::MeshCollider, compute_skinning::ComputeSkinning};
 
 use super::{
     bvh::{TriangleBvh, build_triangle_bvh},
@@ -27,6 +28,8 @@ use super::{
     ColliderRefit
 ))]
 pub(crate) struct PreparedCollider {
+    /// Use the skinning plugin's vertex output instead of transforming local points.
+    pub skinned: bool,
     /// Local-space points in homogeneous coordinates; w is always one.
     pub local_positions: Vec<[f32; 4]>,
     /// Original triangle indices, three entries per triangle.
@@ -36,7 +39,7 @@ pub(crate) struct PreparedCollider {
 }
 
 /// Prepare local source geometry without modifying the Mesh or applying a pose.
-fn prepare_collider(mesh: &Mesh) -> Result<PreparedCollider, String> {
+fn prepare_collider(mesh: &Mesh, skinned: bool) -> Result<PreparedCollider, String> {
     if mesh.primitive_topology() != PrimitiveTopology::TriangleList {
         return Err("collider mesh must use TriangleList topology".into());
     }
@@ -68,25 +71,36 @@ fn prepare_collider(mesh: &Mesh) -> Result<PreparedCollider, String> {
         .collect();
 
     Ok(PreparedCollider {
+        skinned,
         local_positions,
         indices,
         bvh,
     })
 }
 
-/// Prepare on marker addition or Mesh handle replacement, without retrying.
+/// Refresh skinned topology on asset edits as well, to keep its indices matched
+/// to the skinning plugin's current vertex order.
 pub(crate) fn prepare_colliders(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
     colliders: Query<
-        (Entity, &Mesh3d),
+        (Entity, &Mesh3d, Has<ComputeSkinning>),
         (
             With<MeshCollider>,
-            Or<(Added<MeshCollider>, Changed<Mesh3d>)>,
+            Or<(
+                Added<MeshCollider>,
+                Changed<Mesh3d>,
+                Added<ComputeSkinning>,
+                (
+                    With<ComputeSkinning>,
+                    With<PreparedCollider>,
+                    AssetChanged<Mesh3d>,
+                ),
+            )>,
         ),
     >,
 ) {
-    for (entity, mesh_handle) in &colliders {
+    for (entity, mesh_handle, skinned) in &colliders {
         // A failed replacement must not leave the old geometry active.
         commands.entity(entity).remove::<PreparedCollider>();
 
@@ -98,7 +112,7 @@ pub(crate) fn prepare_colliders(
             continue;
         };
 
-        let prepared = match prepare_collider(mesh) {
+        let prepared = match prepare_collider(mesh, skinned) {
             Ok(prepared) => prepared,
             Err(error) => {
                 warn!(?entity, %error, "XPBD collider preparation failed");
@@ -125,7 +139,12 @@ pub(crate) fn clear_removed_colliders(
     mut commands: Commands,
     mut removed_colliders: RemovedComponents<MeshCollider>,
     mut removed_meshes: RemovedComponents<Mesh3d>,
+    mut removed_skinning: RemovedComponents<ComputeSkinning>,
     remaining: Query<(), (With<MeshCollider>, With<Mesh3d>)>,
+    mut switched_to_rigid: Query<
+        &mut PreparedCollider,
+        (With<MeshCollider>, With<Mesh3d>, Without<ComputeSkinning>),
+    >,
 ) {
     for entity in removed_colliders.read().chain(removed_meshes.read()) {
         if remaining.contains(entity) {
@@ -134,6 +153,11 @@ pub(crate) fn clear_removed_colliders(
 
         if let Ok(mut entity_commands) = commands.get_entity(entity) {
             entity_commands.remove::<PreparedCollider>();
+        }
+    }
+    for entity in removed_skinning.read() {
+        if let Ok(mut prepared) = switched_to_rigid.get_mut(entity) {
+            prepared.skinned = false;
         }
     }
 }
@@ -162,7 +186,11 @@ mod tests {
             .init_asset::<Mesh>()
             .add_systems(
                 PostUpdate,
-                (clear_removed_colliders, prepare_colliders).chain(),
+                (
+                    clear_removed_colliders,
+                    prepare_colliders.after(bevy::asset::AssetEventSystems),
+                )
+                    .chain(),
             );
         app
     }
@@ -190,7 +218,7 @@ mod tests {
             }
             let source = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().clone();
             let source_indices = mesh.indices().cloned();
-            let prepared = prepare_collider(&mesh).unwrap();
+            let prepared = prepare_collider(&mesh, false).unwrap();
 
             assert_eq!(prepared.indices, [0, 1, 2]);
             assert_eq!(
@@ -213,22 +241,22 @@ mod tests {
     fn invalid_mesh_inputs_are_rejected() {
         let mut mesh = triangle();
         mesh.insert_indices(Indices::U32(vec![0, 1, 3]));
-        assert!(prepare_collider(&mesh).is_err());
+        assert!(prepare_collider(&mesh, false).is_err());
         mesh.insert_indices(Indices::U32(vec![0, 1]));
-        assert!(prepare_collider(&mesh).is_err());
+        assert!(prepare_collider(&mesh, false).is_err());
 
         let mut mesh = triangle();
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0_f32, 0.0]; 3]);
-        assert!(prepare_collider(&mesh).is_err());
+        assert!(prepare_collider(&mesh, false).is_err());
 
         let mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::MAIN_WORLD);
-        assert!(prepare_collider(&mesh).is_err());
+        assert!(prepare_collider(&mesh, false).is_err());
 
         let mesh = Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::MAIN_WORLD,
         );
-        assert!(prepare_collider(&mesh).is_err());
+        assert!(prepare_collider(&mesh, false).is_err());
     }
 
     #[test]
@@ -329,6 +357,37 @@ mod tests {
         app.world_mut().entity_mut(entity).insert(Mesh3d(bad));
         app.update();
         assert!(app.world().get::<PreparedCollider>(entity).is_none());
+    }
+
+    #[test]
+    fn skinning_marker_selects_the_source_and_tracks_skinned_mesh_edits() {
+        let mut app = test_app();
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .add(triangle());
+        let entity = spawn_collider(&mut app, handle.clone());
+        app.update();
+        assert!(!prepared(&app, entity).skinned);
+
+        app.world_mut().entity_mut(entity).insert(ComputeSkinning);
+        app.update();
+        assert!(prepared(&app, entity).skinned);
+
+        app.world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .get_mut(handle.id())
+            .unwrap()
+            .insert_indices(Indices::U32(vec![2, 0, 1]));
+        app.update();
+        assert_eq!(prepared(&app, entity).indices, [2, 0, 1]);
+
+        app.world_mut()
+            .entity_mut(entity)
+            .remove::<ComputeSkinning>();
+        app.update();
+        assert!(!prepared(&app, entity).skinned);
+        assert_eq!(prepared(&app, entity).indices, [2, 0, 1]);
     }
 
     #[test]

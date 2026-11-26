@@ -14,12 +14,16 @@ use bevy::{
             },
         },
         renderer::{RenderContext, RenderDevice},
+        sync_world::MainEntity,
     },
 };
 use bytemuck::{Pod, Zeroable};
 use std::num::NonZeroU64;
 
-use crate::solver::{bindings::ContactBindGroupLayout, pipeline::WORKGROUP_SIZE};
+use crate::{
+    compute_skinning::ComputeSkinningResults,
+    solver::{bindings::ContactBindGroupLayout, pipeline::WORKGROUP_SIZE},
+};
 
 use super::{
     PreparedCollider,
@@ -84,11 +88,17 @@ pub(crate) fn init_refit_pipeline(
     });
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum ColliderPose {
+    Rigid(Mat4),
+    Skinned(u64),
+}
+
 struct GeometryBindings {
     vertex_buffer: BufferId,
     refit: BindGroup,
     contact: BindGroup,
-    recorded_pose: Option<Mat4>,
+    recorded_pose: Option<ColliderPose>,
 }
 
 /// Per-collider refit resources and progress, recreated with geometry buffers.
@@ -105,7 +115,7 @@ pub(crate) struct ColliderRefit {
 impl ColliderRefit {
     /// The current vertices and bounds have both been recorded in command order.
     /// Not a GPU completion signal.
-    pub(crate) fn ready(&self) -> Option<(&BindGroup, Mat4)> {
+    pub(crate) fn ready(&self) -> Option<(&BindGroup, ColliderPose)> {
         if !self.current {
             return None;
         }
@@ -198,13 +208,40 @@ impl ColliderRefit {
     }
 }
 
-/// Run after vertex transformation and before any contact queries.
+fn current_vertices<'a>(
+    gpu: &'a GpuCollider,
+    transform: Option<&ColliderTransform>,
+    transformed: Option<&ColliderTransformBindGroup>,
+    skinning: Option<&'a ComputeSkinningResults>,
+    entity: Entity,
+) -> Option<(&'a Buffer, ColliderPose)> {
+    if let Some(rigid) = &gpu.rigid {
+        let transform = transform?.0;
+        if transformed?.recorded_transform != Some(transform) {
+            return None;
+        }
+        return Some((&rigid.world_positions, ColliderPose::Rigid(transform)));
+    }
+
+    let output = skinning?.get(entity)?;
+    if output.vertex_count() != gpu.vertex_count {
+        return None;
+    }
+    Some((
+        output.buffer(),
+        ColliderPose::Skinned(output.pose_version()),
+    ))
+}
+
+/// Run after vertex transformation and compute skinning, before contact queries.
 pub(crate) fn refit_colliders(
     mut context: RenderContext,
     cache: Res<PipelineCache>,
     pipeline: Res<ColliderRefitPipeline>,
     contact_layout: Res<ContactBindGroupLayout>,
+    skinning: Option<Res<ComputeSkinningResults>>,
     mut colliders: Query<(
+        &MainEntity,
         &GpuCollider,
         Option<&ColliderTransform>,
         Option<&ColliderTransformBindGroup>,
@@ -215,18 +252,21 @@ pub(crate) fn refit_colliders(
     let internal = cache.get_compute_pipeline(pipeline.internal);
     let stride = refit_param_stride(context.render_device());
 
-    for (gpu, transform, transformed, mut refit) in &mut colliders {
+    for (entity, gpu, transform, transformed, mut refit) in &mut colliders {
         refit.current = false;
-        let (Some(leaves), Some(internal), Some(transform), Some(transformed)) =
-            (leaves, internal, transform, transformed)
-        else {
+        let (Some(leaves), Some(internal)) = (leaves, internal) else {
             continue;
         };
-        let pose = transform.0;
-        if transformed.recorded_transform != Some(pose) {
+        let Some((positions, pose)) = current_vertices(
+            gpu,
+            transform,
+            transformed,
+            skinning.as_deref(),
+            entity.id(),
+        ) else {
+            // Never query an old pose or the bind pose while skinning is unavailable.
             continue;
-        }
-        let positions = &gpu.world_positions;
+        };
         let refit = refit.as_mut();
         if refit
             .bindings

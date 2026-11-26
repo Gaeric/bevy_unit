@@ -31,7 +31,7 @@ pub(crate) fn extract_collider_transforms(
     mut commands: Commands,
     colliders: Extract<
         Query<
-            (RenderEntity, &GlobalTransform),
+            (RenderEntity, &GlobalTransform, &PreparedCollider),
             (
                 With<PreparedCollider>,
                 Or<(Changed<GlobalTransform>, Changed<PreparedCollider>)>,
@@ -39,7 +39,11 @@ pub(crate) fn extract_collider_transforms(
         >,
     >,
 ) {
-    for (entity, transform) in &colliders {
+    for (entity, transform, prepared) in &colliders {
+        if prepared.skinned {
+            commands.entity(entity).remove::<ColliderTransform>();
+            continue;
+        }
         let matrix = transform.to_matrix();
         if !matrix.is_finite() {
             warn!(?entity, "XPBD collider world transform must be finite");
@@ -105,13 +109,14 @@ pub(crate) fn prepare_transform_bind_groups(
     >,
 ) {
     for (entity, gpu) in &colliders {
+        let Some(rigid) = &gpu.rigid else { continue };
         let bind_group = device.create_bind_group(
             "xpbd collider transform bind group",
             &cache.get_bind_group_layout(&pipeline.layout),
             &BindGroupEntries::sequential((
-                gpu.world_from_local.as_entire_binding(),
-                gpu.local_positions.as_entire_binding(),
-                gpu.world_positions.as_entire_binding(),
+                rigid.world_from_local.as_entire_binding(),
+                rigid.local_positions.as_entire_binding(),
+                rigid.world_positions.as_entire_binding(),
             )),
         );
         commands.entity(entity).insert(ColliderTransformBindGroup {
@@ -139,11 +144,12 @@ pub(crate) fn transform_collider_vertices(
     };
 
     for (gpu, transform, mut binding) in &mut colliders {
+        let Some(rigid) = &gpu.rigid else { continue };
         if binding.recorded_transform == Some(transform.0) {
             continue;
         }
         queue.write_buffer(
-            &gpu.world_from_local,
+            &rigid.world_from_local,
             0,
             bytemuck::bytes_of(&transform.0.to_cols_array_2d()),
         );

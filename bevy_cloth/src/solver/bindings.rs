@@ -102,6 +102,12 @@ impl ContactBindGroupLayout {
         collider: &GpuCollider,
         world_positions: &Buffer,
     ) -> BindGroup {
+        // Normal-only contact never reads the local-position binding. Keep the
+        // same layout for both contact pipelines without a second vertex buffer.
+        let local_positions = collider
+            .rigid
+            .as_ref()
+            .map_or(world_positions, |rigid| &rigid.local_positions);
         device.create_bind_group(
             "xpbd contact collider bind group",
             &cache.get_bind_group_layout(&self.collider),
@@ -111,7 +117,7 @@ impl ContactBindGroupLayout {
                 collider.nodes.as_entire_binding(),
                 collider.triangle_refs.as_entire_binding(),
                 collider.motion.delta_per_tick.as_entire_binding(),
-                collider.local_positions.as_entire_binding(),
+                local_positions.as_entire_binding(),
             )),
         )
     }

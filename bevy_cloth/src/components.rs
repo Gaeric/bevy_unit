@@ -101,10 +101,13 @@ impl Default for ClothStepSettings {
 
 /// Triangle-mesh collider input, placed on the actual Mesh3d entity.
 ///
-/// Add only after the Mesh is loaded and CPU-readable. Replacing Mesh3d prepares
-/// new source geometry, independent of the entity transform. In-place Mesh edits
-/// are not tracked. Failed inputs are not retried; fix the input and re-add this
-/// marker or replace the Mesh handle to prepare again.
+/// Add only after the Mesh is loaded and CPU-readable. Replacing `Mesh3d` prepares
+/// new source geometry. In-place Mesh edits are tracked only with
+/// [`ComputeSkinning`](crate::compute_skinning::ComputeSkinning).
+/// With that marker, contact uses the skinning plugin's world-space output and
+/// is normal-only. Without a current output this collider is skipped.
+/// Failed preparation is not retried; fix the input and re-add this marker or
+/// replace the Mesh handle to prepare again.
 #[derive(Component, Debug)]
 pub struct MeshCollider;
 

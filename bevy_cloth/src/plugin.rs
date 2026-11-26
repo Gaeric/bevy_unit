@@ -1,7 +1,7 @@
 //! Cloth plugin assembly and execution order across Main World and Render World.
 
 use bevy::{
-    asset::embedded_asset,
+    asset::{AssetEventSystems, embedded_asset},
     core_pipeline::schedule::camera_driver,
     prelude::*,
     render::{
@@ -24,6 +24,7 @@ use crate::{
         transform as collider_transform,
     },
     components::{ClothStepSettings, CollisionGroup},
+    compute_skinning::ComputeSkinningSystems,
     output::{self, bindings::ClothOutputBindGroupLayout, pipeline::init_output_pipeline},
     prepare::{self, PreparedCloth},
     solver::{
@@ -76,7 +77,7 @@ impl Plugin for ClothPlugin {
                 PostUpdate,
                 (
                     collision::clear_removed_colliders,
-                    collision::prepare_colliders,
+                    collision::prepare_colliders.after(AssetEventSystems),
                 )
                     .chain(),
             );
@@ -136,7 +137,7 @@ impl Plugin for ClothPlugin {
                 RenderGraph,
                 (
                     collider_transform::transform_collider_vertices,
-                    collider_refit::refit_colliders,
+                    collider_refit::refit_colliders.after(ComputeSkinningSystems),
                     prepare_contact_motion,
                     tick::simulate_cloths,
                     report_self_collision_stats,
