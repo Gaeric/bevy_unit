@@ -14,7 +14,6 @@
 //! - bend_lambdas: `array<f32>`, reset per substep, accumulated across bend iterations.
 //! - tethers: `array<TetherConstraint>`, 16-byte stride, read-only. Tether lambdas
 //!   follow the same lifecycle as bend lambdas.
-//! - attachments: `array<FixedAttachment>`, 16-byte stride; read-only fixed targets.
 //!
 //! Particle, velocity and previous-position arrays share particle indices.
 //! Stretch and lambda arrays share reordered constraint indices.
@@ -89,22 +88,6 @@ pub(crate) struct TetherConstraint {
     pub anchor: u32,
     pub max_distance: f32,
     pub compliance: f32,
-}
-
-/// A fixed attachment holds one particle at a world-space target.
-///
-/// WGSL equivalent:
-/// struct FixedAttachment {
-///     target: vec3<f32>,
-///     particle: u32,
-/// }
-///
-/// Array element stride: 16 bytes.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub(crate) struct FixedAttachment {
-    pub target: [f32; 3],
-    pub particle: u32,
 }
 
 /// Simulation parameters; substep_dt is one substep's duration. Uniform payload: 48 bytes.
@@ -190,10 +173,6 @@ mod tests {
         assert_eq!(offset_of!(TetherConstraint, anchor), 4);
         assert_eq!(offset_of!(TetherConstraint, max_distance), 8);
         assert_eq!(offset_of!(TetherConstraint, compliance), 12);
-
-        assert_eq!(size_of::<FixedAttachment>(), 16);
-        assert_eq!(offset_of!(FixedAttachment, target), 0);
-        assert_eq!(offset_of!(FixedAttachment, particle), 12);
 
         // Velocity and previous-position array elements.
         assert_eq!(size_of::<[f32; 4]>(), 16);

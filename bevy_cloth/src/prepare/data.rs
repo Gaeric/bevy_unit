@@ -5,7 +5,7 @@ use bevy::{
 
 use crate::{
     collision::self_collision::PreparedSelfCollision,
-    solver::layout::{BendConstraint, FixedAttachment, Particle, StretchConstraint, TetherConstraint},
+    solver::layout::{BendConstraint, Particle, StretchConstraint, TetherConstraint},
 };
 
 use super::jacobi::JacobiSchedule;
@@ -62,9 +62,6 @@ pub(crate) struct PreparedCloth {
 
     /// One distance limit per reachable free particle, if LRA was enabled.
     pub tethers: Vec<TetherConstraint>,
-
-    /// Fixed particles and their world-space targets.
-    pub attachments: Vec<FixedAttachment>,
 
     pub schedule: ConstraintSchedule,
 

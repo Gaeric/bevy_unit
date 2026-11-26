@@ -75,6 +75,13 @@ pub struct FixedAttachment {
     pub position: Vec3,
 }
 
+/// A hard pin whose world position will be supplied by a runtime target.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DynamicAttachment {
+    pub particle: u32,
+    pub local_offset: Vec3,
+}
+
 /// Per-cloth simulation settings, read at initialization; runtime edits are not applied.
 /// Gravity is copied into GPU StepParams; substeps and iterations control dispatches.
 #[derive(Component, Clone, Copy, Debug, ExtractComponent)]

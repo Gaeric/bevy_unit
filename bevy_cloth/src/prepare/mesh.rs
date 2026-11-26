@@ -5,8 +5,10 @@ use std::collections::BTreeSet;
 
 use crate::{
     collision::self_collision::PreparedSelfCollision,
-    components::{Cloth, ClothLongRangeAttachments, ClothSelfCollision, ClothSolver},
-    solver::layout::{FixedAttachment as FixedAttachmentData, Particle, StretchConstraint},
+    components::{
+        Cloth, ClothLongRangeAttachments, ClothSelfCollision, ClothSolver, DynamicAttachment,
+    },
+    solver::layout::{Particle, StretchConstraint},
 };
 
 use super::{
@@ -81,24 +83,37 @@ fn validate_inputs<'a>(
         return Err("triangle index is out of range".into());
     }
 
-    // Validate fixed attachment references and targets.
+    Ok((positions, indices))
+}
+
+fn validate_attachments(
+    particle_count: usize,
+    config: &Cloth,
+    dynamic: &[DynamicAttachment],
+) -> Result<BTreeSet<u32>, String> {
     let mut attached_particles = BTreeSet::new();
+    let pins = config
+        .attachments
+        .iter()
+        .map(|pin| (pin.particle, pin.position))
+        .chain(dynamic.iter().map(|pin| (pin.particle, pin.local_offset)));
 
-    for attachment in &config.attachments {
-        if attachment.particle >= particle_count {
-            return Err("attachment particle index is out of range".into());
+    for (particle, position_or_offset) in pins {
+        if particle as usize >= particle_count {
+            return Err(format!("attachment particle {particle} is out of range"));
         }
-
-        if !attachment.position.is_finite() {
-            return Err("attachment target must be finite".into());
+        if !position_or_offset.is_finite() {
+            return Err(format!(
+                "attachment {particle} position or local offset must be finite"
+            ));
         }
-
-        if !attached_particles.insert(attachment.particle) {
-            return Err("a particle has multiple attachment entries".into());
+        if !attached_particles.insert(particle) {
+            return Err(format!(
+                "particle {particle} has multiple attachment entries"
+            ));
         }
     }
-
-    Ok((positions, indices))
+    Ok(attached_particles)
 }
 
 /// Color stretch constraints and arrange them into contiguous color ranges.
@@ -196,11 +211,13 @@ pub(crate) fn prepare_mesh(
     mesh: &Mesh,
     transform: &GlobalTransform,
     config: &Cloth,
+    dynamic: &[DynamicAttachment],
     solver: ClothSolver,
     long_range: Option<ClothLongRangeAttachments>,
     self_collision: Option<ClothSelfCollision>,
 ) -> Result<PreparedCloth, String> {
     let (positions, indices) = validate_inputs(mesh, transform, config)?;
+    let anchors = validate_attachments(positions.len(), config, dynamic)?;
 
     // Preserve source vertex indices and convert positions to world space.
     let inv_mass = config.particle_mass.recip();
@@ -250,12 +267,9 @@ pub(crate) fn prepare_mesh(
     let bend_constraints = prepare_bending(&particles, &indices, config.bend_compliance)?;
 
     let tethers = match long_range {
-        Some(settings) => prepare_tethers(
-            particles.len(),
-            &stretch_constraints,
-            &config.attachments,
-            settings,
-        )?,
+        Some(settings) => {
+            prepare_tethers(particles.len(), &stretch_constraints, &anchors, settings)?
+        }
         None => Vec::new(),
     };
 
@@ -284,20 +298,13 @@ pub(crate) fn prepare_mesh(
         }
     };
 
-    // Fixed targets affect the initial state, not the rest geometry.
-    let mut attachments = Vec::with_capacity(config.attachments.len());
-
+    // Pin targets affect the initial state, not the rest geometry. A dynamic
+    // pin starts at its rest position until a valid target has been sampled.
+    for index in anchors {
+        particles[index as usize].inv_mass = 0.0;
+    }
     for attachment in &config.attachments {
-        let target = attachment.position.to_array();
-        let particle = &mut particles[attachment.particle as usize];
-
-        particle.position = target;
-        particle.inv_mass = 0.0;
-
-        attachments.push(FixedAttachmentData {
-            target,
-            particle: attachment.particle,
-        });
+        particles[attachment.particle as usize].position = attachment.position.to_array();
     }
 
     let (normal_offsets, normal_pairs) = build_normal_adjacency(particles.len(), &indices);
@@ -308,7 +315,6 @@ pub(crate) fn prepare_mesh(
         stretch_constraints,
         bend_constraints,
         tethers,
-        attachments,
         schedule,
         self_collision,
         normal_offsets,
@@ -356,6 +362,7 @@ mod tests {
             &hinge_mesh(),
             &GlobalTransform::IDENTITY,
             &config(),
+            &[],
             ClothSolver::default(),
             None,
             None,
@@ -392,8 +399,16 @@ mod tests {
             particle: 2,
             position: transform.transform_point(Vec3::new(0.0, 1.0, 1.0)),
         });
-        let prepared = prepare_mesh(&mesh, &transform, &config, ClothSolver::ColoredGs, None, None)
-            .unwrap();
+        let prepared = prepare_mesh(
+            &mesh,
+            &transform,
+            &config,
+            &[],
+            ClothSolver::ColoredGs,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(prepared.bend_constraints.len(), 1);
         assert!(prepared.bend_constraints[0].rest_angle.abs() < 1e-6);
         assert_eq!(prepared.bend_constraints[0].compliance, 0.125);
@@ -423,7 +438,16 @@ mod tests {
             position: Vec3::new(0.0, 1.0, 1.0),
         });
         let prepare = |solver| {
-            prepare_mesh(&mesh, &GlobalTransform::IDENTITY, &config, solver, None, None).unwrap()
+            prepare_mesh(
+                &mesh,
+                &GlobalTransform::IDENTITY,
+                &config,
+                &[],
+                solver,
+                None,
+                None,
+            )
+            .unwrap()
         };
         let gs = prepare(ClothSolver::ColoredGs);
         let jacobi = prepare(ClothSolver::Jacobi);
@@ -468,6 +492,7 @@ mod tests {
                 &mesh,
                 &GlobalTransform::IDENTITY,
                 &config,
+                &[],
                 solver,
                 long_range,
                 None,
@@ -500,6 +525,72 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_pin_is_a_hard_anchor_for_both_solvers() {
+        let mesh = hinge_mesh();
+        let mut config = config();
+        config.attachments.push(FixedAttachment {
+            particle: 3,
+            position: Vec3::new(0.0, -1.0, 5.0),
+        });
+        let pins = [DynamicAttachment {
+            particle: 2,
+            local_offset: Vec3::Z * 100.0,
+        }];
+
+        for solver in [ClothSolver::ColoredGs, ClothSolver::Jacobi] {
+            let prepared = prepare_mesh(
+                &mesh,
+                &GlobalTransform::IDENTITY,
+                &config,
+                &pins,
+                solver,
+                Some(ClothLongRangeAttachments { compliance: 0.0 }),
+                None,
+            )
+            .unwrap();
+            assert_eq!(prepared.particles[2].inv_mass, 0.0);
+            assert_eq!(prepared.particles[2].position, Vec3::Y.to_array());
+            assert_eq!(prepared.particles[3].inv_mass, 0.0);
+            assert_eq!(prepared.particles[0].inv_mass, 1.0);
+            assert_eq!(prepared.particles[1].inv_mass, 1.0);
+            assert!(prepared.bend_constraints[0].rest_angle.abs() < 1e-6);
+            let paths: Vec<_> = prepared
+                .tethers
+                .iter()
+                .map(|tether| (tether.particle, tether.anchor, tether.max_distance))
+                .collect();
+            // Both paths tie in the rest mesh, so the lower (dynamic) anchor wins.
+            assert_eq!(paths, [(0, 2, 1.0), (1, 2, 2.0_f32.sqrt())]);
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_dynamic_pins() {
+        let mut config = config();
+        config.attachments.push(FixedAttachment {
+            particle: 0,
+            position: Vec3::ZERO,
+        });
+        let pin = DynamicAttachment {
+            particle: 1,
+            local_offset: Vec3::X,
+        };
+        let validate =
+            |pins: &[DynamicAttachment]| validate_attachments(4, &config, pins).unwrap_err();
+
+        assert!(validate(&[DynamicAttachment { particle: 4, ..pin }]).contains("out of range"));
+        assert!(
+            validate(&[DynamicAttachment {
+                local_offset: Vec3::NAN,
+                ..pin
+            }])
+            .contains("finite")
+        );
+        assert!(validate(&[DynamicAttachment { particle: 0, ..pin }]).contains("multiple"));
+        assert!(validate(&[pin, pin]).contains("multiple"));
+    }
+
+    #[test]
     fn invalid_bend_compliance_is_rejected() {
         let mesh = hinge_mesh();
         for compliance in [-1.0, f32::NAN, f32::INFINITY] {
@@ -509,6 +600,7 @@ mod tests {
                 &mesh,
                 &GlobalTransform::IDENTITY,
                 &config,
+                &[],
                 ClothSolver::default(),
                 None,
                 None,

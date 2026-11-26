@@ -2,11 +2,11 @@
 
 use std::{
     cmp::{Ordering, Reverse},
-    collections::BinaryHeap,
+    collections::{BTreeSet, BinaryHeap},
 };
 
 use crate::{
-    components::{ClothLongRangeAttachments, FixedAttachment},
+    components::ClothLongRangeAttachments,
     solver::layout::{StretchConstraint, TetherConstraint},
 };
 
@@ -36,13 +36,13 @@ impl PartialOrd for AnchorPath {
 pub(super) fn prepare_tethers(
     particle_count: usize,
     stretch: &[StretchConstraint],
-    attachments: &[FixedAttachment],
+    anchors: &BTreeSet<u32>,
     settings: ClothLongRangeAttachments,
 ) -> Result<Vec<TetherConstraint>, String> {
     if !settings.compliance.is_finite() || settings.compliance < 0.0 {
         return Err("long-range attachment compliance must be nonnegative and finite".into());
     }
-    if attachments.is_empty() {
+    if anchors.is_empty() {
         return Ok(Vec::new());
     }
 
@@ -58,13 +58,12 @@ pub(super) fn prepare_tethers(
         neighbors[b as usize].push((a, length));
     }
 
-    // Multi-source Dijkstra: seed all fixed vertices, then grow the shortest
+    // Multi-source Dijkstra: seed all pinned vertices, then grow the shortest
     // paths together. Unreached vertices never receive a distance constraint.
     let mut fixed = vec![false; particle_count];
     let mut nearest = vec![None; particle_count];
     let mut queue = BinaryHeap::new();
-    for attachment in attachments {
-        let anchor = attachment.particle;
+    for &anchor in anchors {
         let path = AnchorPath {
             distance: 0.0,
             anchor,
@@ -113,7 +112,6 @@ pub(super) fn prepare_tethers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::prelude::Vec3;
 
     #[test]
     fn picks_the_shortest_rest_path_and_leaves_unanchored_components_alone() {
@@ -133,10 +131,7 @@ mod tests {
             rest_length,
             compliance: 0.0,
         });
-        let anchors = [4, 0].map(|particle| FixedAttachment {
-            particle,
-            position: Vec3::ZERO,
-        });
+        let anchors = BTreeSet::from([4, 0]);
         let tethers = prepare_tethers(
             9,
             &edges,
