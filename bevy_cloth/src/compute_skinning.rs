@@ -1,7 +1,7 @@
 //! Standalone GPU skinning of explicitly marked mesh instances.
 
 use bevy::{
-    asset::{embedded_asset, load_embedded_asset},
+    asset::{AssetId, embedded_asset, load_embedded_asset, prelude::AssetChanged},
     ecs::entity::EntityHashMap,
     mesh::{
         VertexAttributeValues,
@@ -16,7 +16,7 @@ use bevy::{
             ComputePassDescriptor, ComputePipelineDescriptor, PipelineCache, ShaderStages,
             binding_types::{storage_buffer_read_only_sized, storage_buffer_sized},
         },
-        renderer::{RenderContext, RenderDevice, RenderGraph, RenderGraphSystems},
+        renderer::{RenderContext, RenderDevice, RenderGraph, RenderGraphSystems, RenderQueue},
     },
 };
 use bytemuck::{Pod, Zeroable};
@@ -65,13 +65,18 @@ impl Plugin for ComputeSkinningPlugin {
 #[derive(Resource, Default)]
 pub struct ComputeSkinningResults {
     skins: EntityHashMap<Skin>,
+    last_version: u64,
 }
 
 impl ComputeSkinningResults {
-    /// Returns the output for the current extraction once its dispatch has been recorded.
+    /// Returns the output for the current extracted pose once its dispatch has been recorded.
     /// This does not wait for GPU completion. Consumers must order their GPU commands after it.
     pub fn get(&self, entity: Entity) -> Option<&SkinnedPositions> {
-        self.skins.get(&entity)?.output.as_ref()
+        let skin = self.skins.get(&entity)?;
+        if skin.pose.as_ref().ok()?.is_none() || skin.dirty {
+            return None;
+        }
+        Some(&skin.gpu.as_ref()?.as_ref().ok()?.output)
     }
 }
 
@@ -80,16 +85,23 @@ impl ComputeSkinningResults {
 pub struct SkinnedPositions {
     buffer: Buffer,
     vertex_count: u32,
+    pose_version: u64,
 }
 
 impl SkinnedPositions {
-    /// Bind as read-only storage. The allocation is recreated on each dispatch.
+    /// Bind as read-only storage. If caching a bind group, check `Buffer::id()`
+    /// because changes to the source mesh or device can replace the allocation.
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
     }
 
     pub fn vertex_count(&self) -> u32 {
         self.vertex_count
+    }
+
+    /// Changes when a new result is recorded. This is not a simulation tick.
+    pub fn pose_version(&self) -> u64 {
+        self.pose_version
     }
 }
 
@@ -102,49 +114,68 @@ struct SkinVertex {
 }
 
 struct Skin {
-    vertices: Vec<SkinVertex>,
-    pose: Vec<JointMatrix>,
-    output: Option<SkinnedPositions>,
+    mesh_id: AssetId<Mesh>,
+    vertices: Result<Vec<SkinVertex>, &'static str>,
+    pose: Result<Option<Vec<JointMatrix>>, &'static str>,
+    dirty: bool,
+    gpu: Option<Result<GpuSkin, &'static str>>,
+}
+
+struct GpuSkin {
+    palette: Buffer,
+    bind_group: BindGroup,
+    output: SkinnedPositions,
 }
 
 fn extract_skins(
-    skins: Extract<Query<(Entity, &Mesh3d, &SkinnedMesh), With<ComputeSkinning>>>,
+    skins: Extract<Query<(Entity, &Mesh3d, Ref<SkinnedMesh>), With<ComputeSkinning>>>,
+    changed_meshes: Extract<Query<(), AssetChanged<Mesh3d>>>,
     meshes: Extract<Res<Assets<Mesh>>>,
     bindposes: Extract<Res<Assets<SkinnedMeshInverseBindposes>>>,
     transforms: Extract<Query<&GlobalTransform>>,
     mut results: ResMut<ComputeSkinningResults>,
 ) {
-    // No result from the previous frame is valid for the new extraction.
-    results.skins.clear();
+    results.skins.retain(|entity, _| skins.contains(*entity));
     for (entity, mesh_handle, skin) in &skins {
-        let (Some(mesh), Some(inverse)) = (
-            meshes.get(mesh_handle.id()),
-            bindposes.get(&skin.inverse_bindposes),
-        ) else {
+        let mesh_id = mesh_handle.id();
+        let Some(mesh) = meshes.get(mesh_id) else {
+            results.skins.remove(&entity);
             continue;
         };
-        let vertices = match skin_vertices(mesh, skin.joints.len()) {
-            Ok(vertices) => vertices,
-            Err(error) => {
+        let entry = results.skins.entry(entity).or_insert_with(|| Skin {
+            mesh_id,
+            vertices: Ok(Vec::new()),
+            pose: Ok(None),
+            dirty: true,
+            gpu: None,
+        });
+        if matches!(&entry.vertices, Ok(vertices) if vertices.is_empty())
+            || entry.mesh_id != mesh_id
+            || skin.is_changed()
+            || changed_meshes.contains(entity)
+        {
+            entry.mesh_id = mesh_id;
+            entry.vertices = skin_vertices(mesh, skin.joints.len());
+            entry.gpu = None;
+            entry.dirty = true;
+            if let Err(error) = entry.vertices {
                 warn!(?entity, %error, "cannot prepare compute skinning vertices");
-                continue;
             }
-        };
-        let pose = match joint_matrices(skin, inverse, &transforms) {
-            Ok(pose) => pose,
-            Err(error) => {
+        }
+        if entry.vertices.is_err() {
+            continue;
+        }
+        let pose = bindposes
+            .get(&skin.inverse_bindposes)
+            .map(|inverse| joint_matrices(&skin, inverse, &transforms))
+            .transpose();
+        if entry.pose != pose {
+            if let Err(error) = pose {
                 warn!(?entity, %error, "cannot extract compute skinning pose");
-                continue;
             }
-        };
-        results.skins.insert(
-            entity,
-            Skin {
-                vertices,
-                pose,
-                output: None,
-            },
-        );
+            entry.pose = pose;
+            entry.dirty = true;
+        }
     }
 }
 
@@ -237,7 +268,8 @@ fn init_pipeline(
     mut results: ResMut<ComputeSkinningResults>,
 ) {
     for skin in results.skins.values_mut() {
-        skin.output = None;
+        skin.gpu = None;
+        skin.dirty = true;
     }
     let limits = device.limits();
     if limits.max_storage_buffers_per_shader_stage < 3
@@ -275,22 +307,17 @@ fn init_pipeline(
     commands.insert_resource(SkinningPipeline { layout, pipeline });
 }
 
-struct GpuSkin {
-    bind_group: BindGroup,
-    output: SkinnedPositions,
-}
-
 impl GpuSkin {
     fn new(
         device: &RenderDevice,
         cache: &PipelineCache,
         pipeline: &SkinningPipeline,
         vertices: &[SkinVertex],
-        pose: &[JointMatrix],
+        joint_count: usize,
     ) -> Result<Self, &'static str> {
         let vertex_count = u32::try_from(vertices.len()).map_err(|_| "too many vertices")?;
         let position_bytes = u64::from(vertex_count) * 16;
-        let palette_bytes = size_of_val(pose) as u64;
+        let palette_bytes = (joint_count * size_of::<JointMatrix>()) as u64;
         let limits = device.limits();
         let max_storage_size = limits
             .max_buffer_size
@@ -309,10 +336,11 @@ impl GpuSkin {
             contents: bytemuck::cast_slice(vertices),
             usage: BufferUsages::STORAGE,
         });
-        let palette = device.create_buffer_with_data(&BufferInitDescriptor {
+        let palette = device.create_buffer(&BufferDescriptor {
             label: Some("compute skinning joint matrices"),
-            contents: bytemuck::cast_slice(pose),
-            usage: BufferUsages::STORAGE,
+            size: palette_bytes,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
         let buffer = device.create_buffer(&BufferDescriptor {
             label: Some("compute skinning world-space positions"),
@@ -330,10 +358,12 @@ impl GpuSkin {
             )),
         );
         Ok(Self {
+            palette,
             bind_group,
             output: SkinnedPositions {
                 buffer,
                 vertex_count,
+                pose_version: 0,
             },
         })
     }
@@ -341,6 +371,7 @@ impl GpuSkin {
 
 fn dispatch_skinning(
     mut context: RenderContext,
+    queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
     pipeline: Option<Res<SkinningPipeline>>,
     mut results: ResMut<ComputeSkinningResults>,
@@ -349,20 +380,32 @@ fn dispatch_skinning(
     let Some(compute_pipeline) = cache.get_compute_pipeline(pipeline.pipeline) else {
         return;
     };
-    for (&entity, skin) in &mut results.skins {
-        let gpu = match GpuSkin::new(
-            context.render_device(),
-            &cache,
-            &pipeline,
-            &skin.vertices,
-            &skin.pose,
-        ) {
-            Ok(gpu) => gpu,
-            Err(error) => {
-                warn!(?entity, %error, "cannot allocate compute skinning buffers");
-                continue;
-            }
+    let ComputeSkinningResults {
+        skins,
+        last_version,
+    } = results.as_mut();
+    for (&entity, skin) in skins {
+        if !skin.dirty {
+            continue;
+        }
+        let (Ok(vertices), Ok(Some(pose))) = (&skin.vertices, &skin.pose) else {
+            continue;
         };
+        let gpu = skin.gpu.get_or_insert_with(|| {
+            let gpu = GpuSkin::new(
+                context.render_device(),
+                &cache,
+                &pipeline,
+                vertices,
+                pose.len(),
+            );
+            if let Err(error) = gpu {
+                warn!(?entity, %error, "cannot allocate compute skinning buffers");
+            }
+            gpu
+        });
+        let Ok(gpu) = gpu else { continue };
+        queue.write_buffer(&gpu.palette, 0, bytemuck::cast_slice(pose));
         let mut pass = context
             .command_encoder()
             .begin_compute_pass(&ComputePassDescriptor {
@@ -372,6 +415,8 @@ fn dispatch_skinning(
         pass.set_pipeline(compute_pipeline);
         pass.set_bind_group(0, &gpu.bind_group, &[]);
         pass.dispatch_workgroups(gpu.output.vertex_count.div_ceil(WORKGROUP_SIZE), 1, 1);
-        skin.output = Some(gpu.output);
+        *last_version += 1;
+        gpu.output.pose_version = *last_version;
+        skin.dirty = false;
     }
 }
