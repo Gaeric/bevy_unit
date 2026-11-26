@@ -75,10 +75,21 @@ pub struct FixedAttachment {
     pub position: Vec3,
 }
 
-/// A hard pin whose world position will be supplied by a runtime target.
+/// Opt-in hard pins driven by target entities. Add alongside [`Cloth`].
+/// The list is read at initialization; later edits do not rebuild the pins.
+#[derive(Component, Debug, Default)]
+pub struct ClothDynamicAttachments(pub Vec<DynamicAttachment>);
+
+/// A particle pinned to a point in a target entity's local space.
+///
+/// The target can be a bone or any entity with a `GlobalTransform`. If its
+/// world point is unavailable or non-finite, the pin keeps its last valid
+/// position (or its world-space rest position if no target has been sampled).
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DynamicAttachment {
+pub struct DynamicAttachment {
+    /// Index into the source mesh's POSITION attribute. Must not also be pinned elsewhere.
     pub particle: u32,
+    pub target: Entity,
     pub local_offset: Vec3,
 }
 

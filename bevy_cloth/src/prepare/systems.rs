@@ -2,10 +2,13 @@ use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
 use crate::{
     components::{
-        Cloth, ClothExternalFriction, ClothLongRangeAttachments, ClothSelfCollision, ClothSolver,
-        ClothStepSettings,
+        Cloth, ClothDynamicAttachments, ClothExternalFriction, ClothLongRangeAttachments,
+        ClothSelfCollision, ClothSolver, ClothStepSettings,
     },
-    prepare::ConstraintSchedule,
+    prepare::{
+        ConstraintSchedule,
+        attachments::{AttachmentTargets, PreparedDynamicPins},
+    },
     solver::layout::StepParams,
 };
 
@@ -15,6 +18,7 @@ pub(crate) fn prepare_added_cloths(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
     time: Res<Time<Fixed>>,
+    transforms: Query<&GlobalTransform>,
     cloths: Query<
         (
             Entity,
@@ -23,6 +27,7 @@ pub(crate) fn prepare_added_cloths(
             &Cloth,
             &ClothStepSettings,
             &ClothSolver,
+            Option<&ClothDynamicAttachments>,
             Option<&ClothLongRangeAttachments>,
             Option<&ClothExternalFriction>,
             Option<&ClothSelfCollision>,
@@ -31,7 +36,16 @@ pub(crate) fn prepare_added_cloths(
     >,
 ) {
     for (
-        entity, mesh_handle, transform, config, settings, solver, long_range, friction, self_collision,
+        entity,
+        mesh_handle,
+        transform,
+        config,
+        settings,
+        solver,
+        dynamic,
+        long_range,
+        friction,
+        self_collision,
     ) in &cloths
     {
         if !settings.gravity.is_finite() || settings.substeps == 0 || settings.iterations == 0 {
@@ -47,14 +61,18 @@ pub(crate) fn prepare_added_cloths(
             .expect("adding Cloth requires a loaded Mesh");
         let external_friction = friction.map_or(0.0, |friction| friction.coefficient);
         if !external_friction.is_finite() || external_friction < 0.0 {
-            warn!(?entity, "Cloth external friction must be finite and nonnegative");
+            warn!(
+                ?entity,
+                "Cloth external friction must be finite and nonnegative"
+            );
             continue;
         }
-        let prepared = match super::mesh::prepare_mesh(
+        let pins = dynamic.map_or(&[][..], |attachments| attachments.0.as_slice());
+        let mut prepared = match super::mesh::prepare_mesh(
             mesh,
             transform,
             config,
-            &[],
+            pins,
             *solver,
             long_range.copied(),
             self_collision.copied(),
@@ -90,6 +108,7 @@ pub(crate) fn prepare_added_cloths(
             bend = prepared.bend_constraints.len(),
             bend_colors,
             fixed = config.attachments.len(),
+            dynamic = pins.len(),
             tethers = prepared.tethers.len(),
             external_friction,
             self_collision = prepared.self_collision.is_some(),
@@ -99,8 +118,13 @@ pub(crate) fn prepare_added_cloths(
         );
 
         // GPU deformation does not update the mesh's CPU-side bounds.
-        commands
-            .entity(entity)
-            .insert((prepared, step_params, NoFrustumCulling));
+        let mut entity_commands = commands.entity(entity);
+        if pins.is_empty() {
+            entity_commands.remove::<(PreparedDynamicPins, AttachmentTargets)>();
+        } else {
+            let targets = AttachmentTargets::initialize(&mut prepared, pins, &transforms);
+            entity_commands.insert((PreparedDynamicPins(pins.to_vec()), targets));
+        }
+        entity_commands.insert((prepared, step_params, NoFrustumCulling));
     }
 }

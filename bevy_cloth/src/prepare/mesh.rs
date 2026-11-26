@@ -534,6 +534,7 @@ mod tests {
         });
         let pins = [DynamicAttachment {
             particle: 2,
+            target: Entity::PLACEHOLDER,
             local_offset: Vec3::Z * 100.0,
         }];
 
@@ -573,6 +574,7 @@ mod tests {
         });
         let pin = DynamicAttachment {
             particle: 1,
+            target: Entity::PLACEHOLDER,
             local_offset: Vec3::X,
         };
         let validate =

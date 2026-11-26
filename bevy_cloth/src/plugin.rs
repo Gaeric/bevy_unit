@@ -73,7 +73,11 @@ impl Plugin for ClothPlugin {
             .add_systems(FixedUpdate, tick::request_tick)
             .add_systems(
                 PostUpdate,
-                prepare::prepare_added_cloths.after(TransformSystems::Propagate),
+                (
+                    prepare::prepare_added_cloths,
+                    pin_targets::update_attachment_targets,
+                )
+                    .after(TransformSystems::Propagate),
             )
             .add_systems(
                 PostUpdate,
