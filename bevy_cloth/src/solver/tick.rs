@@ -24,6 +24,7 @@ use crate::{
 };
 
 use super::{
+    attachments::{AttachmentPipeline, GpuAttachments},
     bindings::{ClothContactBindGroup, ClothIntegrationBindGroup},
     gpu::{ClothBuffers, constraint_range_param_stride},
     jacobi::{JacobiPipelines, JacobiSweep},
@@ -169,6 +170,7 @@ pub(crate) fn simulate_cloths(
     contact_motion: Res<ContactMotionBatch>,
     cache: Res<PipelineCache>,
     integration_pipelines: Res<ClothIntegrationPipelines>,
+    attachment_pipeline: Res<AttachmentPipeline>,
     colored_gs_pipelines: Res<ColoredGsPipelines>,
     jacobi_pipelines: Res<JacobiPipelines>,
     contact_pipeline: Res<ClothContactPipeline>,
@@ -186,6 +188,7 @@ pub(crate) fn simulate_cloths(
         &ClothStepSettings,
         Option<&CollisionGroup>,
         Option<&SelfCollision>,
+        Option<&GpuAttachments>,
         &mut ClothSimulation,
     )>,
 ) {
@@ -209,6 +212,7 @@ pub(crate) fn simulate_cloths(
     };
 
     let range_param_stride = constraint_range_param_stride(context.render_device());
+    let apply_attachments = cache.get_compute_pipeline(attachment_pipeline.apply);
     let solve_stretch = cache.get_compute_pipeline(colored_gs_pipelines.solve_stretch);
     let solve_bending = cache.get_compute_pipeline(colored_gs_pipelines.solve_bending);
     let solve_tethers = cache.get_compute_pipeline(colored_gs_pipelines.solve_tethers);
@@ -224,9 +228,13 @@ pub(crate) fn simulate_cloths(
         settings,
         collision_group,
         self_collision,
+        attachments,
         mut simulation,
     ) in &mut cloths
     {
+        if attachments.is_some() && apply_attachments.is_none() {
+            continue;
+        }
         let self_contact = match self_collision {
             Some(collision) => {
                 let Some(step) = collision.ready(&cache, &self_collision_pipeline) else {
@@ -315,6 +323,11 @@ pub(crate) fn simulate_cloths(
         };
 
         while tick_cursor < ticks.requested {
+            // Catch-up ticks share this frame's sampled targets. Apply them before
+            // any contact or prediction so constraints see the new anchors.
+            if let (Some(pins), Some(pipeline)) = (attachments, apply_attachments) {
+                pins.record(&mut context, pipeline);
+            }
             if !collider_bindings.is_empty() {
                 let mut pass =
                     context

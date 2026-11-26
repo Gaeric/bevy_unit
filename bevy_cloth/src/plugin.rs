@@ -26,9 +26,9 @@ use crate::{
     components::{ClothStepSettings, CollisionGroup},
     compute_skinning::ComputeSkinningSystems,
     output::{self, bindings::ClothOutputBindGroupLayout, pipeline::init_output_pipeline},
-    prepare::{self, PreparedCloth},
+    prepare::{self, PreparedCloth, attachments as pin_targets},
     solver::{
-        bindings,
+        attachments as gpu_pins, bindings,
         jacobi::{JacobiLayouts, init_jacobi_pipelines},
         layout::StepParams,
         pipeline,
@@ -43,6 +43,7 @@ pub struct ClothPlugin;
 impl Plugin for ClothPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "solver/layout.wesl");
+        embedded_asset!(app, "solver/attachments.wesl");
         embedded_asset!(app, "solver/integration.wesl");
         embedded_asset!(app, "solver/stretch.wesl");
         embedded_asset!(app, "solver/contact.wesl");
@@ -65,6 +66,7 @@ impl Plugin for ClothPlugin {
                 ExtractComponentPlugin::<CollisionGroup>::default(),
                 ExtractResourcePlugin::<ClothTicks>::default(),
                 ExtractComponentPlugin::<PreparedCloth>::default(),
+                ExtractComponentPlugin::<pin_targets::AttachmentTargets>::default(),
                 ExtractComponentPlugin::<StepParams>::default(),
                 ExtractComponentPlugin::<ClothStepSettings>::default(),
             ))
@@ -110,6 +112,7 @@ impl Plugin for ClothPlugin {
                 RenderStartup,
                 (
                     pipeline::init_integration_pipelines,
+                    gpu_pins::init_attachment_pipeline,
                     pipeline::init_colored_gs_pipelines,
                     init_jacobi_pipelines,
                     init_output_pipeline,
@@ -123,6 +126,7 @@ impl Plugin for ClothPlugin {
                 Render,
                 (
                     upload::upload_cloths,
+                    gpu_pins::upload_attachment_targets,
                     collider_gpu::upload_colliders,
                     collider_transform::prepare_transform_bind_groups,
                     collider_refit::prepare_refits,

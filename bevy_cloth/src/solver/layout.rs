@@ -14,6 +14,7 @@
 //! - bend_lambdas: `array<f32>`, reset per substep, accumulated across bend iterations.
 //! - tethers: `array<TetherConstraint>`, 16-byte stride, read-only. Tether lambdas
 //!   follow the same lifecycle as bend lambdas.
+//! - dynamic_pin_targets: `array<AttachmentTarget>`, 16-byte stride; read-only world points.
 //!
 //! Particle, velocity and previous-position arrays share particle indices.
 //! Stretch and lambda arrays share reordered constraint indices.
@@ -88,6 +89,15 @@ pub(crate) struct TetherConstraint {
     pub anchor: u32,
     pub max_distance: f32,
     pub compliance: f32,
+}
+
+/// One sampled dynamic pin's world position and destination particle.
+/// Matches `AttachmentTarget` in attachments.wesl (16-byte stride).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
+pub(crate) struct AttachmentTarget {
+    pub position: [f32; 3],
+    pub particle: u32,
 }
 
 /// Simulation parameters; substep_dt is one substep's duration. Uniform payload: 48 bytes.
@@ -173,6 +183,10 @@ mod tests {
         assert_eq!(offset_of!(TetherConstraint, anchor), 4);
         assert_eq!(offset_of!(TetherConstraint, max_distance), 8);
         assert_eq!(offset_of!(TetherConstraint, compliance), 12);
+
+        assert_eq!(size_of::<AttachmentTarget>(), 16);
+        assert_eq!(offset_of!(AttachmentTarget, position), 0);
+        assert_eq!(offset_of!(AttachmentTarget, particle), 12);
 
         // Velocity and previous-position array elements.
         assert_eq!(size_of::<[f32; 4]>(), 16);

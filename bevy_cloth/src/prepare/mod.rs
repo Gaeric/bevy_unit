@@ -1,3 +1,4 @@
+pub(crate) mod attachments;
 mod bending;
 mod data;
 mod jacobi;

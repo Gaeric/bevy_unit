@@ -7,10 +7,11 @@ use bevy::{
 
 use crate::{
     collision::self_collision::{SelfCollision, SelfCollisionPipeline},
-    prepare::{ConstraintSchedule, PreparedCloth},
+    prepare::{ConstraintSchedule, PreparedCloth, attachments::AttachmentTargets},
 };
 
 use super::{
+    attachments::{AttachmentPipeline, GpuAttachments},
     bindings::{
         ClothBendBindGroupLayout, ClothIntegrationBindGroupLayout, ClothStretchBindGroupLayout,
         ClothTetherBindGroupLayout, ColoredGsBindGroups, ContactBindGroupLayout,
@@ -38,10 +39,35 @@ pub(crate) fn upload_cloths(
     tether_layout: Res<ClothTetherBindGroupLayout>,
     jacobi_layouts: Res<JacobiLayouts>,
     self_collision_pipeline: Res<SelfCollisionPipeline>,
-    cloths: Query<(Entity, &PreparedCloth, &StepParams), Added<PreparedCloth>>,
+    attachment_pipeline: Res<AttachmentPipeline>,
+    cloths: Query<
+        (
+            Entity,
+            &PreparedCloth,
+            &StepParams,
+            Option<&AttachmentTargets>,
+        ),
+        Added<PreparedCloth>,
+    >,
 ) {
-    for (entity, prepared, step_params) in &cloths {
+    for (entity, prepared, step_params, targets) in &cloths {
         let cloth_buffers = ClothBuffers::new(&device, prepared, step_params);
+        let gpu_attachments = match targets {
+            Some(targets) => match GpuAttachments::new(
+                &device,
+                &cache,
+                &attachment_pipeline,
+                &cloth_buffers,
+                targets,
+            ) {
+                Ok(gpu) => Some(gpu),
+                Err(error) => {
+                    warn!(?entity, %error, "XPBD cloth GPU pin preparation failed");
+                    continue;
+                }
+            },
+            None => None,
+        };
         let self_collision = match &prepared.self_collision {
             Some(data) => match SelfCollision::new(
                 &device,
@@ -99,6 +125,11 @@ pub(crate) fn upload_cloths(
             contact_bind_group,
             ClothSimulation::default(),
         ));
+        if let Some(gpu_attachments) = gpu_attachments {
+            entity_commands.insert(gpu_attachments);
+        } else {
+            entity_commands.remove::<GpuAttachments>();
+        }
         if let Some(self_collision) = self_collision {
             entity_commands.insert(self_collision);
         } else {
