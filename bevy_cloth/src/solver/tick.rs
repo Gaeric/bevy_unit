@@ -193,14 +193,7 @@ pub(crate) fn simulate_cloths(
     )>,
 ) {
     // Check compilation once at the entry; transform/refit commands precede this system.
-    let (
-        Some(_),
-        Some(_),
-        Some(_),
-        Some(predict),
-        Some(stabilize),
-        Some(update_velocity),
-    ) = (
+    let (Some(_), Some(_), Some(_), Some(predict), Some(stabilize), Some(update_velocity)) = (
         cache.get_compute_pipeline(transform_pipeline.transform_vertices),
         cache.get_compute_pipeline(refit_pipeline.leaves),
         cache.get_compute_pipeline(refit_pipeline.internal),

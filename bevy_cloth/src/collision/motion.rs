@@ -107,14 +107,14 @@ mod tests {
     #[test]
     fn apportioned_rotation_and_translation_follow_the_same_barycentric_point() {
         let previous = Mat4::from_translation(Vec3::new(-1.0, 0.0, 2.0));
-        let current = Mat4::from_rotation_translation(
-            Quat::from_rotation_z(0.7),
-            Vec3::new(1.0, 3.0, -2.0),
-        );
+        let current =
+            Mat4::from_rotation_translation(Quat::from_rotation_z(0.7), Vec3::new(1.0, 3.0, -2.0));
         let triangle = [Vec3::ZERO, Vec3::X, Vec3::Y];
         let weights = [0.2, 0.3, 0.5];
         let sample = |pose: Mat4| {
-            triangle.into_iter().zip(weights)
+            triangle
+                .into_iter()
+                .zip(weights)
                 .map(|(point, weight)| pose.transform_point3(point) * weight)
                 .sum::<Vec3>()
         };

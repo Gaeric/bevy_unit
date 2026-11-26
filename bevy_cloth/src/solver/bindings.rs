@@ -57,7 +57,10 @@ impl ContactBindGroupLayout {
                                 NonZeroU64::new(size_of::<Particle>() as u64),
                             ),
                         ),
-                        (2, storage_buffer_read_only_sized(false, NonZeroU64::new(16))),
+                        (
+                            2,
+                            storage_buffer_read_only_sized(false, NonZeroU64::new(16)),
+                        ),
                     ),
                 ),
             ),
@@ -194,7 +197,10 @@ impl ClothTetherBindGroupLayout {
                 &BindGroupLayoutEntries::sequential(
                     ShaderStages::COMPUTE,
                     (
-                        uniform_buffer_sized(false, NonZeroU64::new(size_of::<StepParams>() as u64)),
+                        uniform_buffer_sized(
+                            false,
+                            NonZeroU64::new(size_of::<StepParams>() as u64),
+                        ),
                         storage_buffer_sized(false, NonZeroU64::new(size_of::<Particle>() as u64)),
                         storage_buffer_read_only_sized(
                             false,
