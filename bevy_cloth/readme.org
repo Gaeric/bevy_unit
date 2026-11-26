@@ -63,6 +63,15 @@
   #+end_src
   示例的第二个 compute pass 直接绑定输出，核对根节点不动、子骨骼旋转前后的三个顶点，
   以及未改姿态时版本不变。成功时打印 =Compute skinning GPU direct-read probe passed=。
+** 作为 XPBD 碰撞体
+  同时注册 =ComputeSkinningPlugin= 和 =ClothPlugin=，在实际的 =Mesh3d + SkinnedMesh= 实体上加
+  =MeshCollider + ComputeSkinning=。BVH refit 和接触查询直接绑定同一份 GPU 蒙皮输出；没有结果时跳过该碰撞体。
+  蒙皮接触只做法向响应；刚体碰撞及其摩擦不变。同一渲染帧中的多个固定 tick 共用这次提取的姿态，不做插值。
+  #+begin_src bash
+    cargo run -j 2 -p bevy_cloth --example xpbd-skinned-collider
+  #+end_src
+  无窗口示例仅转动子骨骼，检查同一帧新位置的布料顶点从 =z=0.02= 推到 =z=0.10=，旧位置保持 =z=0.02=。
+  成功时打印 =XPBD skinned collider probe passed=。
 * Record for AI
   - 本文件：项目入口、代码现状和运行方式。
   - [[file:plan.org][plan.org]]：协作约定、当前问题和下一步；不把所有未来功能都展开成任务。
