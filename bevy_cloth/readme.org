@@ -27,8 +27,8 @@
 
   拉伸和弯曲是基础约束。长距离约束（LRA）默认关闭，可在添加 =Cloth= 时同时添加
   =ClothLongRangeAttachments { compliance: 0.0 }=；零表示刚性距离上限。
-  每个能沿原网格边到达挂点的自由粒子至多生成一条约束，上限取固定目标应用前的最短静止路径长度。
-  运行时用当前位置到固定挂点的直线距离求解。它只约束拉长，不替代固定挂点，也不焊接接缝。
+  每个能沿原网格边到达挂点的自由粒子至多生成一条约束，上限取挂点目标应用前的最短静止路径长度。
+  运行时用当前位置到挂点当前坐标的直线距离求解。它只约束拉长，不替代硬挂点，也不焊接接缝。
   零柔度不表示有限轮迭代后所有约束都能同时精确满足。
 
   外部摩擦与自碰撞也默认关闭；在添加 =Cloth= 时按需一起添加：
@@ -48,6 +48,29 @@
   #+end_src
   三个功能开关可独立使用：=--lra= 增加刚性距离上限；=--friction= 打开外部摩擦，若已打开自碰撞也会启用自接触摩擦；
   =--self-collision= 打开自碰撞。准备日志中的 =tethers= 是生成的长距离约束数。
+* 动态硬挂点
+  添加 =Cloth= 时可在同一布料实体上一起添加：
+  #+begin_src rust
+    use bevy_cloth::{ClothDynamicAttachments, DynamicAttachment};
+
+    let pins = ClothDynamicAttachments(vec![DynamicAttachment {
+        particle: 12,
+        target: joint_entity,
+        local_offset: Vec3::new(0.1, 0.0, 0.0),
+    }]);
+  #+end_src
+  =target= 可以是骨骼或任意具有 =GlobalTransform= 的实体，不需要 GPU 蒙皮插件。
+  变换传播后用 =GlobalTransform.transform_point(local_offset)= 采样；每个固定 tick 开始、接触稳定和预测之前写入硬挂点。
+  同一帧追赶多个 tick 时共用这次采样，不插值。目标丢失或坐标不再有限时保持最后有效位置；未采到过则固定在世界空间静止位置。
+  挂点列表只在初始化时读取，动态挂点和 =FixedAttachment= 不得使用同一粒子。
+  动态挂点也可作为 LRA 锚点，不改变静止度量；自由粒子仍由 XPBD 求解，不支持多骨骼表面挂点。
+
+  无窗口验收（仍需支持 compute 的 GPU 后端）：
+  #+begin_src bash
+    cargo run -j 2 -p bevy_cloth --example xpbd-dynamic-attachments
+  #+end_src
+  预期：子骨骼旋转 90° 的当帧，固定角保持 =(2, 0, 0)=，动态角从 =(4, 0, 0)= 到 =(3, 1, 0)=，
+  自由角由 XPBD 拉动而非跟随骨骼刚性旋转；移除目标后动态角不动。成功时打印 =XPBD dynamic attachment probe passed=。
 * 独立 GPU 蒙皮
   在 =DefaultPlugins= 后注册 =bevy_cloth::compute_skinning::ComputeSkinningPlugin=，给需要计算的
   =Mesh3d + SkinnedMesh= 实体加 =ComputeSkinning=。源 Mesh 的属性须保留在主世界。
