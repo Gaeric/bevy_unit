@@ -8,7 +8,7 @@ use crate::{
     components::{
         Cloth, ClothLongRangeAttachments, ClothSelfCollision, ClothSolver, DynamicAttachment,
     },
-    solver::layout::{Particle, StretchConstraint},
+    solver::layout::{BendConstraint, Particle, StretchConstraint, TetherConstraint},
 };
 
 use super::{
@@ -230,11 +230,53 @@ pub(crate) fn prepare_mesh(
         })
         .collect();
 
-    let velocities = vec![[0.0; 4]; particles.len()];
     let self_collision = self_collision
         .map(|settings| PreparedSelfCollision::new(settings, &particles))
         .transpose()?;
+    let (stretch_constraints, bend_constraints, tethers, schedule) =
+        prepare_xpbd(&particles, &indices, &anchors, config, solver, long_range)?;
 
+    // Pin targets affect the initial state, not the rest geometry. A dynamic
+    // pin starts at its rest position until a valid target has been sampled.
+    for index in anchors {
+        particles[index as usize].inv_mass = 0.0;
+    }
+    for attachment in &config.attachments {
+        particles[attachment.particle as usize].position = attachment.position.to_array();
+    }
+
+    let (normal_offsets, normal_pairs) = build_normal_adjacency(particles.len(), &indices);
+    let velocities = vec![[0.0; 4]; particles.len()];
+
+    Ok(PreparedCloth {
+        particles,
+        velocities,
+        stretch_constraints,
+        bend_constraints,
+        tethers,
+        schedule,
+        self_collision,
+        normal_offsets,
+        normal_pairs,
+    })
+}
+
+fn prepare_xpbd(
+    particles: &[Particle],
+    indices: &[u32],
+    anchors: &BTreeSet<u32>,
+    config: &Cloth,
+    solver: ClothSolver,
+    long_range: Option<ClothLongRangeAttachments>,
+) -> Result<
+    (
+        Vec<StretchConstraint>,
+        Vec<BendConstraint>,
+        Vec<TetherConstraint>,
+        ConstraintSchedule,
+    ),
+    String,
+> {
     // Extract unique undirected edges. Self-connections add no constraint.
     let mut edges = BTreeSet::new();
 
@@ -263,12 +305,10 @@ pub(crate) fn prepare_mesh(
         })
         .collect();
 
-    // Rest angles, like rest lengths, use geometry before attachment targets.
-    let bend_constraints = prepare_bending(&particles, &indices, config.bend_compliance)?;
-
+    let bend_constraints = prepare_bending(particles, indices, config.bend_compliance)?;
     let tethers = match long_range {
         Some(settings) => {
-            prepare_tethers(particles.len(), &stretch_constraints, &anchors, settings)?
+            prepare_tethers(particles.len(), &stretch_constraints, anchors, settings)?
         }
         None => Vec::new(),
     };
@@ -297,29 +337,7 @@ pub(crate) fn prepare_mesh(
             )
         }
     };
-
-    // Pin targets affect the initial state, not the rest geometry. A dynamic
-    // pin starts at its rest position until a valid target has been sampled.
-    for index in anchors {
-        particles[index as usize].inv_mass = 0.0;
-    }
-    for attachment in &config.attachments {
-        particles[attachment.particle as usize].position = attachment.position.to_array();
-    }
-
-    let (normal_offsets, normal_pairs) = build_normal_adjacency(particles.len(), &indices);
-
-    Ok(PreparedCloth {
-        particles,
-        velocities,
-        stretch_constraints,
-        bend_constraints,
-        tethers,
-        schedule,
-        self_collision,
-        normal_offsets,
-        normal_pairs,
-    })
+    Ok((stretch_constraints, bend_constraints, tethers, schedule))
 }
 
 #[cfg(test)]
