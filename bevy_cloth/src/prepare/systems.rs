@@ -3,7 +3,7 @@ use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 use crate::{
     components::{
         Cloth, ClothDynamicAttachments, ClothExternalFriction, ClothLongRangeAttachments,
-        ClothSelfCollision, ClothSolver, ClothStepSettings, ClothVbdMaterial,
+        ClothSelfCollision, ClothSolver, ClothStepSettings, ClothVbdContact, ClothVbdMaterial,
     },
     prepare::{
         ConstraintSchedule,
@@ -28,6 +28,7 @@ pub(crate) fn prepare_added_cloths(
             &ClothStepSettings,
             &ClothSolver,
             Option<&ClothVbdMaterial>,
+            Option<&ClothVbdContact>,
             Option<&ClothDynamicAttachments>,
             Option<&ClothLongRangeAttachments>,
             Option<&ClothExternalFriction>,
@@ -44,6 +45,7 @@ pub(crate) fn prepare_added_cloths(
         settings,
         solver,
         material,
+        vbd_contact,
         dynamic,
         long_range,
         friction,
@@ -78,7 +80,10 @@ pub(crate) fn prepare_added_cloths(
                 warn!(?entity, "VBD does not yet support contact friction");
                 continue;
             }
-            super::mesh::MeshSolver::Vbd(*material)
+            super::mesh::MeshSolver::Vbd {
+                material: *material,
+                contact_stiffness: vbd_contact.map_or(0.0, |contact| contact.stiffness),
+            }
         } else {
             (*solver).into()
         };

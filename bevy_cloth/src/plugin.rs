@@ -23,7 +23,7 @@ use crate::{
         self_collision::{init_self_collision_pipeline, report_self_collision_stats},
         transform as collider_transform,
     },
-    components::{ClothStepSettings, CollisionGroup},
+    components::{ClothStepSettings, CollisionGroup, VbdStaticCollider},
     compute_skinning::ComputeSkinningSystems,
     output::{self, bindings::ClothOutputBindGroupLayout, pipeline::init_output_pipeline},
     prepare::{self, PreparedCloth, attachments as pin_targets},
@@ -67,6 +67,7 @@ impl Plugin for ClothPlugin {
             .add_plugins((
                 ExtractComponentPlugin::<PreparedCollider>::default(),
                 ExtractComponentPlugin::<CollisionGroup>::default(),
+                ExtractComponentPlugin::<VbdStaticCollider>::default(),
                 ExtractResourcePlugin::<ClothTicks>::default(),
                 ExtractComponentPlugin::<PreparedCloth>::default(),
                 ExtractComponentPlugin::<pin_targets::AttachmentTargets>::default(),

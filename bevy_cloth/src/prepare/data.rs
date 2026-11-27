@@ -36,6 +36,7 @@ pub(crate) enum ConstraintSchedule {
     Vbd {
         rest: super::vbd::VbdRestData,
         material: crate::components::ClothVbdMaterial,
+        contact_stiffness: f32,
     },
 }
 

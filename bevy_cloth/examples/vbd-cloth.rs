@@ -1,4 +1,4 @@
-//! Headless GPU probe for VBD inertia and elasticity.
+//! Headless GPU probe for VBD inertia, elasticity and static normal contact.
 
 use bevy::{
     app::PluginsState,
@@ -24,7 +24,8 @@ use bevy::{
     winit::WinitPlugin,
 };
 use bevy_cloth::{
-    Cloth, ClothPlugin, ClothSolver, ClothStepSettings, ClothVbdMaterial, FixedAttachment,
+    Cloth, ClothPlugin, ClothSolver, ClothStepSettings, ClothVbdContact, ClothVbdMaterial,
+    FixedAttachment, VbdStaticCollider,
 };
 use std::{
     thread,
@@ -74,7 +75,7 @@ fn main() {
 
     let world = app.world_mut();
     let triangle = [Vec3::ZERO, Vec3::X, Vec3::Y];
-    let inertia = spawn_case(
+    let (_, inertia) = spawn_case(
         world,
         &triangle,
         &[0, 1, 2],
@@ -83,7 +84,7 @@ fn main() {
         ClothVbdMaterial::default(),
         2,
     );
-    let membrane = spawn_case(
+    let (_, membrane) = spawn_case(
         world,
         &triangle,
         &[0, 1, 2],
@@ -96,7 +97,7 @@ fn main() {
         },
         2,
     );
-    let hinge = spawn_case(
+    let (_, hinge) = spawn_case(
         world,
         &[Vec3::ZERO, Vec3::X, Vec3::Y, -Vec3::Y],
         &[2, 0, 1, 3, 1, 0],
@@ -108,6 +109,45 @@ fn main() {
         },
         1,
     );
+
+    // A single triangle spanning both test vertices, with outward normal -X.
+    let plane = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        vec![[0.875, -2.0, -2.0], [0.875, -2.0, 3.0], [0.875, 3.0, -2.0]],
+    );
+    let plane = world.resource_mut::<Assets<Mesh>>().add(plane);
+    world.spawn((Mesh3d(plane), VbdStaticCollider));
+    let (contact_entity, contact) = spawn_case(
+        world,
+        &[Vec3::ZERO, 0.75 * Vec3::X, Vec3::Y],
+        &[0, 1, 2],
+        &[(0, Vec3::ZERO), (2, Vec3::Y)],
+        64.0 * Vec3::X,
+        ClothVbdMaterial::default(),
+        2,
+    );
+    let (coupled_entity, coupled) = spawn_case(
+        world,
+        &triangle,
+        &[0, 1, 2],
+        &[(0, Vec3::ZERO), (2, Vec3::Y)],
+        -64.0 * Vec3::X,
+        ClothVbdMaterial {
+            shear: 128.0,
+            area: 128.0,
+            ..default()
+        },
+        2,
+    );
+    for entity in [contact_entity, coupled_entity] {
+        let mut entity = world.entity_mut(entity);
+        entity.get_mut::<Cloth>().unwrap().collision_margin = 0.0625;
+        entity.insert(ClothVbdContact { stiffness: 256.0 });
+    }
 
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -155,6 +195,23 @@ fn main() {
         ],
     );
 
+    // h = 1/16, m/h² = k = 256. The target center is x = 0.875 - 0.0625.
+    // Starting at predicted x = 1, half the compression remains after solving.
+    check(
+        &app,
+        "contact",
+        &contact,
+        &[Vec3::ZERO, 0.90625 * Vec3::X, Vec3::Y],
+    );
+    // Predicted x = 0.75 is outside the thickness. The first membrane block
+    // moves to x = 6/7, then the next sweep adds contact to the 448 N/m block.
+    check(
+        &app,
+        "contact and membrane",
+        &coupled,
+        &[Vec3::ZERO, (37.0 / 44.0) * Vec3::X, Vec3::Y],
+    );
+
     app.update();
     check(
         &app,
@@ -170,6 +227,11 @@ fn pipelines_ready(app: &App) -> bool {
     [
         "predict_vbd",
         "solve_vbd_color",
+        "reset_vbd_contacts",
+        "gather_vbd_contacts",
+        "xpbd collider transform_vertices",
+        "xpbd collider refit_leaves",
+        "xpbd collider refit_internal",
         "xpbd update_velocity",
         "xpbd output_mesh",
     ]
@@ -194,7 +256,7 @@ fn spawn_case(
     gravity: Vec3,
     material: ClothVbdMaterial,
     iterations: u32,
-) -> Handle<Mesh> {
+) -> (Entity, Handle<Mesh>) {
     let mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
@@ -206,28 +268,30 @@ fn spawn_case(
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; points.len()])
     .with_inserted_indices(Indices::U32(indices.to_vec()));
     let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
-    world.spawn((
-        Mesh3d(mesh.clone()),
-        Cloth {
-            particle_mass: 1.0,
-            stretch_compliance: 0.0,
-            bend_compliance: 0.0,
-            attachments: pins
-                .iter()
-                .map(|&(particle, position)| FixedAttachment { particle, position })
-                .collect(),
-            collision_margin: 0.0,
-            double_sided: false,
-        },
-        ClothSolver::Vbd,
-        material,
-        ClothStepSettings {
-            gravity,
-            substeps: 1,
-            iterations,
-        },
-    ));
-    mesh
+    let entity = world
+        .spawn((
+            Mesh3d(mesh.clone()),
+            Cloth {
+                particle_mass: 1.0,
+                stretch_compliance: 0.0,
+                bend_compliance: 0.0,
+                attachments: pins
+                    .iter()
+                    .map(|&(particle, position)| FixedAttachment { particle, position })
+                    .collect(),
+                collision_margin: 0.0,
+                double_sided: false,
+            },
+            ClothSolver::Vbd,
+            material,
+            ClothStepSettings {
+                gravity,
+                substeps: 1,
+                iterations,
+            },
+        ))
+        .id();
+    (entity, mesh)
 }
 
 fn check(app: &App, label: &str, mesh: &Handle<Mesh>, expected: &[Vec3]) {

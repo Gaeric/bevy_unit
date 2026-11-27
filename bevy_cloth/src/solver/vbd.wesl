@@ -1,5 +1,6 @@
 import super::layout::{Particle, StepParams, ConstraintRangeParams};
-import super::vbd_energy::{IDENTITY_3, evaluate_vbd_membrane, evaluate_vbd_hinge};
+import super::vbd_energy::{IDENTITY_3, outer_self, evaluate_vbd_membrane, evaluate_vbd_hinge};
+import super::super::collision::bvh_query::{closest_hit, QUERY_OK, INVALID_TRIANGLE};
 
 struct Membrane {
     particles: vec3<u32>,
@@ -27,12 +28,59 @@ struct Incident {
 @group(0) @binding(3) var<storage, read> velocities: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read_write> previous_positions: array<vec4<f32>>;
 @group(0) @binding(5) var<uniform> color: ConstraintRangeParams;
-@group(0) @binding(6) var<uniform> material: vec4<f32>; // shear, area, bend, unused
-@group(0) @binding(7) var<storage, read> vertices: array<u32>;
-@group(0) @binding(8) var<storage, read> offsets: array<u32>;
+@group(0) @binding(6) var<uniform> material: vec4<f32>; // shear, area, bend, contact stiffness
+// CSR offsets (particle_count + 1), followed by the colored vertex list.
+@group(0) @binding(7) var<storage, read> vertex_schedule: array<u32>;
 @group(0) @binding(9) var<storage, read> incidents: array<Incident>;
 @group(0) @binding(10) var<storage, read> membranes: array<Membrane>;
 @group(0) @binding(11) var<storage, read> hinges: array<Hinge>;
+
+struct NormalContact {
+    point_and_distance_squared: vec4<f32>,
+    normal: vec3<f32>, // zero when no candidate was found
+};
+
+@group(0) @binding(12) var<storage, read_write> contacts: array<NormalContact>;
+
+@compute @workgroup_size(64)
+fn reset_vbd_contacts(@builtin(global_invocation_id) invocation: vec3<u32>) {
+    if invocation.x < step.particle_count {
+        var empty: NormalContact;
+        contacts[invocation.x] = empty;
+    }
+}
+
+@compute @workgroup_size(64)
+fn gather_vbd_contacts(@builtin(global_invocation_id) invocation: vec3<u32>) {
+    let vertex = invocation.x;
+    if vertex >= step.particle_count || particles[vertex].inv_mass == 0.0 {
+        return;
+    }
+    let position = particles[vertex].position;
+    let hit = closest_hit(position);
+    if hit.status != QUERY_OK || hit.triangle_id == INVALID_TRIANGLE
+        || all(hit.normal.xyz == vec3<f32>(0.0))
+    {
+        return;
+    }
+    let old = contacts[vertex];
+    if any(old.normal != vec3<f32>(0.0)) && old.point_and_distance_squared.w <= hit.point.w {
+        return;
+    }
+
+    // Use the distance direction at an edge or corner, signed by winding for
+    // solid shells. For two-sided surfaces choose the side at sweep start.
+    var normal = hit.normal.xyz;
+    let separation = position - hit.point.xyz;
+    let distance_squared = dot(separation, separation);
+    if distance_squared > 0.0 && distance_squared <= 3.402823466e38 {
+        normal = separation * inverseSqrt(distance_squared);
+        if step.double_sided == 0u && dot(separation, hit.normal.xyz) < 0.0 {
+            normal = -normal;
+        }
+    }
+    contacts[vertex] = NormalContact(hit.point, normal);
+}
 
 @compute @workgroup_size(64)
 fn predict_vbd(@builtin(global_invocation_id) invocation: vec3<u32>) {
@@ -109,7 +157,7 @@ fn solve_vbd_color(@builtin(global_invocation_id) invocation: vec3<u32>) {
     if invocation.x >= color.count {
         return;
     }
-    let vertex = vertices[color.start + invocation.x];
+    let vertex = vertex_schedule[step.particle_count + 1u + color.start + invocation.x];
     let particle = particles[vertex];
     if particle.inv_mass == 0.0 {
         return;
@@ -119,7 +167,7 @@ fn solve_vbd_color(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let inertia = (1.0 / particle.inv_mass) / (dt * dt);
     var force = inertia * (inertia_targets[vertex].xyz - particle.position);
     var hessian = inertia * IDENTITY_3;
-    for (var i = offsets[vertex]; i < offsets[vertex + 1u]; i += 1u) {
+    for (var i = vertex_schedule[vertex]; i < vertex_schedule[vertex + 1u]; i += 1u) {
         let incident = incidents[i];
         if incident.kind == 0u && (material.x > 0.0 || material.y > 0.0) {
             let triangle = membranes[incident.element];
@@ -144,6 +192,17 @@ fn solve_vbd_color(@builtin(global_invocation_id) invocation: vec3<u32>) {
             );
             force += block.force;
             hessian += block.hessian;
+        }
+    }
+
+    if material.w > 0.0 {
+        let contact = contacts[vertex];
+        let normal = contact.normal;
+        let gap = dot(particle.position - contact.point_and_distance_squared.xyz, normal);
+        let compression = step.collision_margin - gap;
+        if compression > 0.0 && any(normal != vec3<f32>(0.0)) {
+            force += (material.w * compression) * normal;
+            hessian += material.w * outer_self(normal);
         }
     }
 

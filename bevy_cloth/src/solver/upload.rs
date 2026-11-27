@@ -54,8 +54,13 @@ pub(crate) fn upload_cloths(
     >,
 ) {
     for (entity, prepared, step_params, targets) in &cloths {
-        if let ConstraintSchedule::Vbd { rest, .. } = &prepared.schedule
-            && let Err(error) = VbdBindings::check_limits(&device, rest, step_params)
+        if let ConstraintSchedule::Vbd {
+            rest,
+            contact_stiffness,
+            ..
+        } = &prepared.schedule
+            && let Err(error) =
+                VbdBindings::check_limits(&device, rest, step_params, *contact_stiffness)
         {
             warn!(?entity, %error, "VBD cloth GPU preparation failed");
             continue;
@@ -124,7 +129,11 @@ pub(crate) fn upload_cloths(
             ConstraintSchedule::Jacobi(schedule) => ConstraintBindGroups::Jacobi(
                 jacobi_layouts.create_bind_groups(&device, &cache, &cloth_buffers, schedule),
             ),
-            ConstraintSchedule::Vbd { rest, material } => {
+            ConstraintSchedule::Vbd {
+                rest,
+                material,
+                contact_stiffness,
+            } => {
                 let Some(pipelines) = &vbd_pipelines else {
                     warn!(?entity, "VBD requires seven compute storage bindings");
                     continue;
@@ -136,6 +145,7 @@ pub(crate) fn upload_cloths(
                     &cloth_buffers,
                     rest,
                     *material,
+                    *contact_stiffness,
                 ))
             }
         };

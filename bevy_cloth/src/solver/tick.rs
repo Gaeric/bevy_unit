@@ -19,7 +19,7 @@ use crate::{
         self_collision::{SelfCollision, SelfCollisionPipeline},
         transform::ColliderTransformPipeline,
     },
-    components::{ClothStepSettings, CollisionGroup},
+    components::{ClothStepSettings, CollisionGroup, VbdStaticCollider},
     prepare::{ColoredGsSchedule, ConstraintColorRange, ConstraintSchedule, PreparedCloth},
 };
 
@@ -142,6 +142,9 @@ enum ConstraintSweep<'a> {
         pipeline: &'a ComputePipeline,
         bindings: &'a VbdBindings,
         colors: &'a [ConstraintColorRange],
+        contact_pipelines: Option<(&'a ComputePipeline, &'a ComputePipeline)>,
+        colliders: Vec<&'a BindGroup>,
+        workgroups: u32,
     },
     Empty,
 }
@@ -168,7 +171,13 @@ impl ConstraintSweep<'_> {
                 pipeline,
                 bindings,
                 colors,
+                contact_pipelines,
+                colliders,
+                workgroups,
             } => {
+                if let Some((reset, gather)) = contact_pipelines {
+                    bindings.record_contacts(pass, reset, gather, colliders, *workgroups);
+                }
                 pass.set_pipeline(pipeline);
                 bindings.record_colors(pass, colors);
             }
@@ -192,7 +201,11 @@ pub(crate) fn simulate_cloths(
     transform_pipeline: Res<ColliderTransformPipeline>,
     refit_pipeline: Res<ColliderRefitPipeline>,
     self_collision_pipeline: Res<SelfCollisionPipeline>,
-    colliders: Query<(&ColliderRefit, Option<&CollisionGroup>)>,
+    colliders: Query<(
+        &ColliderRefit,
+        Option<&CollisionGroup>,
+        Has<VbdStaticCollider>,
+    )>,
     mut cloths: Query<(
         &ClothBuffers,
         &ClothIntegrationBindGroup,
@@ -229,6 +242,13 @@ pub(crate) fn simulate_cloths(
     let vbd_solve = vbd_pipelines
         .as_ref()
         .and_then(|pipelines| cache.get_compute_pipeline(pipelines.solve_color));
+
+    let vbd_contact = vbd_pipelines.as_ref().and_then(|pipelines| {
+        cache
+            .get_compute_pipeline(pipelines.reset_contacts)
+            .zip(cache.get_compute_pipeline(pipelines.gather_contacts))
+            .filter(|_| collider_geometry_ready)
+    });
 
     let range_param_stride = constraint_range_param_stride(context.render_device());
     let apply_attachments = cache.get_compute_pipeline(attachment_pipeline.apply);
@@ -322,10 +342,31 @@ pub(crate) fn simulate_cloths(
                 let Some(pipeline) = vbd_solve else {
                     continue;
                 };
+                let (contact_pipelines, static_colliders) = if bindings.contacts.is_some() {
+                    let Some(contact_pipelines) = vbd_contact else {
+                        continue;
+                    };
+                    let static_colliders = colliders
+                        .iter()
+                        .filter(|(_, group, is_static)| {
+                            *is_static && group.copied().unwrap_or_default() == cloth_group
+                        })
+                        .filter_map(|(refit, _, _)| match refit.ready()? {
+                            (binding, ColliderPose::Rigid(_)) => Some(binding),
+                            (_, ColliderPose::Skinned(_)) => None,
+                        })
+                        .collect();
+                    (Some(contact_pipelines), static_colliders)
+                } else {
+                    (None, Vec::new())
+                };
                 ConstraintSweep::Vbd {
                     pipeline,
                     bindings,
                     colors: &rest.colors,
+                    contact_pipelines,
+                    colliders: static_colliders,
+                    workgroups: particle_workgroups,
                 }
             }
             _ => unreachable!("constraint bindings are built from the prepared schedule"),
@@ -350,8 +391,8 @@ pub(crate) fn simulate_cloths(
         let collider_bindings: Vec<_> = if stabilize.is_some() {
             colliders
                 .iter()
-                .filter(|(_, group)| group.copied().unwrap_or_default() == cloth_group)
-                .filter_map(|(refit, _)| refit.ready())
+                .filter(|(_, group, _)| group.copied().unwrap_or_default() == cloth_group)
+                .filter_map(|(refit, _, _)| refit.ready())
                 .collect()
         } else {
             Vec::new()

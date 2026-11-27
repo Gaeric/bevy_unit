@@ -22,7 +22,10 @@ use super::{
 /// Solver choice with the material already resolved for VBD.
 pub(super) enum MeshSolver {
     Xpbd(ClothSolver),
-    Vbd(ClothVbdMaterial),
+    Vbd {
+        material: ClothVbdMaterial,
+        contact_stiffness: f32,
+    },
 }
 
 impl From<ClothSolver> for MeshSolver {
@@ -245,7 +248,13 @@ pub(crate) fn prepare_mesh(
                 prepare_xpbd(&particles, &indices, &anchors, config, solver, long_range)?;
             (stretch, bend, tethers, schedule, self_collision)
         }
-        MeshSolver::Vbd(material) => {
+        MeshSolver::Vbd {
+            material,
+            contact_stiffness,
+        } => {
+            if !contact_stiffness.is_finite() || contact_stiffness < 0.0 {
+                return Err("VBD contact stiffness must be finite and nonnegative".into());
+            }
             if !material.is_valid() {
                 return Err(
                     "VBD stiffnesses and their membrane sum must be finite and nonnegative".into(),
@@ -262,7 +271,11 @@ pub(crate) fn prepare_mesh(
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),
-                ConstraintSchedule::Vbd { rest, material },
+                ConstraintSchedule::Vbd {
+                    rest,
+                    material,
+                    contact_stiffness,
+                },
                 None,
             )
         }
@@ -427,11 +440,15 @@ mod tests {
             &GlobalTransform::IDENTITY,
             &config,
             &[],
-            MeshSolver::Vbd(ClothVbdMaterial {
-                shear: 1.0,
-                area: 1.0,
-                bend: 1.0,
-            }),
+            MeshSolver::Vbd {
+                material: ClothVbdMaterial {
+                    shear: 1.0,
+                    area: 1.0,
+                    bend: 1.0,
+                    ..default()
+                },
+                contact_stiffness: 0.0,
+            },
             None,
             None,
         )

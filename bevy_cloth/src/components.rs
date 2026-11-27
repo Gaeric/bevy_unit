@@ -33,7 +33,7 @@ pub enum ClothSolver {
     #[default]
     ColoredGs,
     Jacobi,
-    /// Vertex block descent with internal elastic energies.
+    /// Vertex block descent with elastic energies and optional static normal contact.
     /// Requires `ClothVbdMaterial`.
     Vbd,
 }
@@ -65,6 +65,13 @@ impl ClothVbdMaterial {
     pub(crate) fn has_hinges(self) -> bool {
         self.bend > 0.0
     }
+}
+
+/// Opt-in static normal contact for VBD. Read when adding `Cloth`.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct ClothVbdContact {
+    /// Normal penalty stiffness in N/m. Must be finite and nonnegative; zero disables contact.
+    pub stiffness: f32,
 }
 
 /// Opt-in long-range attachments. Add alongside `Cloth`; later edits do not
@@ -160,6 +167,14 @@ impl Default for ClothStepSettings {
 /// replace the Mesh handle to prepare again.
 #[derive(Component, Debug)]
 pub struct MeshCollider;
+
+/// Opt this mesh into VBD's static normal contact. Its world pose and geometry
+/// must stay fixed during simulation. Skinned meshes are ignored by VBD.
+#[derive(Component, Clone, Copy, Debug, Default, ExtractComponent)]
+#[require(MeshCollider = MeshCollider)]
+#[extract_app(RenderApp)]
+#[extract_component_filter(Added<VbdStaticCollider>)]
+pub struct VbdStaticCollider;
 
 /// Cloth and collider match by exact group equality, not a bit mask.
 ///

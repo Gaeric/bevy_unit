@@ -1,4 +1,4 @@
-//! GPU prediction and colored vertex-block sweeps for elastic VBD.
+//! GPU prediction, static normal candidates and colored vertex-block sweeps.
 
 use bevy::{
     asset::load_embedded_asset,
@@ -7,8 +7,8 @@ use bevy::{
         render_resource::{
             BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
             BindingResource, Buffer, BufferBinding, BufferDescriptor, BufferInitDescriptor,
-            BufferUsages, CachedComputePipelineId, ComputePass, ComputePipelineDescriptor,
-            PipelineCache, ShaderStages,
+            BufferUsages, CachedComputePipelineId, ComputePass, ComputePipeline,
+            ComputePipelineDescriptor, PipelineCache, ShaderStages,
             binding_types::{
                 storage_buffer_read_only_sized, storage_buffer_sized, uniform_buffer_sized,
             },
@@ -28,6 +28,7 @@ use crate::{
 };
 
 use super::{
+    bindings::ContactBindGroupLayout,
     gpu::{ClothBuffers, constraint_range_param_stride, pack_constraint_range_params},
     layout::{ConstraintRangeParams, Particle, StepParams},
     pipeline::WORKGROUP_SIZE,
@@ -59,12 +60,18 @@ struct Incident {
     corner: u32,
 }
 
+// WGSL NormalContact: vec4 point/distance, vec3 normal, 4 bytes of tail padding.
+const CONTACT_STRIDE: u64 = 32;
+
 #[derive(Resource)]
 pub(crate) struct VbdPipelines {
     predict_layout: BindGroupLayoutDescriptor,
     solve_layout: BindGroupLayoutDescriptor,
+    contact_layout: BindGroupLayoutDescriptor,
     pub predict: CachedComputePipelineId,
     pub solve_color: CachedComputePipelineId,
+    pub reset_contacts: CachedComputePipelineId,
+    pub gather_contacts: CachedComputePipelineId,
     _energy_shader: Handle<Shader>,
 }
 
@@ -73,6 +80,7 @@ pub(crate) fn init_vbd_pipelines(
     asset_server: Res<AssetServer>,
     cache: Res<PipelineCache>,
     device: Res<RenderDevice>,
+    collider_layout: Res<ContactBindGroupLayout>,
 ) {
     // Keep XPBD available on devices that cannot bind the VBD solve layout.
     if device.limits().max_storage_buffers_per_shader_stage < 7 {
@@ -112,28 +120,51 @@ pub(crate) fn init_vbd_pipelines(
                 ),
                 (6, uniform_buffer_sized(false, NonZeroU64::new(16))),
                 (7, read_storage(4)),
-                (8, read_storage(4)),
                 (9, read_storage(size_of::<Incident>() as u64)),
                 (10, read_storage(size_of::<Membrane>() as u64)),
                 (11, read_storage(size_of::<Hinge>() as u64)),
+                (
+                    12,
+                    storage_buffer_sized(false, NonZeroU64::new(CONTACT_STRIDE)),
+                ),
+            ),
+        ),
+    );
+    let contact_layout = BindGroupLayoutDescriptor::new(
+        "vbd contact candidates layout",
+        &BindGroupLayoutEntries::with_indices(
+            ShaderStages::COMPUTE,
+            (
+                (0, step),
+                (1, particles),
+                (
+                    12,
+                    storage_buffer_sized(false, NonZeroU64::new(CONTACT_STRIDE)),
+                ),
             ),
         ),
     );
     let shader = load_embedded_asset!(asset_server.as_ref(), "vbd.wesl");
-    let queue = |entry: &'static str, layout: &BindGroupLayoutDescriptor| {
+    let queue = |entry: &'static str, layout: Vec<BindGroupLayoutDescriptor>| {
         cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: Some(entry.into()),
-            layout: vec![layout.clone()],
+            layout,
             shader: shader.clone(),
             entry_point: Some(entry.into()),
             ..default()
         })
     };
     commands.insert_resource(VbdPipelines {
-        predict: queue("predict_vbd", &predict_layout),
-        solve_color: queue("solve_vbd_color", &solve_layout),
+        predict: queue("predict_vbd", vec![predict_layout.clone()]),
+        solve_color: queue("solve_vbd_color", vec![solve_layout.clone()]),
+        reset_contacts: queue("reset_vbd_contacts", vec![contact_layout.clone()]),
+        gather_contacts: queue(
+            "gather_vbd_contacts",
+            vec![contact_layout.clone(), collider_layout.collider.clone()],
+        ),
         predict_layout,
         solve_layout,
+        contact_layout,
         _energy_shader: load_embedded_asset!(asset_server.as_ref(), "vbd_energy.wesl"),
     });
 }
@@ -141,6 +172,7 @@ pub(crate) fn init_vbd_pipelines(
 pub(crate) struct VbdBindings {
     pub predict: BindGroup,
     solve: Option<BindGroup>,
+    pub contacts: Option<BindGroup>,
     range_stride: u32,
 }
 
@@ -149,13 +181,18 @@ impl VbdBindings {
         device: &RenderDevice,
         rest: &VbdRestData,
         step: &StepParams,
+        contact_stiffness: f32,
     ) -> Result<(), &'static str> {
         let limits = device.limits();
         let particle_count = u64::from(step.particle_count);
         let largest_storage = [
             particle_count * 16,
-            rest.vertices.len() as u64 * 4,
-            rest.offsets.len() as u64 * 4,
+            (rest.offsets.len() as u64 + rest.vertices.len() as u64) * 4,
+            if contact_stiffness > 0.0 && !rest.colors.is_empty() {
+                particle_count * CONTACT_STRIDE
+            } else {
+                CONTACT_STRIDE
+            },
             rest.incidents.len() as u64 * size_of::<Incident>() as u64,
             rest.membranes.len() as u64 * size_of::<Membrane>() as u64,
             rest.hinges.len() as u64 * size_of::<Hinge>() as u64,
@@ -188,6 +225,7 @@ impl VbdBindings {
         cloth: &ClothBuffers,
         rest: &VbdRestData,
         material: ClothVbdMaterial,
+        contact_stiffness: f32,
     ) -> Self {
         let targets = device.create_buffer(&BufferDescriptor {
             label: Some("vbd inertia targets"),
@@ -207,7 +245,30 @@ impl VbdBindings {
             )),
         );
         let range_stride = constraint_range_param_stride(device);
+        let mut contacts = None;
         let solve = (!rest.colors.is_empty()).then(|| {
+            let contact_enabled = contact_stiffness > 0.0;
+            let contact_buffer = device.create_buffer(&BufferDescriptor {
+                label: Some("vbd normal contact records"),
+                size: if contact_enabled {
+                    (cloth.particles.size() / size_of::<Particle>() as u64) * CONTACT_STRIDE
+                } else {
+                    CONTACT_STRIDE
+                },
+                usage: BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            });
+            if contact_enabled {
+                contacts = Some(device.create_bind_group(
+                    "vbd contact candidates bind group",
+                    &cache.get_bind_group_layout(&pipelines.contact_layout),
+                    &BindGroupEntries::with_indices((
+                        (0, cloth.step_params.as_entire_binding()),
+                        (1, cloth.particles.as_entire_binding()),
+                        (12, contact_buffer.as_entire_binding()),
+                    )),
+                ));
+            }
             let upload = |label, contents: &[u8], usage| {
                 device.create_buffer_with_data(&BufferInitDescriptor {
                     label: Some(label),
@@ -222,18 +283,18 @@ impl VbdBindings {
             );
             let material = upload(
                 "vbd material",
-                bytemuck::bytes_of(&[material.shear, material.area, material.bend, 0.0]),
+                bytemuck::bytes_of(&[
+                    material.shear,
+                    material.area,
+                    material.bend,
+                    contact_stiffness,
+                ]),
                 BufferUsages::UNIFORM,
             );
-            let vertices = upload(
-                "vbd colored vertices",
-                bytemuck::cast_slice(&rest.vertices),
-                BufferUsages::STORAGE,
-            );
-            let offsets = upload(
-                "vbd incident offsets",
-                bytemuck::cast_slice(&rest.offsets),
-                BufferUsages::STORAGE,
+            let vertex_schedule = upload_array(
+                device,
+                "vbd incident offsets and colored vertices",
+                rest.offsets.iter().chain(&rest.vertices).copied(),
             );
             let incidents = upload_array(
                 device,
@@ -287,18 +348,44 @@ impl VbdBindings {
                         }),
                     ),
                     (6, material.as_entire_binding()),
-                    (7, vertices.as_entire_binding()),
-                    (8, offsets.as_entire_binding()),
+                    (7, vertex_schedule.as_entire_binding()),
                     (9, incidents.as_entire_binding()),
                     (10, membranes.as_entire_binding()),
                     (11, hinges.as_entire_binding()),
+                    (12, contact_buffer.as_entire_binding()),
                 )),
             )
         });
         Self {
             predict,
             solve,
+            contacts,
             range_stride,
+        }
+    }
+
+    /// Refresh one nearest record per vertex across all matching static meshes.
+    pub fn record_contacts(
+        &self,
+        pass: &mut ComputePass<'_>,
+        reset: &ComputePipeline,
+        gather: &ComputePipeline,
+        colliders: &[&BindGroup],
+        workgroups: u32,
+    ) {
+        let Some(binding) = &self.contacts else {
+            return;
+        };
+        // Always invalidate old records, even when the last collider disappeared.
+        pass.set_pipeline(reset);
+        pass.set_bind_group(0, binding, &[]);
+        pass.dispatch_workgroups(workgroups, 1, 1);
+        if !colliders.is_empty() {
+            pass.set_pipeline(gather);
+            for &collider in colliders {
+                pass.set_bind_group(1, collider, &[]);
+                pass.dispatch_workgroups(workgroups, 1, 1);
+            }
         }
     }
 
