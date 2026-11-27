@@ -34,6 +34,7 @@ use crate::{
         pipeline,
         tick::{self, ClothTicks},
         upload,
+        vbd::init_vbd_pipelines,
     },
 };
 
@@ -50,6 +51,8 @@ impl Plugin for ClothPlugin {
         embedded_asset!(app, "solver/bending.wesl");
         embedded_asset!(app, "solver/constraint_math.wesl");
         embedded_asset!(app, "solver/jacobi.wesl");
+        embedded_asset!(app, "solver/vbd.wesl");
+        embedded_asset!(app, "solver/vbd_energy.wesl");
         embedded_asset!(app, "solver/tether.wesl");
         embedded_asset!(app, "output/output.wesl");
         embedded_asset!(app, "collision/bvh_query.wesl");
@@ -119,6 +122,7 @@ impl Plugin for ClothPlugin {
                     gpu_pins::init_attachment_pipeline,
                     pipeline::init_colored_gs_pipelines,
                     init_jacobi_pipelines,
+                    init_vbd_pipelines,
                     init_output_pipeline,
                     pipeline::init_contact_pipeline,
                     collider_transform::init_transform_pipeline,

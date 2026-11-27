@@ -154,7 +154,10 @@ impl ColoredGsRangeBuffers {
 }
 
 /// One immutable, device-aligned uniform slot per constraint color.
-fn pack_constraint_range_params(ranges: &[ConstraintColorRange], stride: usize) -> Vec<u8> {
+pub(crate) fn pack_constraint_range_params(
+    ranges: &[ConstraintColorRange],
+    stride: usize,
+) -> Vec<u8> {
     let mut bytes = vec![0_u8; ranges.len() * stride];
     for (index, range) in ranges.iter().enumerate() {
         let params = ConstraintRangeParams {

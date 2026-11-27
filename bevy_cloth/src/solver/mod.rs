@@ -8,3 +8,4 @@ pub(crate) mod layout;
 pub(crate) mod pipeline;
 pub(crate) mod tick;
 pub(crate) mod upload;
+pub(crate) mod vbd;
