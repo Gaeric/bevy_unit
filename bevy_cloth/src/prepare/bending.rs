@@ -79,7 +79,7 @@ fn signed_dihedral(points: [Vec3; 4]) -> Option<f32> {
     angle.is_finite().then_some(angle as f32)
 }
 
-fn triangle_normal(a: DVec3, b: DVec3, c: DVec3) -> Option<DVec3> {
+pub(super) fn triangle_normal(a: DVec3, b: DVec3, c: DVec3) -> Option<DVec3> {
     let ab = b - a;
     let ac = c - a;
     let bc = c - b;

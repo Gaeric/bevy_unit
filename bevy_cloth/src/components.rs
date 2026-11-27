@@ -35,6 +35,34 @@ pub enum ClothSolver {
     Jacobi,
 }
 
+/// Elastic material for VBD. Coefficients must be finite and nonnegative.
+/// Zero stiffness disables the corresponding term.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct ClothVbdMaterial {
+    /// Membrane shear coefficient, in N/m.
+    pub shear: f32,
+    /// Membrane area coefficient, in N/m (the area term uses `area + shear`).
+    pub area: f32,
+    /// Dihedral coefficient per unit rest edge length, in N.
+    pub bend: f32,
+}
+
+impl ClothVbdMaterial {
+    pub(crate) fn is_valid(self) -> bool {
+        [self.shear, self.area, self.bend, self.shear + self.area]
+            .into_iter()
+            .all(|value| value.is_finite() && value >= 0.0)
+    }
+
+    pub(crate) fn has_membrane(self) -> bool {
+        self.shear > 0.0 || self.area > 0.0
+    }
+
+    pub(crate) fn has_hinges(self) -> bool {
+        self.bend > 0.0
+    }
+}
+
 /// Opt-in long-range attachments. Add alongside `Cloth`; later edits do not
 /// rebuild the cloth. Without this component no tethers are generated.
 #[derive(Component, Clone, Copy, Debug)]

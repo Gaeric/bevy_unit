@@ -10,7 +10,7 @@ use crate::{
 
 use super::jacobi::JacobiSchedule;
 
-/// A color's contiguous range in a reordered constraint array.
+/// A color's contiguous range in a reordered constraint or vertex array.
 ///
 /// Used only by the CPU to record dispatches; not uploaded as GPU storage data.
 /// Each dispatch passes its range through a separate `ConstraintRangeParams` payload.

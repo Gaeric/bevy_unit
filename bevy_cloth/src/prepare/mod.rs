@@ -5,6 +5,7 @@ mod jacobi;
 mod mesh;
 mod systems;
 mod tether;
+pub(crate) mod vbd;
 
 pub(crate) use data::{ColoredGsSchedule, ConstraintColorRange, ConstraintSchedule, PreparedCloth};
 pub(crate) use jacobi::JacobiSchedule;
