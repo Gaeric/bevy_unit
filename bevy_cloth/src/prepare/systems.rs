@@ -3,7 +3,7 @@ use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 use crate::{
     components::{
         Cloth, ClothDynamicAttachments, ClothExternalFriction, ClothLongRangeAttachments,
-        ClothSelfCollision, ClothSolver, ClothStepSettings,
+        ClothSelfCollision, ClothSolver, ClothStepSettings, ClothVbdMaterial,
     },
     prepare::{
         ConstraintSchedule,
@@ -27,6 +27,7 @@ pub(crate) fn prepare_added_cloths(
             &Cloth,
             &ClothStepSettings,
             &ClothSolver,
+            Option<&ClothVbdMaterial>,
             Option<&ClothDynamicAttachments>,
             Option<&ClothLongRangeAttachments>,
             Option<&ClothExternalFriction>,
@@ -42,6 +43,7 @@ pub(crate) fn prepare_added_cloths(
         config,
         settings,
         solver,
+        material,
         dynamic,
         long_range,
         friction,
@@ -67,25 +69,39 @@ pub(crate) fn prepare_added_cloths(
             );
             continue;
         }
+        let mesh_solver = if *solver == ClothSolver::Vbd {
+            let Some(material) = material else {
+                warn!(?entity, "VBD requires ClothVbdMaterial");
+                continue;
+            };
+            if friction.is_some() {
+                warn!(?entity, "VBD does not yet support contact friction");
+                continue;
+            }
+            super::mesh::MeshSolver::Vbd(*material)
+        } else {
+            (*solver).into()
+        };
         let pins = dynamic.map_or(&[][..], |attachments| attachments.0.as_slice());
         let mut prepared = match super::mesh::prepare_mesh(
             mesh,
             transform,
             config,
             pins,
-            *solver,
+            mesh_solver,
             long_range.copied(),
             self_collision.copied(),
         ) {
             Ok(prepared) => prepared,
             Err(error) => {
-                warn!(?entity, %error, "XPBD cloth preparation failed");
+                warn!(?entity, ?solver, %error, "cloth preparation failed");
                 continue;
             }
         };
-        let (stretch_colors, bend_colors) = match &prepared.schedule {
-            ConstraintSchedule::ColoredGs(gs) => (gs.stretch_colors.len(), gs.bend_colors.len()),
-            ConstraintSchedule::Jacobi(_) => (0, 0),
+        let (stretch_colors, bend_colors, vertex_colors) = match &prepared.schedule {
+            ConstraintSchedule::ColoredGs(gs) => (gs.stretch_colors.len(), gs.bend_colors.len(), 0),
+            ConstraintSchedule::Jacobi(_) => (0, 0, 0),
+            ConstraintSchedule::Vbd { rest, .. } => (0, 0, rest.colors.len()),
         };
         let step_params = StepParams {
             gravity: settings.gravity.extend(0.0).to_array(),
@@ -107,6 +123,7 @@ pub(crate) fn prepare_added_cloths(
             colors = stretch_colors,
             bend = prepared.bend_constraints.len(),
             bend_colors,
+            vertex_colors,
             fixed = config.attachments.len(),
             dynamic = pins.len(),
             tethers = prepared.tethers.len(),
@@ -114,7 +131,7 @@ pub(crate) fn prepare_added_cloths(
             self_collision = prepared.self_collision.is_some(),
             substeps = settings.substeps,
             iterations = settings.iterations,
-            "XPBD cloth prepared"
+            "cloth prepared"
         );
 
         // GPU deformation does not update the mesh's CPU-side bounds.

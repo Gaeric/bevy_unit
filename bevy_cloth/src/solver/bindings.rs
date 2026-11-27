@@ -349,6 +349,10 @@ impl ClothStretchBindGroupLayout {
         cloth_buffers: &ClothBuffers,
         range_params: &Buffer,
     ) -> BindGroup {
+        let stretch = cloth_buffers
+            .stretch
+            .as_ref()
+            .expect("XPBD stretch buffers");
         device.create_bind_group(
             "xpbd stretch bind group",
             &cache.get_bind_group_layout(&self.descriptor),
@@ -363,8 +367,8 @@ impl ClothStretchBindGroupLayout {
                         size: NonZeroU64::new(size_of::<ConstraintRangeParams>() as u64),
                     }),
                 ),
-                (5, cloth_buffers.stretch_constraints.as_entire_binding()),
-                (6, cloth_buffers.stretch_lambdas.as_entire_binding()),
+                (5, stretch.constraints.as_entire_binding()),
+                (6, stretch.lambdas.as_entire_binding()),
             )),
         )
     }

@@ -33,6 +33,7 @@ use super::{
         ClothContactPipeline, ClothIntegrationPipelines, ColoredGsPipelines, WORKGROUP_SIZE,
     },
     upload::ConstraintBindGroups,
+    vbd::{VbdBindings, VbdPipelines},
 };
 
 /// Total number of simulation ticks requested by Main World.
@@ -137,6 +138,11 @@ enum ConstraintSweep<'a> {
         range_param_stride: u32,
     },
     Jacobi(JacobiSweep<'a>),
+    Vbd {
+        pipeline: &'a ComputePipeline,
+        bindings: &'a VbdBindings,
+        colors: &'a [ConstraintColorRange],
+    },
     Empty,
 }
 
@@ -158,6 +164,14 @@ impl ConstraintSweep<'_> {
                 *range_param_stride,
             ),
             Self::Jacobi(sweep) => sweep.record(pass),
+            Self::Vbd {
+                pipeline,
+                bindings,
+                colors,
+            } => {
+                pass.set_pipeline(pipeline);
+                bindings.record_colors(pass, colors);
+            }
             Self::Empty => {}
         }
     }
@@ -173,6 +187,7 @@ pub(crate) fn simulate_cloths(
     attachment_pipeline: Res<AttachmentPipeline>,
     colored_gs_pipelines: Res<ColoredGsPipelines>,
     jacobi_pipelines: Res<JacobiPipelines>,
+    vbd_pipelines: Option<Res<VbdPipelines>>,
     contact_pipeline: Res<ClothContactPipeline>,
     transform_pipeline: Res<ColliderTransformPipeline>,
     refit_pipeline: Res<ColliderRefitPipeline>,
@@ -192,17 +207,28 @@ pub(crate) fn simulate_cloths(
         &mut ClothSimulation,
     )>,
 ) {
-    // Check compilation once at the entry; transform/refit commands precede this system.
-    let (Some(_), Some(_), Some(_), Some(predict), Some(stabilize), Some(update_velocity)) = (
-        cache.get_compute_pipeline(transform_pipeline.transform_vertices),
-        cache.get_compute_pipeline(refit_pipeline.leaves),
-        cache.get_compute_pipeline(refit_pipeline.internal),
-        cache.get_compute_pipeline(integration_pipelines.predict),
-        cache.get_compute_pipeline(contact_pipeline.stabilize),
-        cache.get_compute_pipeline(integration_pipelines.update_velocity),
-    ) else {
+    let Some(update_velocity) = cache.get_compute_pipeline(integration_pipelines.update_velocity)
+    else {
         return;
     };
+    // Transform/refit record before this system. Elastic-only VBD need not wait for them.
+    let collider_geometry_ready = [
+        transform_pipeline.transform_vertices,
+        refit_pipeline.leaves,
+        refit_pipeline.internal,
+    ]
+    .into_iter()
+    .all(|id| cache.get_compute_pipeline(id).is_some());
+    let xpbd_stages = cache
+        .get_compute_pipeline(integration_pipelines.predict)
+        .zip(cache.get_compute_pipeline(contact_pipeline.stabilize))
+        .filter(|_| collider_geometry_ready);
+    let vbd_predict = vbd_pipelines
+        .as_ref()
+        .and_then(|pipelines| cache.get_compute_pipeline(pipelines.predict));
+    let vbd_solve = vbd_pipelines
+        .as_ref()
+        .and_then(|pipelines| cache.get_compute_pipeline(pipelines.solve_color));
 
     let range_param_stride = constraint_range_param_stride(context.render_device());
     let apply_attachments = cache.get_compute_pipeline(attachment_pipeline.apply);
@@ -238,6 +264,8 @@ pub(crate) fn simulate_cloths(
             None => None,
         };
         let tether_count = prepared.tethers.len() as u32;
+        let cloth_group = collision_group.copied().unwrap_or_default();
+        let particle_workgroups = step_params.particle_count.div_ceil(WORKGROUP_SIZE);
         let sweep = match (&prepared.schedule, constraint_bindings) {
             (
                 ConstraintSchedule::ColoredGs(schedule),
@@ -285,20 +313,49 @@ pub(crate) fn simulate_cloths(
             (ConstraintSchedule::Jacobi(_), ConstraintBindGroups::Jacobi(None)) => {
                 ConstraintSweep::Empty
             }
+            (ConstraintSchedule::Vbd { rest, .. }, ConstraintBindGroups::Vbd(_))
+                if rest.colors.is_empty() =>
+            {
+                ConstraintSweep::Empty
+            }
+            (ConstraintSchedule::Vbd { rest, .. }, ConstraintBindGroups::Vbd(bindings)) => {
+                let Some(pipeline) = vbd_solve else {
+                    continue;
+                };
+                ConstraintSweep::Vbd {
+                    pipeline,
+                    bindings,
+                    colors: &rest.colors,
+                }
+            }
             _ => unreachable!("constraint bindings are built from the prepared schedule"),
+        };
+        let (predict, predict_binding, stabilize) = match constraint_bindings {
+            ConstraintBindGroups::Vbd(bindings) => {
+                let Some(predict) = vbd_predict else { continue };
+                (predict, &bindings.predict, None)
+            }
+            _ => {
+                let Some((predict, stabilize)) = xpbd_stages else {
+                    continue;
+                };
+                (predict, &integration.0, Some(stabilize))
+            }
         };
         let Some(mut tick_cursor) = simulation.tick_cursor else {
             // Start here instead of replaying ticks requested during loading.
             simulation.tick_cursor = Some(ticks.requested);
             continue;
         };
-        let particle_workgroups = step_params.particle_count.div_ceil(WORKGROUP_SIZE);
-        let cloth_group = collision_group.copied().unwrap_or_default();
-        let collider_bindings: Vec<_> = colliders
-            .iter()
-            .filter(|(_, group)| group.copied().unwrap_or_default() == cloth_group)
-            .filter_map(|(refit, _)| refit.ready())
-            .collect();
+        let collider_bindings: Vec<_> = if stabilize.is_some() {
+            colliders
+                .iter()
+                .filter(|(_, group)| group.copied().unwrap_or_default() == cloth_group)
+                .filter_map(|(refit, _)| refit.ready())
+                .collect()
+        } else {
+            Vec::new()
+        };
         let has_rigid_contact = collider_bindings
             .iter()
             .any(|(_, pose)| matches!(pose, ColliderPose::Rigid(_)));
@@ -321,7 +378,7 @@ pub(crate) fn simulate_cloths(
             if let (Some(pins), Some(pipeline)) = (attachments, apply_attachments) {
                 pins.record(&mut context, pipeline);
             }
-            if !collider_bindings.is_empty() {
+            if let Some(stabilize) = stabilize.filter(|_| !collider_bindings.is_empty()) {
                 let mut pass =
                     context
                         .command_encoder()
@@ -342,7 +399,9 @@ pub(crate) fn simulate_cloths(
 
             for _ in 0..settings.substeps {
                 let encoder = context.command_encoder();
-                encoder.clear_buffer(&cloth_buffers.stretch_lambdas, 0, None);
+                if let Some(stretch) = &cloth_buffers.stretch {
+                    encoder.clear_buffer(&stretch.lambdas, 0, None);
+                }
                 if let Some(bend_buffers) = &cloth_buffers.bending {
                     encoder.clear_buffer(&bend_buffers.lambdas, 0, None);
                 }
@@ -351,22 +410,24 @@ pub(crate) fn simulate_cloths(
                 }
 
                 let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("xpbd cloth substep"),
+                    label: Some("cloth substep"),
                     timestamp_writes: None,
                 });
 
                 pass.set_pipeline(predict);
-                pass.set_bind_group(0, &integration.0, &[]);
+                pass.set_bind_group(0, predict_binding, &[]);
                 pass.dispatch_workgroups(particle_workgroups, 1, 1);
 
-                record_contacts(
-                    &mut pass,
-                    stabilize,
-                    friction,
-                    &contact_bind_group.0,
-                    &collider_bindings,
-                    particle_workgroups,
-                );
+                if let Some(stabilize) = stabilize {
+                    record_contacts(
+                        &mut pass,
+                        stabilize,
+                        friction,
+                        &contact_bind_group.0,
+                        &collider_bindings,
+                        particle_workgroups,
+                    );
+                }
 
                 if let Some(contact) = &self_contact {
                     contact.record(&mut pass);

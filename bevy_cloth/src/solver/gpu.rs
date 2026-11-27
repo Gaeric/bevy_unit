@@ -9,9 +9,15 @@ use bevy::{
 };
 use std::mem::size_of;
 
-use crate::prepare::{ColoredGsSchedule, ConstraintColorRange, PreparedCloth};
+use crate::prepare::{ColoredGsSchedule, ConstraintColorRange, ConstraintSchedule, PreparedCloth};
 
 use super::layout::{ConstraintRangeParams, StepParams};
+
+/// XPBD stretch state. VBD has no constraint multipliers.
+pub(crate) struct StretchBuffers {
+    pub constraints: Buffer,
+    pub lambdas: Buffer,
+}
 
 /// Present only when the prepared cloth has dihedral constraints.
 /// Lambda indices follow the uploaded bend array, not the source edges.
@@ -39,8 +45,7 @@ pub(crate) struct ClothBuffers {
     pub particles: Buffer,
     pub velocities: Buffer,
     pub previous_positions: Buffer,
-    pub stretch_constraints: Buffer,
-    pub stretch_lambdas: Buffer,
+    pub stretch: Option<StretchBuffers>,
     pub bending: Option<BendConstraintBuffers>,
     pub tethers: Option<TetherBuffers>,
     pub step_params: Buffer,
@@ -59,10 +64,24 @@ impl ClothBuffers {
                 [x, y, z, 0.0]
             })
             .collect();
-        let stretch_lambdas = vec![0.0_f32; prepared.stretch_constraints.len()];
-
+        let vbd = matches!(prepared.schedule, ConstraintSchedule::Vbd { .. });
         let storage = BufferUsages::STORAGE | BufferUsages::COPY_DST;
         let uniform = BufferUsages::UNIFORM | BufferUsages::COPY_DST;
+        let stretch = (!vbd).then(|| {
+            let lambdas = vec![0.0_f32; prepared.stretch_constraints.len()];
+            StretchBuffers {
+                constraints: device.create_buffer_with_data(&BufferInitDescriptor {
+                    label: Some("xpbd stretch"),
+                    contents: bytemuck::cast_slice(&prepared.stretch_constraints),
+                    usage: storage,
+                }),
+                lambdas: device.create_buffer_with_data(&BufferInitDescriptor {
+                    label: Some("xpbd stretch lambdas"),
+                    contents: bytemuck::cast_slice(&lambdas),
+                    usage: storage,
+                }),
+            }
+        });
         let bending = (!prepared.bend_constraints.is_empty()).then(|| {
             let lambdas = vec![0.0_f32; prepared.bend_constraints.len()];
             BendConstraintBuffers {
@@ -111,16 +130,7 @@ impl ClothBuffers {
                 contents: bytemuck::cast_slice(&previous_positions),
                 usage: storage,
             }),
-            stretch_constraints: device.create_buffer_with_data(&BufferInitDescriptor {
-                label: Some("xpbd stretch"),
-                contents: bytemuck::cast_slice(&prepared.stretch_constraints),
-                usage: storage,
-            }),
-            stretch_lambdas: device.create_buffer_with_data(&BufferInitDescriptor {
-                label: Some("xpbd stretch lambdas"),
-                contents: bytemuck::cast_slice(&stretch_lambdas),
-                usage: storage,
-            }),
+            stretch,
             bending,
             tethers,
             step_params: device.create_buffer_with_data(&BufferInitDescriptor {

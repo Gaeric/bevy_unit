@@ -26,16 +26,20 @@ pub struct Cloth {
     pub double_sided: bool,
 }
 
-/// Per-cloth constraint sweep strategy. Set when adding `Cloth`; later edits
-/// do not rebuild solver data. Both strategies use the same XPBD constraints.
+/// Per-cloth solver. Set when adding `Cloth`; later edits do not rebuild it.
+/// Colored GS and Jacobi use the same XPBD constraints.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ClothSolver {
     #[default]
     ColoredGs,
     Jacobi,
+    /// Vertex block descent with internal elastic energies.
+    /// Requires `ClothVbdMaterial`.
+    Vbd,
 }
 
-/// Elastic material for VBD. Coefficients must be finite and nonnegative.
+/// Elastic material for VBD. Add alongside `Cloth` and `ClothSolver::Vbd`.
+/// Coefficients must be finite and nonnegative.
 /// Zero stiffness disables the corresponding term.
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct ClothVbdMaterial {

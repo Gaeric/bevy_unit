@@ -33,6 +33,10 @@ pub(crate) struct ColoredGsSchedule {
 pub(crate) enum ConstraintSchedule {
     ColoredGs(ColoredGsSchedule),
     Jacobi(JacobiSchedule),
+    Vbd {
+        rest: super::vbd::VbdRestData,
+        material: crate::components::ClothVbdMaterial,
+    },
 }
 
 /// Initial cloth data prepared on the CPU.

@@ -101,6 +101,7 @@ fn spawn_case(
     let group = match solver {
         ClothSolver::ColoredGs => CollisionGroup(0),
         ClothSolver::Jacobi => CollisionGroup(1),
+        ClothSolver::Vbd => unreachable!("this example compares only XPBD strategies"),
     };
     let (mesh, mut attachments) = cloth_input();
     for attachment in &mut attachments {

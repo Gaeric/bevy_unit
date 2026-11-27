@@ -154,6 +154,7 @@ impl JacobiLayouts {
             mapped_at_creation: false,
         });
 
+        let stretch_buffers = cloth.stretch.as_ref().expect("XPBD stretch buffers");
         let stretch = device.create_bind_group(
             "xpbd Jacobi stretch",
             &cache.get_bind_group_layout(&self.stretch),
@@ -161,8 +162,8 @@ impl JacobiLayouts {
                 (0, cloth.step_params.as_entire_binding()),
                 (1, cloth.particles.as_entire_binding()),
                 (2, offsets.as_entire_binding()),
-                (3, cloth.stretch_constraints.as_entire_binding()),
-                (4, cloth.stretch_lambdas.as_entire_binding()),
+                (3, stretch_buffers.constraints.as_entire_binding()),
+                (4, stretch_buffers.lambdas.as_entire_binding()),
                 (7, corrections.as_entire_binding()),
             )),
         );

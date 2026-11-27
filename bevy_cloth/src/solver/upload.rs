@@ -20,12 +20,14 @@ use super::{
     jacobi::{JacobiBindGroups, JacobiLayouts},
     layout::StepParams,
     tick::ClothSimulation,
+    vbd::{VbdBindings, VbdPipelines},
 };
 
 #[derive(Component)]
 pub(crate) enum ConstraintBindGroups {
     ColoredGs(ColoredGsBindGroups),
     Jacobi(Option<JacobiBindGroups>),
+    Vbd(VbdBindings),
 }
 
 pub(crate) fn upload_cloths(
@@ -40,6 +42,7 @@ pub(crate) fn upload_cloths(
     jacobi_layouts: Res<JacobiLayouts>,
     self_collision_pipeline: Res<SelfCollisionPipeline>,
     attachment_pipeline: Res<AttachmentPipeline>,
+    vbd_pipelines: Option<Res<VbdPipelines>>,
     cloths: Query<
         (
             Entity,
@@ -51,6 +54,12 @@ pub(crate) fn upload_cloths(
     >,
 ) {
     for (entity, prepared, step_params, targets) in &cloths {
+        if let ConstraintSchedule::Vbd { rest, .. } = &prepared.schedule
+            && let Err(error) = VbdBindings::check_limits(&device, rest, step_params)
+        {
+            warn!(?entity, %error, "VBD cloth GPU preparation failed");
+            continue;
+        }
         let cloth_buffers = ClothBuffers::new(&device, prepared, step_params);
         let gpu_attachments = match targets {
             Some(targets) => match GpuAttachments::new(
@@ -115,6 +124,20 @@ pub(crate) fn upload_cloths(
             ConstraintSchedule::Jacobi(schedule) => ConstraintBindGroups::Jacobi(
                 jacobi_layouts.create_bind_groups(&device, &cache, &cloth_buffers, schedule),
             ),
+            ConstraintSchedule::Vbd { rest, material } => {
+                let Some(pipelines) = &vbd_pipelines else {
+                    warn!(?entity, "VBD requires seven compute storage bindings");
+                    continue;
+                };
+                ConstraintBindGroups::Vbd(VbdBindings::new(
+                    &device,
+                    &cache,
+                    pipelines,
+                    &cloth_buffers,
+                    rest,
+                    *material,
+                ))
+            }
         };
 
         let mut entity_commands = commands.entity(entity);
@@ -143,7 +166,7 @@ pub(crate) fn upload_cloths(
             bend = prepared.bend_constraints.len(),
             tethers = prepared.tethers.len(),
             self_collision = prepared.self_collision.is_some(),
-            "XPBD cloth GPU data and binding initialized"
+            "cloth GPU data and bindings initialized"
         );
     }
 }

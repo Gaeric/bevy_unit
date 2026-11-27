@@ -6,7 +6,8 @@ use std::collections::BTreeSet;
 use crate::{
     collision::self_collision::PreparedSelfCollision,
     components::{
-        Cloth, ClothLongRangeAttachments, ClothSelfCollision, ClothSolver, DynamicAttachment,
+        Cloth, ClothLongRangeAttachments, ClothSelfCollision, ClothSolver, ClothVbdMaterial,
+        DynamicAttachment,
     },
     solver::layout::{BendConstraint, Particle, StretchConstraint, TetherConstraint},
 };
@@ -15,7 +16,20 @@ use super::{
     ColoredGsSchedule, ConstraintColorRange, ConstraintSchedule, JacobiSchedule, PreparedCloth,
     bending::{color_bending, prepare_bending},
     tether::prepare_tethers,
+    vbd::VbdRestData,
 };
+
+/// Solver choice with the material already resolved for VBD.
+pub(super) enum MeshSolver {
+    Xpbd(ClothSolver),
+    Vbd(ClothVbdMaterial),
+}
+
+impl From<ClothSolver> for MeshSolver {
+    fn from(solver: ClothSolver) -> Self {
+        Self::Xpbd(solver)
+    }
+}
 
 /// Validate all inputs before preparing particles and constraints.
 ///
@@ -25,17 +39,8 @@ fn validate_inputs<'a>(
     transform: &GlobalTransform,
     config: &Cloth,
 ) -> Result<(&'a [[f32; 3]], Vec<u32>), String> {
-    // Validate configuration inputs, not derived calculation results.
     if !config.particle_mass.is_finite() || config.particle_mass <= 0.0 {
         return Err("particle_mass must be positive and finite".into());
-    }
-
-    if !config.stretch_compliance.is_finite() || config.stretch_compliance < 0.0 {
-        return Err("stretch_compliance must be nonnegative and finite".into());
-    }
-
-    if !config.bend_compliance.is_finite() || config.bend_compliance < 0.0 {
-        return Err("bend_compliance must be nonnegative and finite".into());
     }
 
     if !config.collision_margin.is_finite() || config.collision_margin < 0.0 {
@@ -212,10 +217,11 @@ pub(crate) fn prepare_mesh(
     transform: &GlobalTransform,
     config: &Cloth,
     dynamic: &[DynamicAttachment],
-    solver: ClothSolver,
+    solver: impl Into<MeshSolver>,
     long_range: Option<ClothLongRangeAttachments>,
     self_collision: Option<ClothSelfCollision>,
 ) -> Result<PreparedCloth, String> {
+    let solver = solver.into();
     let (positions, indices) = validate_inputs(mesh, transform, config)?;
     let anchors = validate_attachments(positions.len(), config, dynamic)?;
 
@@ -230,11 +236,37 @@ pub(crate) fn prepare_mesh(
         })
         .collect();
 
-    let self_collision = self_collision
-        .map(|settings| PreparedSelfCollision::new(settings, &particles))
-        .transpose()?;
-    let (stretch_constraints, bend_constraints, tethers, schedule) =
-        prepare_xpbd(&particles, &indices, &anchors, config, solver, long_range)?;
+    let (stretch_constraints, bend_constraints, tethers, schedule, self_collision) = match solver {
+        MeshSolver::Xpbd(solver) => {
+            let self_collision = self_collision
+                .map(|settings| PreparedSelfCollision::new(settings, &particles))
+                .transpose()?;
+            let (stretch, bend, tethers, schedule) =
+                prepare_xpbd(&particles, &indices, &anchors, config, solver, long_range)?;
+            (stretch, bend, tethers, schedule, self_collision)
+        }
+        MeshSolver::Vbd(material) => {
+            if !material.is_valid() {
+                return Err(
+                    "VBD stiffnesses and their membrane sum must be finite and nonnegative".into(),
+                );
+            }
+            if !inv_mass.is_finite() || inv_mass == 0.0 {
+                return Err("VBD inverse mass must be positive and finite".into());
+            }
+            if long_range.is_some() || self_collision.is_some() {
+                return Err("VBD does not yet support LRA or self-collision".into());
+            }
+            let rest = VbdRestData::new(&particles, &indices, &anchors, material)?;
+            (
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                ConstraintSchedule::Vbd { rest, material },
+                None,
+            )
+        }
+    };
 
     // Pin targets affect the initial state, not the rest geometry. A dynamic
     // pin starts at its rest position until a valid target has been sampled.
@@ -277,6 +309,13 @@ fn prepare_xpbd(
     ),
     String,
 > {
+    if !config.stretch_compliance.is_finite() || config.stretch_compliance < 0.0 {
+        return Err("stretch_compliance must be nonnegative and finite".into());
+    }
+    if !config.bend_compliance.is_finite() || config.bend_compliance < 0.0 {
+        return Err("bend_compliance must be nonnegative and finite".into());
+    }
+
     // Extract unique undirected edges. Self-connections add no constraint.
     let mut edges = BTreeSet::new();
 
@@ -336,6 +375,7 @@ fn prepare_xpbd(
                 ConstraintSchedule::Jacobi(schedule),
             )
         }
+        ClothSolver::Vbd => unreachable!("VBD uses its own rest geometry"),
     };
     Ok((stretch_constraints, bend_constraints, tethers, schedule))
 }
@@ -372,6 +412,42 @@ mod tests {
             collision_margin: 0.02,
             double_sided: false,
         }
+    }
+
+    #[test]
+    fn vbd_mesh_measures_rest_geometry_before_applying_pins() {
+        let mesh = hinge_mesh();
+        let mut config = config();
+        config.attachments.push(FixedAttachment {
+            particle: 2,
+            position: Vec3::new(0.0, 1.0, 5.0),
+        });
+        let prepared = prepare_mesh(
+            &mesh,
+            &GlobalTransform::IDENTITY,
+            &config,
+            &[],
+            MeshSolver::Vbd(ClothVbdMaterial {
+                shear: 1.0,
+                area: 1.0,
+                bend: 1.0,
+            }),
+            None,
+            None,
+        )
+        .unwrap();
+        let ConstraintSchedule::Vbd { rest, .. } = &prepared.schedule else {
+            panic!("expected VBD schedule");
+        };
+        assert_eq!(prepared.particles[2].position, [0.0, 1.0, 5.0]);
+        assert_eq!(prepared.particles[2].inv_mass, 0.0);
+        assert_eq!(rest.membranes.len(), 2);
+        assert_eq!(rest.membranes[0].rest_area, 0.5);
+        assert_eq!(rest.hinges[0].rest_angle, 0.0);
+        assert!(!rest.vertices.contains(&2));
+        assert!(prepared.stretch_constraints.is_empty());
+        assert!(prepared.bend_constraints.is_empty());
+        assert!(prepared.tethers.is_empty());
     }
 
     #[test]
