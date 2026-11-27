@@ -1,4 +1,4 @@
-//! Headless GPU probe for VBD inertia, elasticity and static normal contact.
+//! Headless GPU probe for VBD inertia, elasticity, static contact and material damping.
 
 use bevy::{
     app::PluginsState,
@@ -24,8 +24,8 @@ use bevy::{
     winit::WinitPlugin,
 };
 use bevy_cloth::{
-    Cloth, ClothPlugin, ClothSolver, ClothStepSettings, ClothVbdContact, ClothVbdMaterial,
-    FixedAttachment, VbdStaticCollider,
+    Cloth, ClothDynamicAttachments, ClothPlugin, ClothSolver, ClothStepSettings, ClothVbdContact,
+    ClothVbdMaterial, DynamicAttachment, FixedAttachment, VbdStaticCollider,
 };
 use std::{
     thread,
@@ -149,6 +149,87 @@ fn main() {
         entity.insert(ClothVbdContact { stiffness: 256.0 });
     }
 
+    // Pure damping must not resist a rigid translation or a finite rotation.
+    let shell = [Vec3::ZERO, Vec3::X, Vec3::Y, -Vec3::Y];
+    let shell_indices = [2, 0, 1, 3, 1, 0];
+    let damping = ClothVbdMaterial {
+        membrane_damping: 4.0,
+        bend_damping: 16.0,
+        ..default()
+    };
+    let (_, translation) = spawn_case(
+        world,
+        &shell,
+        &shell_indices,
+        &[],
+        64.0 * Vec3::Z,
+        damping,
+        2,
+    );
+    let (rotation_entity, rotation) = spawn_case(
+        world,
+        &shell,
+        &shell_indices,
+        &[],
+        256.0 * (Vec3::Z - Vec3::Y),
+        damping,
+        2,
+    );
+    let mut targets = Vec::new();
+    for particle in [0, 1, 3] {
+        let target = world
+            .spawn(Transform::from_translation(shell[particle]))
+            .id();
+        targets.push((particle, target));
+    }
+    world
+        .entity_mut(rotation_entity)
+        .insert(ClothDynamicAttachments(
+            targets
+                .iter()
+                .map(|&(particle, target)| DynamicAttachment {
+                    particle: particle as u32,
+                    target,
+                    local_offset: Vec3::ZERO,
+                })
+                .collect(),
+        ));
+
+    let (_, bending_rate) = spawn_case(
+        world,
+        &shell,
+        &shell_indices,
+        &[(0, Vec3::ZERO), (1, Vec3::X), (3, -Vec3::Y)],
+        -64.0 * Vec3::Z,
+        ClothVbdMaterial {
+            bend_damping: 16.0,
+            ..default()
+        },
+        1,
+    );
+
+    // Both pins shift to x = 1/8, so equilibrium is at x = 9/8. The free
+    // vertex starts compressed at x = 1, with zero velocity and no external load.
+    let release = |world: &mut World, membrane_damping| {
+        spawn_case(
+            world,
+            &triangle,
+            &[0, 1, 2],
+            &[(0, 0.125 * Vec3::X), (2, Vec3::new(0.125, 1.0, 0.0))],
+            Vec3::ZERO,
+            ClothVbdMaterial {
+                shear: 128.0,
+                area: 128.0,
+                membrane_damping,
+                ..default()
+            },
+            6,
+        )
+        .1
+    };
+    let undamped = release(world, 0.0);
+    let damped = release(world, 4.0);
+
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         app.update();
@@ -165,6 +246,15 @@ fn main() {
         thread::sleep(Duration::from_millis(1));
     }
 
+    let rotate = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
+    for (particle, target) in targets {
+        app.world_mut()
+            .get_mut::<Transform>(target)
+            .unwrap()
+            .translation = rotate * shell[particle];
+    }
+    // The pin samples are taken in PostUpdate. Submit them before the first tick.
+    app.update();
     app.insert_resource(TimeUpdateStrategy::FixedTimesteps(1));
     app.update();
     check(
@@ -212,6 +302,32 @@ fn main() {
         &[Vec3::ZERO, (37.0 / 44.0) * Vec3::X, Vec3::Y],
     );
 
+    check(
+        &app,
+        "rigid translation",
+        &translation,
+        &shell.map(|x| x + 0.25 * Vec3::Z),
+    );
+    check(
+        &app,
+        "rigid rotation",
+        &rotation,
+        &shell.map(|x| rotate * x),
+    );
+    // With only hinge damping, c/h = 256. One Gauss–Newton block at
+    // (0, 1, -1/4) corrects along the current dihedral gradient.
+    check(
+        &app,
+        "dihedral rate",
+        &bending_rate,
+        &[
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::new(0.0, 1.0296944, -0.1312225),
+            -Vec3::Y,
+        ],
+    );
+
     app.update();
     check(
         &app,
@@ -219,7 +335,29 @@ fn main() {
         &inertia,
         &[-Vec3::X, 1.75 * Vec3::X, Vec3::Y + 0.75 * Vec3::X],
     );
+    for _ in 0..3 {
+        app.update();
+    }
+    let undamped_fifth = free_x(&app, &undamped);
+    let damped_fifth = free_x(&app, &damped);
+    app.update();
+    let undamped_energy = oscillation_energy(undamped_fifth, free_x(&app, &undamped));
+    let damped_energy = oscillation_energy(damped_fifth, free_x(&app, &damped));
+    assert!(
+        (0.05..0.055).contains(&undamped_energy) && damped_energy < 0.5 * undamped_energy,
+        "expected faster decay with damping, energies: {undamped_energy} and {damped_energy}"
+    );
     println!("VBD cloth GPU probe passed");
+}
+
+fn free_x(app: &App, mesh: &Handle<Mesh>) -> f32 {
+    read_positions(app, mesh, 3).expect("oscillation output mesh")[1].x
+}
+
+fn oscillation_energy(previous_x: f32, x: f32) -> f32 {
+    let velocity = (x - previous_x) / STEP.as_secs_f32();
+    // Along this axis the membrane is a spring with stiffness 192 N/m.
+    0.5 * velocity * velocity + 96.0 * (x - 1.125).powi(2)
 }
 
 fn pipelines_ready(app: &App) -> bool {
