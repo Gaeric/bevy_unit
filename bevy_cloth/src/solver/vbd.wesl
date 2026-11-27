@@ -24,11 +24,21 @@ struct Incident {
 
 @group(0) @binding(0) var<uniform> step: StepParams;
 @group(0) @binding(1) var<storage, read_write> particles: array<Particle>;
-@group(0) @binding(2) var<storage, read_write> inertia_targets: array<vec4<f32>>;
+// First particle_count entries are x_n, the rest are fixed inertia targets y.
+@group(0) @binding(2) var<storage, read_write> substep_positions: array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read> velocities: array<vec4<f32>>;
-@group(0) @binding(4) var<storage, read_write> previous_positions: array<vec4<f32>>;
 @group(0) @binding(5) var<uniform> color: ConstraintRangeParams;
-@group(0) @binding(6) var<uniform> material: vec4<f32>; // shear, area, bend, contact stiffness
+struct Material {
+    shear: f32,
+    area: f32,
+    bend: f32,
+    contact_stiffness: f32,
+    membrane_damping: f32,
+    bend_damping: f32,
+    padding: vec2<f32>,
+};
+
+@group(0) @binding(6) var<uniform> material: Material;
 // CSR offsets (particle_count + 1), followed by the colored vertex list.
 @group(0) @binding(7) var<storage, read> vertex_schedule: array<u32>;
 @group(0) @binding(9) var<storage, read> incidents: array<Incident>;
@@ -89,7 +99,7 @@ fn predict_vbd(@builtin(global_invocation_id) invocation: vec3<u32>) {
         return;
     }
     let particle = particles[index];
-    previous_positions[index] = vec4<f32>(particle.position, 0.0);
+    substep_positions[index] = vec4<f32>(particle.position, 0.0);
     var predicted = particle.position;
     if particle.inv_mass > 0.0 {
         let dt = step.substep_dt;
@@ -97,7 +107,7 @@ fn predict_vbd(@builtin(global_invocation_id) invocation: vec3<u32>) {
         particles[index].position = predicted;
     }
     // Keep y fixed while later colors overwrite current positions.
-    inertia_targets[index] = vec4<f32>(predicted, 0.0);
+    substep_positions[step.particle_count + index] = vec4<f32>(predicted, 0.0);
 }
 
 struct BlockSolution {
@@ -165,44 +175,56 @@ fn solve_vbd_color(@builtin(global_invocation_id) invocation: vec3<u32>) {
 
     let dt = step.substep_dt;
     let inertia = (1.0 / particle.inv_mass) / (dt * dt);
-    var force = inertia * (inertia_targets[vertex].xyz - particle.position);
+    var force = inertia * (substep_positions[step.particle_count + vertex].xyz - particle.position);
     var hessian = inertia * IDENTITY_3;
     for (var i = vertex_schedule[vertex]; i < vertex_schedule[vertex + 1u]; i += 1u) {
         let incident = incidents[i];
-        if incident.kind == 0u && (material.x > 0.0 || material.y > 0.0) {
+        if incident.kind == 0u {
+            // Preparation includes an element only when elasticity or damping is enabled.
             let triangle = membranes[incident.element];
             let ids = triangle.particles;
             let x = array(particles[ids.x].position, particles[ids.y].position, particles[ids.z].position);
+            var start: array<vec3<f32>, 3>;
+            if material.membrane_damping > 0.0 {
+                start = array(substep_positions[ids.x].xyz, substep_positions[ids.y].xyz, substep_positions[ids.z].xyz);
+            }
             let block = evaluate_vbd_membrane(
                 x, incident.corner, triangle.grad1, triangle.grad2, triangle.rest_area,
-                material.x, material.y,
+                material.shear, material.area, start, material.membrane_damping / dt,
             );
             force += block.force;
             hessian += block.hessian;
-        } else if incident.kind == 1u && material.z > 0.0 {
+        } else if incident.kind == 1u {
             let hinge = hinges[incident.element];
             let ids = hinge.particles;
             let x = array(
                 particles[ids.x].position, particles[ids.y].position,
                 particles[ids.z].position, particles[ids.w].position,
             );
+            var start: array<vec3<f32>, 4>;
+            if material.bend_damping > 0.0 {
+                start = array(
+                    substep_positions[ids.x].xyz, substep_positions[ids.y].xyz,
+                    substep_positions[ids.z].xyz, substep_positions[ids.w].xyz,
+                );
+            }
             let block = evaluate_vbd_hinge(
                 x, incident.corner, hinge.rest_angle, hinge.rest_edge_length,
-                material.z,
+                material.bend, start, material.bend_damping / dt,
             );
             force += block.force;
             hessian += block.hessian;
         }
     }
 
-    if material.w > 0.0 {
+    if material.contact_stiffness > 0.0 {
         let contact = contacts[vertex];
         let normal = contact.normal;
         let gap = dot(particle.position - contact.point_and_distance_squared.xyz, normal);
         let compression = step.collision_margin - gap;
         if compression > 0.0 && any(normal != vec3<f32>(0.0)) {
-            force += (material.w * compression) * normal;
-            hessian += material.w * outer_self(normal);
+            force += (material.contact_stiffness * compression) * normal;
+            hessian += material.contact_stiffness * outer_self(normal);
         }
     }
 

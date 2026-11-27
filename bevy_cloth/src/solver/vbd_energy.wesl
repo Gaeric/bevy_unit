@@ -1,7 +1,7 @@
 // Elastic contributions to a single VBD vertex block. Forces are negative
 // energy gradients. The local Hessians use Newton's membrane clamp and hinge
 // Gauss–Newton approximation; neither changes the elastic force.
-import super::constraint_math::evaluate_bend;
+import super::constraint_math::{evaluate_bend, wrap_angle_difference};
 
 struct VbdBlock {
     force: vec3<f32>,
@@ -24,6 +24,7 @@ fn evaluate_vbd_membrane(
     x: array<vec3<f32>, 3>, corner: u32,
     grad1: vec2<f32>, grad2: vec2<f32>, rest_area: f32,
     shear: f32, area_stiffness: f32,
+    start: array<vec3<f32>, 3>, damping_over_dt: f32,
 ) -> VbdBlock {
     let edge1 = x[1] - x[0];
     let edge2 = x[2] - x[0];
@@ -51,11 +52,28 @@ fn evaluate_vbd_membrane(
     // affine in that corner. Clamp only its coefficient, not the force.
     let r = max(area_stress, 0.0) / area_ratio;
     let isotropic = shear * dot(g, g) + r * dot(area_direction, area_direction);
-    let hessian = isotropic * IDENTITY_3
+    var force = -gradient;
+    var hessian = isotropic * IDENTITY_3
         + (lambda - r) * outer_self(area_gradient)
         - r * outer_self(area_direction);
 
-    return VbdBlock(-rest_area * gradient, rest_area * hessian);
+    if damping_over_dt > 0.0 {
+        // Rate of the metric C = F^T F, not of F itself: a rigid rotation
+        // does not change C. The two off-diagonal entries contribute equally.
+        let start_edge1 = start[1] - start[0];
+        let start_edge2 = start[2] - start[0];
+        let start_f0 = start_edge1 * grad1.x + start_edge2 * grad2.x;
+        let start_f1 = start_edge1 * grad1.y + start_edge2 * grad2.y;
+        let delta00 = dot(f0, f0) - dot(start_f0, start_f0);
+        let delta01 = dot(f0, f1) - dot(start_f0, start_f1);
+        let delta11 = dot(f1, f1) - dot(start_f1, start_f1);
+        let grad00 = 2.0 * g.x * f0;
+        let grad01 = g.x * f1 + g.y * f0;
+        let grad11 = 2.0 * g.y * f1;
+        force -= damping_over_dt * (delta00 * grad00 + 2.0 * delta01 * grad01 + delta11 * grad11);
+        hessian += damping_over_dt * (outer_self(grad00) + 2.0 * outer_self(grad01) + outer_self(grad11));
+    }
+    return VbdBlock(rest_area * force, rest_area * hessian);
 }
 
 // Points are ordered [opposite0, opposite1, edge_start, edge_end], matching
@@ -63,6 +81,7 @@ fn evaluate_vbd_membrane(
 fn evaluate_vbd_hinge(
     x: array<vec3<f32>, 4>, corner: u32,
     rest_angle: f32, rest_edge_length: f32, stiffness: f32,
+    start: array<vec3<f32>, 4>, damping_over_dt: f32,
 ) -> VbdBlock {
     let bend = evaluate_bend(x[0], x[1], x[2], x[3], rest_angle);
     var zero: VbdBlock;
@@ -73,5 +92,16 @@ fn evaluate_vbd_hinge(
     let gradients = array(bend.g0, bend.g1, bend.g2, bend.g3);
     let gradient = gradients[corner];
     let k = stiffness * rest_edge_length;
-    return VbdBlock(-k * bend.error * gradient, k * outer_self(gradient));
+    let curvature = outer_self(gradient);
+    var block = VbdBlock(-k * bend.error * gradient, k * curvature);
+    if damping_over_dt > 0.0 {
+        let start_bend = evaluate_bend(start[0], start[1], start[2], start[3], 0.0);
+        if start_bend.valid {
+            let delta = wrap_angle_difference(bend.angle - start_bend.angle);
+            let damping = damping_over_dt * rest_edge_length;
+            block.force -= (damping * delta) * gradient;
+            block.hessian += damping * curvature;
+        }
+    }
+    return block;
 }

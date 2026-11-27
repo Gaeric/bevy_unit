@@ -56,7 +56,7 @@ impl ClothBuffers {
     ///
     /// The caller retains the CPU color ranges for dispatch recording.
     pub fn new(device: &RenderDevice, prepared: &PreparedCloth, step_params: &StepParams) -> Self {
-        let previous_positions: Vec<[f32; 4]> = prepared
+        let mut previous_positions: Vec<[f32; 4]> = prepared
             .particles
             .iter()
             .map(|particle| {
@@ -65,6 +65,11 @@ impl ClothBuffers {
             })
             .collect();
         let vbd = matches!(prepared.schedule, ConstraintSchedule::Vbd { .. });
+        if vbd {
+            // Keep the history prefix shared with velocity reconstruction. VBD
+            // writes the fixed inertia targets in the second half on prediction.
+            previous_positions.resize(2 * prepared.particles.len(), [0.0; 4]);
+        }
         let storage = BufferUsages::STORAGE | BufferUsages::COPY_DST;
         let uniform = BufferUsages::UNIFORM | BufferUsages::COPY_DST;
         let stretch = (!vbd).then(|| {

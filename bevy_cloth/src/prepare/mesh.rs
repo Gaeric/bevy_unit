@@ -257,7 +257,7 @@ pub(crate) fn prepare_mesh(
             }
             if !material.is_valid() {
                 return Err(
-                    "VBD stiffnesses and their membrane sum must be finite and nonnegative".into(),
+                    "VBD stiffnesses, membrane stiffness sum and damping must be finite and nonnegative".into(),
                 );
             }
             if !inv_mass.is_finite() || inv_mass == 0.0 {

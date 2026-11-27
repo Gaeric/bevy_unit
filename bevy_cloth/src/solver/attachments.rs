@@ -6,8 +6,9 @@ use bevy::{
     render::{
         render_resource::{
             BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer,
-            BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor,
-            ComputePipeline, ComputePipelineDescriptor, PipelineCache, ShaderStages,
+            BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePass,
+            ComputePassDescriptor, ComputePipeline, ComputePipelineDescriptor, PipelineCache,
+            ShaderStages,
             binding_types::{storage_buffer_read_only_sized, storage_buffer_sized},
         },
         renderer::{RenderContext, RenderDevice, RenderQueue},
@@ -110,6 +111,10 @@ impl GpuAttachments {
                 label: Some("xpbd apply dynamic hard pins"),
                 timestamp_writes: None,
             });
+        self.record_in_pass(&mut pass, pipeline);
+    }
+
+    pub fn record_in_pass(&self, pass: &mut ComputePass<'_>, pipeline: &ComputePipeline) {
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &self.binding, &[]);
         pass.dispatch_workgroups(self.workgroups, 1, 1);

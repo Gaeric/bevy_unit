@@ -251,6 +251,8 @@ mod tests {
         shear: 1.0,
         area: 1.0,
         bend: 1.0,
+        membrane_damping: 0.0,
+        bend_damping: 0.0,
     };
 
     fn particles(positions: &[[f32; 3]]) -> Vec<Particle> {
@@ -383,6 +385,25 @@ mod tests {
         assert!(data.hinges.is_empty());
         assert_eq!(data.colors.len(), 3);
         assert!(VbdRestData::new(&points, &same_winding, &no_pins, ELASTIC).is_err());
+    }
+
+    #[test]
+    fn damping_only_keeps_elements_and_color_conflicts() {
+        let material = ClothVbdMaterial {
+            membrane_damping: 1.0,
+            bend_damping: 1.0,
+            ..Default::default()
+        };
+        let data = VbdRestData::new(
+            &particles(&HINGE),
+            &HINGE_INDICES,
+            &BTreeSet::new(),
+            material,
+        )
+        .unwrap();
+        assert_eq!(data.membranes.len(), 2);
+        assert_eq!(data.hinges.len(), 1);
+        assert_eq!(data.colors.len(), 4);
     }
 
     #[test]

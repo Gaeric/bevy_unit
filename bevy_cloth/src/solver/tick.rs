@@ -413,10 +413,12 @@ pub(crate) fn simulate_cloths(
             None
         };
 
+        let pins = attachments.zip(apply_attachments);
         while tick_cursor < ticks.requested {
-            // Catch-up ticks share this frame's sampled targets. Apply them before
-            // any contact or prediction so constraints see the new anchors.
-            if let (Some(pins), Some(pipeline)) = (attachments, apply_attachments) {
+            // XPBD keeps its tick-start pin update before contact stabilization.
+            if stabilize.is_some()
+                && let Some((pins, pipeline)) = pins
+            {
                 pins.record(&mut context, pipeline);
             }
             if let Some(stabilize) = stabilize.filter(|_| !collider_bindings.is_empty()) {
@@ -438,7 +440,7 @@ pub(crate) fn simulate_cloths(
                 );
             }
 
-            for _ in 0..settings.substeps {
+            for substep in 0..settings.substeps {
                 let encoder = context.command_encoder();
                 if let Some(stretch) = &cloth_buffers.stretch {
                     encoder.clear_buffer(&stretch.lambdas, 0, None);
@@ -458,6 +460,15 @@ pub(crate) fn simulate_cloths(
                 pass.set_pipeline(predict);
                 pass.set_bind_group(0, predict_binding, &[]);
                 pass.dispatch_workgroups(particle_workgroups, 1, 1);
+
+                // VBD prediction saves the old pin positions but does not move
+                // them. Only the first substep sees a newly sampled pin jump.
+                if stabilize.is_none()
+                    && substep == 0
+                    && let Some((pins, pipeline)) = pins
+                {
+                    pins.record_in_pass(&mut pass, pipeline);
+                }
 
                 if let Some(stabilize) = stabilize {
                     record_contacts(

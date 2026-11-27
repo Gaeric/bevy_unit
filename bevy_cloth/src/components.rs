@@ -38,9 +38,9 @@ pub enum ClothSolver {
     Vbd,
 }
 
-/// Elastic material for VBD. Add alongside `Cloth` and `ClothSolver::Vbd`.
-/// Coefficients must be finite and nonnegative.
-/// Zero stiffness disables the corresponding term.
+/// Elastic and dissipative material for VBD. Add alongside `Cloth` and `ClothSolver::Vbd`.
+/// Coefficients must be finite and nonnegative. A term is omitted only when both
+/// its elasticity and its damping are zero.
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct ClothVbdMaterial {
     /// Membrane shear coefficient, in N/m.
@@ -49,21 +49,32 @@ pub struct ClothVbdMaterial {
     pub area: f32,
     /// Dihedral coefficient per unit rest edge length, in N.
     pub bend: f32,
+    /// Membrane metric-rate coefficient, in N·s/m.
+    pub membrane_damping: f32,
+    /// Dihedral-rate coefficient per unit rest edge length, in N·s.
+    pub bend_damping: f32,
 }
 
 impl ClothVbdMaterial {
     pub(crate) fn is_valid(self) -> bool {
-        [self.shear, self.area, self.bend, self.shear + self.area]
-            .into_iter()
-            .all(|value| value.is_finite() && value >= 0.0)
+        [
+            self.shear,
+            self.area,
+            self.bend,
+            self.shear + self.area,
+            self.membrane_damping,
+            self.bend_damping,
+        ]
+        .into_iter()
+        .all(|value| value.is_finite() && value >= 0.0)
     }
 
     pub(crate) fn has_membrane(self) -> bool {
-        self.shear > 0.0 || self.area > 0.0
+        self.shear > 0.0 || self.area > 0.0 || self.membrane_damping > 0.0
     }
 
     pub(crate) fn has_hinges(self) -> bool {
-        self.bend > 0.0
+        self.bend > 0.0 || self.bend_damping > 0.0
     }
 }
 

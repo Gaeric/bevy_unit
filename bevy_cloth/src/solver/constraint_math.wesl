@@ -24,6 +24,7 @@ struct BendEvaluation {
     g3: vec3<f32>,
     error: f32,
     valid: bool,
+    angle: f32,
 };
 
 fn evaluate_bend(
@@ -61,23 +62,27 @@ fn evaluate_bend(
     let cos_angle = clamp(dot(normal0, normal1), -1.0, 1.0);
     let angle = atan2(sin_angle, cos_angle);
 
-    // Rest angles are signed; choose the shortest difference across +/-pi.
-    let pi = 3.141592653589793;
-    let two_pi = 6.283185307179586;
-    var error = angle - rest_angle;
-    if error > pi {
-        error -= two_pi;
-    } else if error < -pi {
-        error += two_pi;
-    }
-
+    let error = wrap_angle_difference(angle - rest_angle);
     let scaled0 = area0 / area0_squared;
     let scaled1 = area1 / area1_squared;
     let g0 = -edge_length * scaled0;
     let g1 = -edge_length * scaled1;
     let g2 = -(dot(a - d, edge) * scaled0 + dot(b - d, edge) * scaled1) / edge_length;
     let g3 = -(dot(c - a, edge) * scaled0 + dot(c - b, edge) * scaled1) / edge_length;
-    return BendEvaluation(g0, g1, g2, g3, error, true);
+    return BendEvaluation(g0, g1, g2, g3, error, true, angle);
+}
+
+// Both angles are signed atan2 values; one wrap gives the shortest difference.
+fn wrap_angle_difference(difference: f32) -> f32 {
+    let pi = 3.141592653589793;
+    let two_pi = 6.283185307179586;
+    if difference > pi {
+        return difference - two_pi;
+    }
+    if difference < -pi {
+        return difference + two_pi;
+    }
+    return difference;
 }
 
 fn xpbd_delta_lambda(error: f32, lambda: f32, alpha: f32, denominator: f32) -> f32 {

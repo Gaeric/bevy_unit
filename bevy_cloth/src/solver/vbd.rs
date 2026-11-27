@@ -94,13 +94,7 @@ pub(crate) fn init_vbd_pipelines(
         "vbd prediction layout",
         &BindGroupLayoutEntries::sequential(
             ShaderStages::COMPUTE,
-            (
-                step,
-                particles,
-                writable_vec4,
-                read_storage(16),
-                writable_vec4,
-            ),
+            (step, particles, writable_vec4, read_storage(16)),
         ),
     );
     let solve_layout = BindGroupLayoutDescriptor::new(
@@ -118,7 +112,7 @@ pub(crate) fn init_vbd_pipelines(
                         NonZeroU64::new(size_of::<ConstraintRangeParams>() as u64),
                     ),
                 ),
-                (6, uniform_buffer_sized(false, NonZeroU64::new(16))),
+                (6, uniform_buffer_sized(false, NonZeroU64::new(32))),
                 (7, read_storage(4)),
                 (9, read_storage(size_of::<Incident>() as u64)),
                 (10, read_storage(size_of::<Membrane>() as u64)),
@@ -186,7 +180,7 @@ impl VbdBindings {
         let limits = device.limits();
         let particle_count = u64::from(step.particle_count);
         let largest_storage = [
-            particle_count * 16,
+            particle_count * 32, // x_n and y, each with a vec4 stride
             (rest.offsets.len() as u64 + rest.vertices.len() as u64) * 4,
             if contact_stiffness > 0.0 && !rest.colors.is_empty() {
                 particle_count * CONTACT_STRIDE
@@ -227,21 +221,14 @@ impl VbdBindings {
         material: ClothVbdMaterial,
         contact_stiffness: f32,
     ) -> Self {
-        let targets = device.create_buffer(&BufferDescriptor {
-            label: Some("vbd inertia targets"),
-            size: cloth.previous_positions.size(),
-            usage: BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
         let predict = device.create_bind_group(
             "vbd prediction bind group",
             &cache.get_bind_group_layout(&pipelines.predict_layout),
             &BindGroupEntries::sequential((
                 cloth.step_params.as_entire_binding(),
                 cloth.particles.as_entire_binding(),
-                targets.as_entire_binding(),
-                cloth.velocities.as_entire_binding(),
                 cloth.previous_positions.as_entire_binding(),
+                cloth.velocities.as_entire_binding(),
             )),
         );
         let range_stride = constraint_range_param_stride(device);
@@ -288,6 +275,10 @@ impl VbdBindings {
                     material.area,
                     material.bend,
                     contact_stiffness,
+                    material.membrane_damping,
+                    material.bend_damping,
+                    0.0,
+                    0.0,
                 ]),
                 BufferUsages::UNIFORM,
             );
@@ -338,7 +329,7 @@ impl VbdBindings {
                 &BindGroupEntries::with_indices((
                     (0, cloth.step_params.as_entire_binding()),
                     (1, cloth.particles.as_entire_binding()),
-                    (2, targets.as_entire_binding()),
+                    (2, cloth.previous_positions.as_entire_binding()),
                     (
                         5,
                         BindingResource::Buffer(BufferBinding {
