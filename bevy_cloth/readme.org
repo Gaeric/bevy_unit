@@ -50,6 +50,16 @@
   #+end_src
   三个功能开关可独立使用：=--lra= 增加刚性距离上限；=--friction= 打开外部摩擦，若已打开自碰撞也会启用自接触摩擦；
   =--self-collision= 打开自碰撞。准备日志中的 =tethers= 是生成的长距离约束数。
+* Velvet GLB Attach
+  从 workspace 根目录运行，使用生产路径 =ClothPlugin=：
+  #+begin_src bash
+    cargo run -p bevy_cloth --example velvet-glb-scenes
+  #+end_src
+  场景是 40 分段的四角固定布片落向静止球。默认 Colored GS，点击 =Solver= 可切换 Jacobi 或 VBD；
+  切换或按 =R= 重建并暂停，再次点击当前选项不会重置。等窗口显示 =Paused, tick 0=，
+  按 =Space= 播放/暂停，按 =S= 单步。中键拖拽环绕，滚轮缩放。步长 1/60 s，每帧最多一步。
+  加载时保留 CPU 可读的位置和索引，关闭坐标转换及顶点压缩。重建时克隆布料 Mesh，不写回源 GLB。
+  碰撞使用三角网格 BVH，不复刻解析 SDF。该示例的 VBD 仅启用静态法向接触。
 * Blender 外部视觉对照
   从 workspace 根目录运行（已有缓存时只需最后一条）：
   #+begin_src bash

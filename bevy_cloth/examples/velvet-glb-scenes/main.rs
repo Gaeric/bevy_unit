@@ -1,0 +1,330 @@
+//! The Velvet Attach fixture with GLB meshes and the production ClothPlugin.
+
+mod panel;
+mod scene;
+
+use bevy::{
+    asset::AssetPlugin,
+    prelude::*,
+    render::{
+        Render, RenderApp, RenderSystems,
+        extract_resource::{ExtractResource, ExtractResourcePlugin},
+        mesh::allocator::MeshAllocator,
+        pipelined_rendering::PipelinedRenderingPlugin,
+        render_resource::{CachedPipelineState, PipelineCache, PipelineDescriptor},
+    },
+    shader::ShaderCacheError,
+    time::{TimeSystems, TimeUpdateStrategy},
+};
+
+use std::{
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Instant,
+};
+
+use bevy_cloth::{
+    ClothPlugin, ClothSolver,
+    legacy::demo::{LEGACY_FIXED_HZ, LegacyOrbitCamera, LegacyOrbitCameraPlugin, LegacySceneId},
+};
+use scene::{SceneAssets, SceneEntity};
+
+#[derive(Resource)]
+struct Demo {
+    solver: ClothSolver,
+    rebuild: bool,
+    playing: bool,
+    step: bool,
+    tick: u64,
+}
+
+impl Default for Demo {
+    fn default() -> Self {
+        Self {
+            solver: ClothSolver::ColoredGs,
+            rebuild: true,
+            playing: false,
+            step: false,
+            tick: 0,
+        }
+    }
+}
+
+impl Demo {
+    fn reset(&mut self) {
+        self.rebuild = true;
+        self.playing = false;
+        self.step = false;
+        self.tick = 0;
+    }
+}
+
+#[derive(Clone, Resource, ExtractResource)]
+#[extract_app(RenderApp)]
+struct SceneReady {
+    mesh: AssetId<Mesh>,
+    solver: ClothSolver,
+    has_self_contact: bool,
+    ready: Arc<AtomicBool>,
+}
+
+fn main() -> AppExit {
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(AssetPlugin {
+                file_path: Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("assets")
+                    .display()
+                    .to_string(),
+                ..default()
+            })
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Velvet GLB Attach — ClothPlugin".into(),
+                    resolution: (1280, 850).into(),
+                    ..default()
+                }),
+                ..default()
+            })
+            .disable::<PipelinedRenderingPlugin>(),
+    )
+    .add_plugins((
+        ClothPlugin,
+        LegacyOrbitCameraPlugin,
+        ExtractResourcePlugin::<SceneReady>::default(),
+    ))
+    .init_resource::<Demo>()
+    .insert_resource(TimeUpdateStrategy::FixedTimesteps(0))
+    .insert_resource(ClearColor(Color::srgb(0.04, 0.05, 0.08)))
+    .insert_resource(GlobalAmbientLight {
+        brightness: 300.0,
+        ..default()
+    })
+    .add_systems(Startup, (setup, panel::spawn))
+    .add_systems(First, set_tick_budget.before(TimeSystems))
+    .add_systems(
+        Update,
+        (
+            handle_keys,
+            rebuild_scene,
+            update_hud,
+            panel::highlight_selection,
+        )
+            .chain(),
+    )
+    .add_systems(FixedUpdate, count_tick);
+    app.world_mut()
+        .resource_mut::<Time<Fixed>>()
+        .set_timestep_hz(f64::from(LEGACY_FIXED_HZ));
+    app.sub_app_mut(RenderApp)
+        .add_systems(Render, check_scene_ready.after(RenderSystems::Render));
+    app.run()
+}
+
+fn setup(
+    mut commands: Commands,
+    server: Res<AssetServer>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    commands.insert_resource(SceneAssets::load(&server, &mut materials));
+    let orbit = LegacyOrbitCamera::source();
+    commands.spawn((Camera3d::default(), orbit.transform(), orbit));
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 9_000.0,
+            shadow_maps_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(3.0, 5.0, 4.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+    ));
+}
+
+fn handle_keys(keys: Res<ButtonInput<KeyCode>>, mut demo: ResMut<Demo>) {
+    if keys.just_pressed(KeyCode::KeyR) {
+        demo.reset();
+    } else if keys.just_pressed(KeyCode::Space) {
+        demo.playing = !demo.playing;
+    } else if keys.just_pressed(KeyCode::KeyS) {
+        demo.playing = false;
+        demo.step = true;
+    }
+}
+
+fn rebuild_scene(
+    mut commands: Commands,
+    mut demo: ResMut<Demo>,
+    scene_assets: Res<SceneAssets>,
+    server: Res<AssetServer>,
+    old_entities: Query<Entity, With<SceneEntity>>,
+    previous: Option<Res<SceneReady>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) -> Result {
+    if !demo.rebuild {
+        return Ok(());
+    }
+    if let Some(previous) = previous {
+        for entity in &old_entities {
+            commands.entity(entity).despawn();
+        }
+        meshes.remove(previous.mesh);
+        commands.remove_resource::<SceneReady>();
+    }
+    if let Some(mesh) = scene::spawn_scene(
+        &mut commands,
+        &scene_assets,
+        &server,
+        &mut meshes,
+        demo.solver,
+    )? {
+        demo.rebuild = false;
+        commands.insert_resource(SceneReady {
+            mesh,
+            solver: demo.solver,
+            has_self_contact: demo.solver != ClothSolver::Vbd,
+            ready: Arc::new(AtomicBool::new(false)),
+        });
+    }
+    Ok(())
+}
+
+fn set_tick_budget(
+    mut demo: ResMut<Demo>,
+    ready: Option<Res<SceneReady>>,
+    fixed: Res<Time<Fixed>>,
+    mut clock: ResMut<TimeUpdateStrategy>,
+    mut next_tick: Local<Option<Instant>>,
+) {
+    let ready = !demo.rebuild && ready.is_some_and(|scene| scene.ready.load(Ordering::Acquire));
+    let due = if ready && demo.playing {
+        let now = Instant::now();
+        let deadline = next_tick.get_or_insert(now);
+        if now >= *deadline {
+            // Never batch catch-up ticks: ClothPlugin samples one collider/pin pose per frame.
+            *deadline = (*deadline + fixed.timestep()).max(now);
+            true
+        } else {
+            false
+        }
+    } else {
+        *next_tick = None;
+        false
+    };
+    let advance = ready && (due || demo.step);
+    if advance {
+        demo.step = false;
+    }
+    *clock = TimeUpdateStrategy::FixedTimesteps(u32::from(advance));
+}
+
+fn count_tick(mut demo: ResMut<Demo>) {
+    demo.tick += 1;
+}
+
+fn check_scene_ready(
+    scene: Option<Res<SceneReady>>,
+    cache: Res<PipelineCache>,
+    allocator: Res<MeshAllocator>,
+    mut waiting: Local<Option<(AssetId<Mesh>, Instant)>>,
+) {
+    let Some(scene) = scene else { return };
+    if scene.ready.load(Ordering::Acquire) {
+        return;
+    }
+    if waiting.is_none_or(|(mesh, _)| mesh != scene.mesh) {
+        *waiting = Some((scene.mesh, Instant::now()));
+    }
+    let common = [
+        "xpbd update_velocity",
+        "xpbd output_mesh",
+        "xpbd collider transform_vertices",
+        "xpbd collider refit_leaves",
+        "xpbd collider refit_internal",
+    ];
+    let xpbd = ["xpbd predict", "stabilize_contact", "solve_contact"];
+    let self_contact = [
+        "cloth self-contact clear_hash",
+        "cloth self-contact count_hash",
+        "cloth self-contact scan_blocks",
+        "cloth self-contact add_block_offsets",
+        "cloth self-contact scatter_hash",
+        "cloth self-contact find_candidates",
+        "cloth self-contact gather_self_contact",
+        "cloth self-contact apply_self_contact",
+    ];
+    let solver: &[&str] = match scene.solver {
+        ClothSolver::ColoredGs => &["xpbd solve_stretch", "xpbd solve_bending"],
+        ClothSolver::Jacobi => &["solve_stretch_jacobi", "solve_bend_jacobi", "apply_jacobi"],
+        ClothSolver::Vbd => &[
+            "predict_vbd",
+            "solve_vbd_color",
+            "reset_vbd_contacts",
+            "gather_vbd_contacts",
+        ],
+    };
+    let required = common
+        .into_iter()
+        .chain(solver.iter().copied())
+        .chain(
+            xpbd.into_iter()
+                .filter(|_| scene.solver != ClothSolver::Vbd),
+        )
+        .chain(self_contact.into_iter().filter(|_| scene.has_self_contact));
+    let mut pending = Vec::new();
+    for label in required {
+        let state = cache.pipelines().find_map(|p| {
+            let PipelineDescriptor::ComputePipelineDescriptor(descriptor) = &p.descriptor else {
+                return None;
+            };
+            (descriptor.label.as_deref() == Some(label)).then_some(&p.state)
+        });
+        match state {
+            Some(CachedPipelineState::Ok(_)) => (),
+            Some(CachedPipelineState::Err(
+                ShaderCacheError::ShaderNotLoaded(_)
+                | ShaderCacheError::ShaderImportNotYetAvailable,
+            )) => pending.push(label),
+            Some(CachedPipelineState::Err(error)) => panic!("{label}: {error}"),
+            _ => pending.push(label),
+        }
+    }
+    let mesh_ready = allocator.mesh_vertex_slice(&scene.mesh).is_some();
+    if pending.is_empty() && mesh_ready {
+        // Checked after the render graph, while fixed ticks are still paused.
+        scene.ready.store(true, Ordering::Release);
+    } else if waiting.is_some_and(|(_, since)| since.elapsed().as_secs() >= 30) {
+        panic!(
+            "Timed out preparing scene; pending GPU pipelines: {pending:?}; mesh allocated: {mesh_ready}"
+        );
+    }
+}
+
+fn update_hud(
+    demo: Res<Demo>,
+    ready: Option<Res<SceneReady>>,
+    mut hud: Single<&mut Text, With<panel::Hud>>,
+) {
+    let state = if demo.rebuild {
+        "Loading GLBs"
+    } else if !ready.is_some_and(|scene| scene.ready.load(Ordering::Acquire)) {
+        "Preparing GPU"
+    } else if demo.playing {
+        "Playing"
+    } else {
+        "Paused"
+    };
+    let features = if demo.solver == ClothSolver::Vbd {
+        "VBD: static contact, no friction or self-contact"
+    } else {
+        "XPBD: mesh contact, friction, particle self-contact"
+    };
+    hud.0 = format!(
+        "{}  |  {:?}  |  {state}, tick {}\n{features}\nSpace play/pause  S step  R reset",
+        LegacySceneId::Attach.label(),
+        demo.solver,
+        demo.tick
+    );
+}
