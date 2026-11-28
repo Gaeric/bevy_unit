@@ -171,8 +171,13 @@ impl SelfCollision {
         if particle_workgroups.max(bucket_workgroups) > limits.max_compute_workgroups_per_dimension {
             return Err("self-contact exceeds device dispatch size".into());
         }
-        let particle_bytes = u64::from(params.particle_count) * size_of::<Particle>() as u64;
-        if cloth.particles.size() != particle_bytes || cloth.previous_positions.size() != particle_bytes {
+        let particle_count = u64::from(params.particle_count);
+        let particle_bytes = particle_count * size_of::<Particle>() as u64;
+        let history_bytes = particle_count * size_of::<[f32; 4]>() as u64;
+        // Only read the x_n prefix; VBD stores its fixed inertia targets after it.
+        if cloth.particles.size() != particle_bytes
+            || cloth.previous_positions.size() < history_bytes
+        {
             return Err("self-contact rest and cloth GPU particle counts differ".into());
         }
         let candidate_bytes = u64::from(prepared.candidate_words) * 4;
