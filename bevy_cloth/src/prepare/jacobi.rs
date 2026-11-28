@@ -21,15 +21,23 @@ impl JacobiSchedule {
         .map_err(|_| "Jacobi endpoint count exceeds u32")?;
         // Same order as jacobi.wesl: two slots per stretch, four per bend,
         // then one per tether. The fixed tether anchor needs no correction slot.
-        let endpoints = || {
+        let endpoints = {
             stretch
                 .iter()
                 .flat_map(|edge| edge.particles)
                 .chain(bend.iter().flat_map(|hinge| hinge.particles))
                 .chain(tethers.iter().map(|tether| tether.particle))
         };
+        Self::from_endpoints(particle_count, slot_count, endpoints)
+    }
+
+    fn from_endpoints(
+        particle_count: usize,
+        slot_count: u32,
+        endpoints: impl Iterator<Item = u32> + Clone,
+    ) -> Result<Self, String> {
         let mut offsets = vec![0_u32; particle_count + 1];
-        for particle in endpoints() {
+        for particle in endpoints.clone() {
             offsets[particle as usize + 1] += 1;
         }
         for particle in 0..particle_count {
@@ -37,7 +45,7 @@ impl JacobiSchedule {
         }
         let mut cursors = offsets[..particle_count].to_vec();
         let mut slots = vec![0; slot_count as usize];
-        for (slot, particle) in endpoints().enumerate() {
+        for (slot, particle) in endpoints.enumerate() {
             let cursor = &mut cursors[particle as usize];
             slots[*cursor as usize] = slot as u32;
             *cursor += 1;
