@@ -20,6 +20,7 @@ use crate::{
         transform::ColliderTransformPipeline,
     },
     components::{ClothStepSettings, CollisionGroup, VbdStaticCollider},
+    debug::{RenderCapture, xpbd::Recorder},
     prepare::{ColoredGsSchedule, ConstraintColorRange, ConstraintSchedule, PreparedCloth},
 };
 
@@ -207,6 +208,7 @@ pub(crate) fn simulate_cloths(
         Has<VbdStaticCollider>,
     )>,
     mut cloths: Query<(
+        Entity,
         &ClothBuffers,
         &ClothIntegrationBindGroup,
         &ClothContactBindGroup,
@@ -219,7 +221,13 @@ pub(crate) fn simulate_cloths(
         Option<&GpuAttachments>,
         &mut ClothSimulation,
     )>,
+    mut capture: Option<ResMut<RenderCapture>>,
 ) {
+    let mut capture = if capture.as_deref().is_some_and(RenderCapture::is_ready) {
+        capture.as_deref_mut()
+    } else {
+        None
+    };
     let Some(update_velocity) = cache.get_compute_pipeline(integration_pipelines.update_velocity)
     else {
         return;
@@ -258,6 +266,7 @@ pub(crate) fn simulate_cloths(
     let frictional_contact = cache.get_compute_pipeline(contact_pipeline.solve_contact);
 
     for (
+        entity,
         cloth_buffers,
         integration,
         contact_bind_group,
@@ -428,13 +437,40 @@ pub(crate) fn simulate_cloths(
             self_contact: self_contact.as_ref(),
             sweep: &sweep,
         };
+        if tick_cursor < ticks.requested
+            && let Some(capture) = capture.as_deref_mut()
+            && let Some(ready) = capture.take_ready(entity)
+            && let Some(recorder) = ready.start(context.render_device(), cloth_buffers)
+        {
+            tick.record(&mut context, &recorder);
+            tick_cursor += 1;
+            capture.submit(recorder.finish(context.command_encoder(), tick_cursor));
+        }
         while tick_cursor < ticks.requested {
-            tick.record(&mut context);
-            // Bevy submits the command stream later; no CPU wait or particle readback.
+            tick.record(&mut context, &NoTrace);
+            // This cursor tracks requests, not GPU completion.
             tick_cursor += 1;
         }
 
         simulation.tick_cursor = Some(tick_cursor);
+    }
+}
+
+// The ordinary tick uses the same dispatch sequence without diagnostic work.
+trait TickTrace {
+    fn constraint_positions(&self, pass: &mut ComputePass<'_>, substep: u32, after: bool);
+}
+
+struct NoTrace;
+
+impl TickTrace for NoTrace {
+    #[inline(always)]
+    fn constraint_positions(&self, _: &mut ComputePass<'_>, _: u32, _: bool) {}
+}
+
+impl TickTrace for Recorder {
+    fn constraint_positions(&self, pass: &mut ComputePass<'_>, substep: u32, after: bool) {
+        Recorder::constraint_positions(self, pass, substep, after);
     }
 }
 
@@ -455,7 +491,7 @@ struct RecordTick<'a> {
 }
 
 impl RecordTick<'_> {
-    fn record(&self, context: &mut RenderContext) {
+    fn record(&self, context: &mut RenderContext, trace: &impl TickTrace) {
         // XPBD keeps its tick-start pin update before contact stabilization.
         if self.stabilize.is_some()
             && let Some((pins, pipeline)) = self.pins
@@ -523,9 +559,11 @@ impl RecordTick<'_> {
             if let Some(contact) = self.self_contact {
                 contact.record(&mut pass);
             }
+            trace.constraint_positions(&mut pass, substep, false);
             for _ in 0..self.iterations {
                 self.sweep.record(&mut pass);
             }
+            trace.constraint_positions(&mut pass, substep, true);
 
             pass.set_pipeline(self.velocity.0);
             pass.set_bind_group(0, self.velocity.1, &[]);

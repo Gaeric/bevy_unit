@@ -3,6 +3,7 @@
 mod collision;
 mod components;
 pub mod compute_skinning;
+pub mod debug;
 mod output;
 mod plugin;
 mod prepare;
