@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Generate cloth.glb and sphere.glb; Python standard library only.
+"""Generate the Velvet GLB meshes using only the Python standard library.
 
-Run: python3 bevy_cloth/tools/generate_glb.py
-Geometry/materials only, without simulation or attachment metadata.
+Run without arguments for the original Collision pair, or pass --scenes
+for the full seven-scene asset set. Poses and pins are set by the Rust examples.
 """
 
+import argparse
 import json
 import math
 from pathlib import Path
@@ -13,7 +14,8 @@ import struct
 ASSETS = Path(__file__).resolve().parents[1] / "assets" / "velvet"
 
 
-def write_glb(name, positions, normals, indices, translation, scale, uvs=None):
+def write_glb(name, positions, normals, indices, translation=(0, 0, 0),
+              scale=(1, 1, 1), uvs=None, *, directory=ASSETS, embed_fabric=True):
     binary, views, accessors = bytearray(), [], []
 
     def view(data, target=None):
@@ -56,7 +58,7 @@ def write_glb(name, positions, normals, indices, translation, scale, uvs=None):
                     "indices": len(accessors) - 1, "material": 0, "mode": 4}]}],
         "materials": [material], "accessors": accessors, "bufferViews": views,
     }
-    if uvs is not None:
+    if uvs is not None and embed_fabric:
         image = view((ASSETS / "fabric2.jpg").read_bytes())
         doc["images"] = [{"bufferView": image, "mimeType": "image/jpeg"}]
         doc["samplers"] = [{"magFilter": 9729, "minFilter": 9987,
@@ -70,7 +72,7 @@ def write_glb(name, positions, normals, indices, translation, scale, uvs=None):
     output = (struct.pack("<III", 0x46546C67, 2, 28 + len(encoded) + len(binary))
               + struct.pack("<II", len(encoded), 0x4E4F534A) + encoded
               + struct.pack("<II", len(binary), 0x004E4942) + binary)
-    path = ASSETS / (name.lower() + ".glb")
+    path = directory / (name.lower() + ".glb")
     path.write_bytes(output)
     print(f"{path}: {len(positions)} vertices, {len(indices) // 3} triangles, "
           f"{len(output)} bytes")
@@ -129,7 +131,48 @@ def sphere(subdivisions=3):
     return positions, [i for face in faces for i in face]
 
 
+def scene_meshes():
+    directory = ASSETS / "scenes"
+    directory.mkdir(exist_ok=True)
+    for resolution in (16, 36, 40, 60, 64, 200):
+        positions, normals, indices, uvs = cloth(resolution)
+        write_glb(f"cloth-{resolution}", positions, normals, indices, uvs=uvs,
+                  directory=directory, embed_fabric=False)
+
+    positions, indices = sphere()
+    write_glb("sphere", positions, positions, indices, directory=directory)
+
+    corners = [(-25, 0, -25), (-25, 0, 25), (25, 0, 25), (25, 0, -25)]
+    write_glb("ground", corners, [(0, 1, 0)] * 4, [0, 1, 2, 0, 2, 3],
+              directory=directory)
+
+    # Flat normals require four vertices per face. Every face winds outward.
+    positions, normals, indices = [], [], []
+    for normal, tangent, bitangent in [
+        ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
+        ((-1, 0, 0), (0, 1, 0), (0, 0, -1)),
+        ((0, 1, 0), (0, 0, 1), (1, 0, 0)),
+        ((0, -1, 0), (0, 0, 1), (-1, 0, 0)),
+        ((0, 0, 1), (1, 0, 0), (0, 1, 0)),
+        ((0, 0, -1), (1, 0, 0), (0, -1, 0)),
+    ]:
+        first = len(positions)
+        for u, v in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            positions.append(tuple((n + u * t + v * b) * 0.5
+                                   for n, t, b in zip(normal, tangent, bitangent)))
+            normals.append(normal)
+        indices.extend(first + i for i in (0, 1, 2, 0, 2, 3))
+    write_glb("cube", positions, normals, indices, directory=directory)
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--scenes", action="store_true")
+    args = parser.parse_args()
+    if args.scenes:
+        scene_meshes()
+        return
+
     positions, normals, indices, uvs = cloth()
     write_glb("Cloth", positions, normals, indices,
               (0.0, 2.5, 0.0), (1.0, 1.0, 1.0), uvs)
