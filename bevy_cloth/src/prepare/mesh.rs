@@ -239,14 +239,12 @@ pub(crate) fn prepare_mesh(
         })
         .collect();
 
-    let (stretch_constraints, bend_constraints, tethers, schedule, self_collision) = match solver {
+    let self_collision = self_collision
+        .map(|settings| PreparedSelfCollision::new(settings, &particles))
+        .transpose()?;
+    let (stretch_constraints, bend_constraints, tethers, schedule) = match solver {
         MeshSolver::Xpbd(solver) => {
-            let self_collision = self_collision
-                .map(|settings| PreparedSelfCollision::new(settings, &particles))
-                .transpose()?;
-            let (stretch, bend, tethers, schedule) =
-                prepare_xpbd(&particles, &indices, &anchors, config, solver, long_range)?;
-            (stretch, bend, tethers, schedule, self_collision)
+            prepare_xpbd(&particles, &indices, &anchors, config, solver, long_range)?
         }
         MeshSolver::Vbd {
             material,
@@ -263,8 +261,8 @@ pub(crate) fn prepare_mesh(
             if !inv_mass.is_finite() || inv_mass == 0.0 {
                 return Err("VBD inverse mass must be positive and finite".into());
             }
-            if long_range.is_some() || self_collision.is_some() {
-                return Err("VBD does not yet support LRA or self-collision".into());
+            if long_range.is_some() {
+                return Err("VBD does not yet support LRA".into());
             }
             let rest = VbdRestData::new(&particles, &indices, &anchors, material)?;
             (
@@ -276,7 +274,6 @@ pub(crate) fn prepare_mesh(
                     material,
                     contact_stiffness,
                 },
-                None,
             )
         }
     };

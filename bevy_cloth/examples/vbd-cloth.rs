@@ -1,4 +1,4 @@
-//! Headless GPU probe for VBD inertia, elasticity, static contact and material damping.
+//! Headless GPU probe for VBD inertia, elasticity, contact and material damping.
 
 use bevy::{
     app::PluginsState,
@@ -24,9 +24,9 @@ use bevy::{
     winit::WinitPlugin,
 };
 use bevy_cloth::{
-    Cloth, ClothDynamicAttachments, ClothExternalFriction, ClothPlugin, ClothSolver,
-    ClothStepSettings, ClothVbdContact, ClothVbdMaterial, DynamicAttachment, FixedAttachment,
-    VbdStaticCollider,
+    Cloth, ClothDynamicAttachments, ClothExternalFriction, ClothPlugin, ClothSelfCollision,
+    ClothSolver, ClothStepSettings, ClothVbdContact, ClothVbdMaterial, DynamicAttachment,
+    FixedAttachment, VbdStaticCollider,
 };
 use std::{
     thread,
@@ -98,6 +98,41 @@ fn main() {
         },
         2,
     );
+    // The second triangle supplies a fixed contact vertex without changing
+    // the first triangle's membrane block.
+    let (self_contact_entity, self_contact) = spawn_case(
+        world,
+        &[
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            -Vec3::X,
+            -Vec3::X + 2.0 * Vec3::Y,
+            -Vec3::X + 2.0 * Vec3::Z,
+        ],
+        &[0, 1, 2, 3, 4, 5],
+        &[
+            (0, Vec3::ZERO),
+            (2, Vec3::Y),
+            (3, 0.75 * Vec3::X),
+            (4, -Vec3::X + 2.0 * Vec3::Y),
+            (5, -Vec3::X + 2.0 * Vec3::Z),
+        ],
+        Vec3::X * 64.0,
+        ClothVbdMaterial {
+            shear: 128.0,
+            area: 128.0,
+            ..default()
+        },
+        2,
+    );
+    world
+        .entity_mut(self_contact_entity)
+        .insert(ClothSelfCollision {
+            diameter: 0.4375,
+            friction: 0.0,
+            neighbor_capacity: 8,
+        });
     let (_, hinge) = spawn_case(
         world,
         &[Vec3::ZERO, Vec3::X, Vec3::Y, -Vec3::Y],
@@ -294,6 +329,21 @@ fn main() {
         &membrane,
         &[Vec3::ZERO, (8.0 / 7.0) * Vec3::X, Vec3::Y],
     );
+    // The predictor at x=1.25 is outside the 7/16 clearance of the pin at x=3/4.
+    // The membrane brings it to 8/7, then self-contact pushes it to x=19/16.
+    check(
+        &app,
+        "self-contact after VBD sweeps",
+        &self_contact,
+        &[
+            Vec3::ZERO,
+            1.1875 * Vec3::X,
+            Vec3::Y,
+            0.75 * Vec3::X,
+            -Vec3::X + 2.0 * Vec3::Y,
+            -Vec3::X + 2.0 * Vec3::Z,
+        ],
+    );
     // Both free corners predict z = -0.25. The second corner's block uses
     // the angle after the first corner moved, not the original 2*atan(0.25).
     check(
@@ -416,6 +466,14 @@ fn pipelines_ready(app: &App) -> bool {
         "xpbd collider refit_internal",
         "xpbd update_velocity",
         "xpbd output_mesh",
+        "cloth self-contact clear_hash",
+        "cloth self-contact count_hash",
+        "cloth self-contact scan_blocks",
+        "cloth self-contact add_block_offsets",
+        "cloth self-contact scatter_hash",
+        "cloth self-contact find_candidates",
+        "cloth self-contact gather_self_contact",
+        "cloth self-contact apply_self_contact",
     ]
     .into_iter()
     .all(|label| {

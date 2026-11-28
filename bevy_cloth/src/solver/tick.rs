@@ -631,7 +631,8 @@ impl RecordTick<'_> {
                     Some(substep),
                 );
             }
-            if let Some(contact) = self.self_contact {
+            // Keep XPBD's existing projection order, even without external colliders.
+            if self.stabilize.is_some() && let Some(contact) = self.self_contact {
                 contact.record(&mut pass);
             }
             trace.constraint_positions(&mut pass, substep, false);
@@ -640,6 +641,10 @@ impl RecordTick<'_> {
             }
             trace.constraint_positions(&mut pass, substep, true);
 
+            // Project VBD's final positions once, outside the elastic color sweeps.
+            if self.stabilize.is_none() && let Some(contact) = self.self_contact {
+                contact.record(&mut pass);
+            }
             pass.set_pipeline(self.velocity.0);
             pass.set_bind_group(0, self.velocity.1, &[]);
             pass.dispatch_workgroups(self.particle_workgroups, 1, 1);

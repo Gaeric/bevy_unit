@@ -92,7 +92,7 @@ pub(crate) fn upload_cloths(
             ) {
                 Ok(buffers) => Some(buffers),
                 Err(error) => {
-                    warn!(?entity, %error, "XPBD cloth GPU self-contact preparation failed");
+                    warn!(?entity, %error, "Cloth GPU self-contact preparation failed");
                     continue;
                 }
             },

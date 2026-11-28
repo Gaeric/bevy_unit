@@ -254,7 +254,7 @@ pub(crate) struct SelfCollisionStep<'a> {
 }
 
 impl SelfCollisionStep<'_> {
-    /// Record once per substep, after external contacts and before the internal constraints.
+    /// Record one discrete self-contact projection from the current particle positions.
     pub fn record(&self, pass: &mut ComputePass<'_>) {
         let cloth = self.cloth;
         let groups = cloth.particle_workgroups;
@@ -270,7 +270,7 @@ impl SelfCollisionStep<'_> {
         }
         dispatch(pass, self.scatter, &cloth.scatter, groups);
         dispatch(pass, self.candidates, &cloth.candidates, groups);
-        // Particles are still the post-external-contact snapshot. Only apply writes them.
+        // Candidate search and gather see the same positions. Only apply writes them.
         dispatch(pass, self.gather, &cloth.gather, groups);
         dispatch(pass, self.apply, &cloth.apply, groups);
         cloth.telemetry.dirty.store(true, Ordering::Relaxed);

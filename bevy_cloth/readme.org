@@ -73,7 +73,12 @@
   VBD 不读取 =Cloth= 的 XPBD compliance 字段；默认求解器仍是 XPBD Colored GS。
 
   使用世界空间的静止三角形膜和二面角铰链；每个子步固定惯性目标，逐色原地更新自由顶点。
-  固定与动态硬挂点和 Mesh GPU 写回共用。给 VBD 布料添加自碰撞或 LRA 设置会拒绝初始化。
+  固定与动态硬挂点和 Mesh GPU 写回共用。给 VBD 布料添加 LRA 设置仍会拒绝初始化。
+
+  粒子自碰撞：添加 =ClothSelfCollision { diameter, friction, neighbor_capacity }=。
+  每个子步在 VBD sweeps 之后、速度重建之前，用空间哈希寻找近邻，再从同一份位置计算并应用一次 Jacobi 修正。
+  不改变 VBD 顶点块或 XPBD 原有调度。静止网格中已在直径范围内的粒子对不参与；
+  不检测顶点–三角形、边–边或连续碰撞，也不处理不同 Cloth 实体间的接触。
 
   静态法向接触：在布料上加 =ClothVbdContact { stiffness }=（N/m），在同组碰撞网格上加
   =VbdStaticCollider=（自动补上 =MeshCollider=）。网格及世界变换须保持不变；不读取蒙皮结果。
@@ -95,7 +100,7 @@
   #+begin_src bash
     cargo run -p bevy_cloth --example vbd-cloth
   #+end_src
-  示例读取 GPU Mesh 输出，检查惯性、膜和两色铰链、外部接触与摩擦。
+  示例读取 GPU Mesh 输出，检查惯性、膜和两色铰链、外部接触与摩擦，以及在 sweep 之后激活的粒子自碰撞。
   也检查刚体运动不受材料阻尼、铰链角速率响应和膜振动衰减。
   全部通过时打印 =VBD cloth GPU probe passed=。
 * 动态硬挂点

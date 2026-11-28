@@ -104,9 +104,10 @@ pub struct ClothExternalFriction {
     pub coefficient: f32,
 }
 
-/// Opt-in discrete particle contact within one cloth. Add alongside `Cloth`;
-/// later edits do not change the simulation. Pairs already within one diameter
-/// in the raw rest mesh are excluded.
+/// Opt-in discrete particle contact within one cloth (XPBD or VBD). Add alongside
+/// `Cloth`; later edits do not change the simulation. Pairs already within one
+/// diameter in the raw rest mesh are excluded. VBD projects self-contact once
+/// after its sweeps in each substep, outside the vertex-block solve.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct ClothSelfCollision {
     /// World-space minimum pair separation, in meters.
