@@ -76,10 +76,6 @@ pub(crate) fn prepare_added_cloths(
                 warn!(?entity, "VBD requires ClothVbdMaterial");
                 continue;
             };
-            if friction.is_some() {
-                warn!(?entity, "VBD does not yet support contact friction");
-                continue;
-            }
             super::mesh::MeshSolver::Vbd {
                 material: *material,
                 contact_stiffness: vbd_contact.map_or(0.0, |contact| contact.stiffness),

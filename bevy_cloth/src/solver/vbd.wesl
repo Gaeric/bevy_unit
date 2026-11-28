@@ -1,6 +1,6 @@
 import super::layout::{Particle, StepParams, ConstraintRangeParams};
-import super::vbd_energy::{IDENTITY_3, outer_self, evaluate_vbd_membrane, evaluate_vbd_hinge};
-import super::super::collision::bvh_query::{closest_hit, QUERY_OK, INVALID_TRIANGLE};
+import super::vbd_energy::{VbdBlock, IDENTITY_3, outer_self, evaluate_vbd_membrane, evaluate_vbd_hinge};
+import super::super::collision::bvh_query::{closest_hit, finite_scalar, QUERY_OK, INVALID_TRIANGLE};
 
 struct Membrane {
     particles: vec3<u32>,
@@ -162,6 +162,26 @@ fn solve_spd(h: mat3x3<f32>, rhs: vec3<f32>) -> BlockSolution {
     return cholesky(a + 1e-6 * IDENTITY_3, b);
 }
 
+fn static_friction_block(
+    displacement: vec3<f32>, normal: vec3<f32>, force_cap: f32, dt: f32,
+) -> VbdBlock {
+    let slip = displacement - dot(displacement, normal) * normal;
+    let slip_length = length(slip);
+    var zero: VbdBlock;
+    if !finite_scalar(slip_length) {
+        return zero;
+    }
+
+    // Quadratic near rest, Coulomb-capped above 1 cm/s. Freeze the normal
+    // load and use a PSD quadratic approximation in the tangent plane.
+    let stiffness = force_cap / max(slip_length, 0.01 * dt);
+    if !finite_scalar(stiffness) {
+        return zero;
+    }
+    let tangent_projector = IDENTITY_3 - outer_self(normal);
+    return VbdBlock(-stiffness * slip, stiffness * tangent_projector);
+}
+
 @compute @workgroup_size(64)
 fn solve_vbd_color(@builtin(global_invocation_id) invocation: vec3<u32>) {
     if invocation.x >= color.count {
@@ -223,8 +243,17 @@ fn solve_vbd_color(@builtin(global_invocation_id) invocation: vec3<u32>) {
         let gap = dot(particle.position - contact.point_and_distance_squared.xyz, normal);
         let compression = step.collision_margin - gap;
         if compression > 0.0 && any(normal != vec3<f32>(0.0)) {
-            force += (material.contact_stiffness * compression) * normal;
+            let normal_load = material.contact_stiffness * compression;
+            force += normal_load * normal;
             hessian += material.contact_stiffness * outer_self(normal);
+            if step.external_friction > 0.0 {
+                let displacement = particle.position - substep_positions[vertex].xyz;
+                let friction = static_friction_block(
+                    displacement, normal, step.external_friction * normal_load, dt,
+                );
+                force += friction.force;
+                hessian += friction.hessian;
+            }
         }
     }
 

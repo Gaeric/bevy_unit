@@ -24,8 +24,9 @@ use bevy::{
     winit::WinitPlugin,
 };
 use bevy_cloth::{
-    Cloth, ClothDynamicAttachments, ClothPlugin, ClothSolver, ClothStepSettings, ClothVbdContact,
-    ClothVbdMaterial, DynamicAttachment, FixedAttachment, VbdStaticCollider,
+    Cloth, ClothDynamicAttachments, ClothExternalFriction, ClothPlugin, ClothSolver,
+    ClothStepSettings, ClothVbdContact, ClothVbdMaterial, DynamicAttachment, FixedAttachment,
+    VbdStaticCollider,
 };
 use std::{
     thread,
@@ -148,6 +149,28 @@ fn main() {
         entity.get_mut::<Cloth>().unwrap().collision_margin = 0.0625;
         entity.insert(ClothVbdContact { stiffness: 256.0 });
     }
+
+    let slide = |world: &mut World, x, coefficient| {
+        let (entity, mesh) = spawn_case(
+            world,
+            &[Vec3::ZERO, x * Vec3::X, Vec3::Y],
+            &[0, 1, 2],
+            &[(0, Vec3::ZERO), (2, Vec3::Y)],
+            64.0 * (Vec3::X + Vec3::Y),
+            ClothVbdMaterial::default(),
+            1,
+        );
+        let mut entity = world.entity_mut(entity);
+        entity.get_mut::<Cloth>().unwrap().collision_margin = 0.0625;
+        entity.insert((
+            ClothVbdContact { stiffness: 256.0 },
+            ClothExternalFriction { coefficient },
+        ));
+        mesh
+    };
+    let frictionless_slide = slide(world, 0.75, 0.0);
+    let frictional_slide = slide(world, 0.75, 0.5);
+    let friction_without_contact = slide(world, 0.5, 0.5);
 
     // Pure damping must not resist a rigid translation or a finite rotation.
     let shell = [Vec3::ZERO, Vec3::X, Vec3::Y, -Vec3::Y];
@@ -300,6 +323,27 @@ fn main() {
         "contact and membrane",
         &coupled,
         &[Vec3::ZERO, (37.0 / 44.0) * Vec3::X, Vec3::Y],
+    );
+
+    check(
+        &app,
+        "contact with zero friction",
+        &frictionless_slide,
+        &[Vec3::ZERO, Vec3::new(0.90625, 0.25, 0.0), Vec3::Y],
+    );
+    // First sweep: normal load is 256 * 0.1875 = 48 N. The force cap is
+    // 24 N and 0.25 m of predicted slip gives 96 N/m of tangent curvature.
+    check(
+        &app,
+        "static contact friction",
+        &frictional_slide,
+        &[Vec3::ZERO, Vec3::new(0.90625, 2.0 / 11.0, 0.0), Vec3::Y],
+    );
+    check(
+        &app,
+        "friction without active contact",
+        &friction_without_contact,
+        &[Vec3::ZERO, Vec3::new(0.75, 0.25, 0.0), Vec3::Y],
     );
 
     check(

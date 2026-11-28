@@ -95,11 +95,12 @@ pub struct ClothLongRangeAttachments {
 }
 
 /// Opt-in friction against external mesh colliders. Add alongside `Cloth`.
-/// Without this component, external contact only corrects the normal direction.
+/// VBD requires enabled `ClothVbdContact` and only uses static colliders.
+/// Without this component, external contact only responds in the normal direction.
 /// Read when adding `Cloth`; later edits do not change the simulation.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct ClothExternalFriction {
-    /// Finite, nonnegative Coulomb coefficient used for the tangential correction cap.
+    /// Finite, nonnegative Coulomb coefficient (zero disables friction).
     pub coefficient: f32,
 }
 
