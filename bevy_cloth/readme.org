@@ -56,11 +56,16 @@
   后续帧用 =take_result(id)= 取得一次结果。首次请求会异步准备管线，抓就绪后的下一个实际求解 tick；
   不暂停或推进模拟。请求与读回共用，=ClothDiagnostics= 按实际准备的求解器返回各自的诊断数据。
 
-  当前结果为 =ClothDiagnostics::Xpbd=（Colored GS / Jacobi），记录各子步内部约束 sweeps 前后的粒子位置。
+  当前结果为 =ClothDiagnostics::Xpbd=（Colored GS / Jacobi）。按碰撞体实际 dispatch 顺序记录
+  tick 开头的稳定投影及各子步的外部投影：粒子前后位置、查询结果、命中三角形、接触法线、
+  有符号间隙、margin、法向和摩擦修正量。空投影列表表示没有碰撞体参与；有效表面但零修正
+  与查询失败是两回事。各子步还保留内部约束前后的位置，可与外部投影结果对照。
+  这些值来自抓取 tick 的实际投影，不用最终位置重查。普通 tick 仍用原接触管线。
+
   一次只抓一块已准备的布，最多 64 个粒子和 64 个子步。暂无 VBD 诊断或单条内部约束明细。
   无窗口验算：=cargo run -p bevy_cloth --example xpbd-skinned-collider -- --capture=。
-  预期打印 =XPBD position capture passed=：隔离布料位置不变，旋转碰撞体将测试粒子推到 margin，
-  内部约束前后的位置相同。
+  预期打印 =XPBD contact capture passed=：旋转帧投影前后 =z= 从 0.02 到 0.10，
+  法向修正约为 0.08，子步仍查询到表面但不再需要明显修正；隔离布料的外部投影列表为空。
 * VBD
   在同一实体上添加 =Cloth=、=ClothSolver::Vbd= 和显式的
   =ClothVbdMaterial=。膜的 =shear= 与 =area= 单位为 N/m，=bend= 单位为 N，

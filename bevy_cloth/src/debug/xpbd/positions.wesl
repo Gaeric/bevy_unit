@@ -1,15 +1,5 @@
 import super::super::super::solver::layout::Particle;
-struct CaptureParams {
-    output_base: u32,
-    particle_count: u32,
-    _padding: vec2<u32>,
-}
-
-struct SelectedParticles {
-    // A uniform rather than an additional storage binding. Packing into vec4s
-    // keeps all 64 IDs in 256 bytes under uniform layout rules.
-    ids: array<vec4<u32>, 16>,
-}
+import super::contact_trace::{CaptureParams, SelectedParticles};
 
 @group(0) @binding(0) var<storage, read> particles: array<Particle>;
 @group(0) @binding(1) var<uniform> selected: SelectedParticles;

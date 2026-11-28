@@ -3,6 +3,9 @@ import super::super::collision::bvh_query::{
     closest_hit, QueryHit, QUERY_OK, INVALID_TRIANGLE, indices, finite_scalar, finite_vector,
 };
 
+@if(XPBD_CONTACT_TRACE)
+import super::super::debug::xpbd::contact_trace::{contact_slot, trace_contact, trace_immovable};
+
 @group(0) @binding(0)
 var<uniform> step_params: StepParams;
 
@@ -18,16 +21,23 @@ var<uniform> surface_delta_per_tick: mat4x4<f32>;
 @group(1) @binding(5)
 var<storage, read> local_positions: array<vec4<f32>>;
 
+struct ContactProjection {
+    @if(XPBD_CONTACT_TRACE) normal: vec3<f32>,
+    @if(XPBD_CONTACT_TRACE) signed_gap: f32,
+    delta: vec3<f32>,
+}
+
 // Solid-shell contact signs the nearest distance using the winning face winding.
 // Two-sided contact keeps the particle on its current side of the surface.
-fn contact_correction(position: vec3<f32>, hit: QueryHit) -> vec3<f32> {
+fn project_contact(position: vec3<f32>, hit: QueryHit) -> ContactProjection {
+    var projection: ContactProjection;
     if hit.status != QUERY_OK || hit.triangle_id == INVALID_TRIANGLE {
-        return vec3<f32>(0.0);
+        return projection;
     }
 
     let face_normal = hit.normal.xyz;
     if dot(face_normal, face_normal) == 0.0 {
-        return vec3<f32>(0.0);
+        return projection;
     }
 
     let separation = position - hit.point.xyz;
@@ -47,12 +57,14 @@ fn contact_correction(position: vec3<f32>, hit: QueryHit) -> vec3<f32> {
         }
     }
 
+    @if(XPBD_CONTACT_TRACE) projection.normal = normal;
+    @if(XPBD_CONTACT_TRACE) projection.signed_gap = signed_distance;
     let correction_length = step_params.collision_margin - signed_distance;
     if correction_length <= 0.0 {
-        return vec3<f32>(0.0);
+        return projection;
     }
-
-    return correction_length * normal;
+    projection.delta = correction_length * normal;
+    return projection;
 }
 
 fn tangential_correction(index: u32, position: vec3<f32>, hit: QueryHit, correction: vec3<f32>) -> vec3<f32> {
@@ -91,23 +103,46 @@ fn is_movable(index: u32) -> bool {
 @compute @workgroup_size(64)
 fn stabilize_contact(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let index = invocation.x;
+    @if(XPBD_CONTACT_TRACE) let slot = contact_slot(index);
     if !is_movable(index) {
+        @if(XPBD_CONTACT_TRACE) if slot != 0xffffffffu {
+            trace_immovable(slot, particles[index].position);
+        }
         return;
     }
     let position = particles[index].position;
     let hit = closest_hit(position);
-    particles[index].position = position + contact_correction(position, hit);
+    let projection = project_contact(position, hit);
+    let after = position + projection.delta;
+    particles[index].position = after;
+    @if(XPBD_CONTACT_TRACE) if slot != 0xffffffffu {
+        trace_contact(
+            slot, position, after, hit, projection.normal, projection.signed_gap,
+            step_params.collision_margin, projection.delta, vec3<f32>(0.0),
+        );
+    }
 }
 
 @compute @workgroup_size(64)
 fn solve_contact(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let index = invocation.x;
+    @if(XPBD_CONTACT_TRACE) let slot = contact_slot(index);
     if !is_movable(index) {
+        @if(XPBD_CONTACT_TRACE) if slot != 0xffffffffu {
+            trace_immovable(slot, particles[index].position);
+        }
         return;
     }
     let position = particles[index].position;
     let hit = closest_hit(position);
-    let normal_delta = contact_correction(position, hit);
-    let tangent_delta = tangential_correction(index, position, hit, normal_delta);
-    particles[index].position = position + normal_delta + tangent_delta;
+    let projection = project_contact(position, hit);
+    let tangent_delta = tangential_correction(index, position, hit, projection.delta);
+    let after = position + projection.delta + tangent_delta;
+    particles[index].position = after;
+    @if(XPBD_CONTACT_TRACE) if slot != 0xffffffffu {
+        trace_contact(
+            slot, position, after, hit, projection.normal, projection.signed_gap,
+            step_params.collision_margin, projection.delta, tangent_delta,
+        );
+    }
 }

@@ -31,7 +31,7 @@ use bevy_cloth::{
     compute_skinning::{ComputeSkinning, ComputeSkinningPlugin, ComputeSkinningResults},
     debug::{
         ClothCapture, ClothCaptureId, ClothDebug, ClothDebugPlugin, ClothDiagnostics,
-        xpbd::PositionTrace,
+        xpbd::{ContactOutcome, ContactTrace},
     },
 };
 use std::{
@@ -101,6 +101,8 @@ fn main() {
         let warmup = request_capture(&mut app, old_probe_entity);
         let capture = wait_capture(&mut app, warmup);
         let trace = xpbd_trace(&capture);
+        assert!(trace.stabilization.is_empty());
+        assert!(trace.substeps[0].external_contacts.is_empty());
         assert_z(
             "isolated before constraints",
             trace.substeps[0].before_constraints[0].z,
@@ -145,14 +147,47 @@ fn main() {
         assert_eq!(capture.cloth, bent_probe_entity);
         assert_eq!(capture.particle_ids, [0]);
         let trace = xpbd_trace(&capture);
+        assert_eq!(trace.stabilization.len(), 1);
+        let stabilization = &trace.stabilization[0];
+        assert_eq!(stabilization.collider, collider);
+        assert!(!stabilization.friction_enabled);
+        let particle = &stabilization.particles[0];
+        assert_z("before stabilization", particle.before.z, START_Z);
+        assert_z("after stabilization", particle.after.z, MARGIN);
+        let ContactOutcome::Surface(surface) = &particle.outcome else {
+            panic!("expected a valid stabilization surface: {particle:?}");
+        };
+        assert_eq!(surface.triangle, 0);
+        assert_z("contact point", surface.point.z, 0.0);
+        assert_z("contact normal", surface.normal.z, 1.0);
+        assert_z("input signed gap", surface.signed_gap, START_Z);
+        assert_z("contact margin", surface.margin, MARGIN);
+        assert_z(
+            "applied normal correction",
+            surface.normal_delta.z,
+            MARGIN - START_Z,
+        );
+        assert_eq!(surface.friction_delta, Vec3::ZERO);
+
         let substep = &trace.substeps[0];
+        assert_eq!(substep.external_contacts.len(), 1);
+        let contact = &substep.external_contacts[0];
+        assert_eq!(contact.collider, collider);
+        assert!(
+            !contact.friction_enabled,
+            "skinned contacts are normal-only"
+        );
+        let ContactOutcome::Surface(surface) = &contact.particles[0].outcome else {
+            panic!("a surfaced particle still queries its collider");
+        };
+        assert!(surface.normal_delta.length() < EPSILON);
         assert_z(
             "before constraints",
             substep.before_constraints[0].z,
             MARGIN,
         );
         assert_z("after constraints", substep.after_constraints[0].z, MARGIN);
-        println!("XPBD position capture passed (tick {})", capture.tick);
+        println!("XPBD contact capture passed (tick {})", capture.tick);
     }
     println!(
         "XPBD skinned collider probe passed (pose versions {initial_version} -> {bent_version})"
@@ -181,7 +216,7 @@ fn wait_capture(app: &mut App, id: ClothCaptureId) -> ClothCapture {
     }
 }
 
-fn xpbd_trace(capture: &ClothCapture) -> &PositionTrace {
+fn xpbd_trace(capture: &ClothCapture) -> &ContactTrace {
     match &capture.diagnostics {
         ClothDiagnostics::Xpbd(trace) => trace,
         other => panic!("expected XPBD diagnostics: {other:?}"),

@@ -9,6 +9,7 @@ use bevy::{
             BindGroup, ComputePass, ComputePassDescriptor, ComputePipeline, PipelineCache,
         },
         renderer::RenderContext,
+        sync_world::MainEntity,
     },
 };
 
@@ -20,7 +21,10 @@ use crate::{
         transform::ColliderTransformPipeline,
     },
     components::{ClothStepSettings, CollisionGroup, VbdStaticCollider},
-    debug::{RenderCapture, xpbd::Recorder},
+    debug::{
+        RenderCapture,
+        xpbd::{ContactSource, Recorder},
+    },
     prepare::{ColoredGsSchedule, ConstraintColorRange, ConstraintSchedule, PreparedCloth},
 };
 
@@ -57,28 +61,48 @@ pub(crate) struct ClothSimulation {
     pub tick_cursor: Option<u64>,
 }
 
+struct XpbdCollider<'a> {
+    entity: Entity,
+    binding: &'a BindGroup,
+    rigid: bool,
+}
+
+impl XpbdCollider<'_> {
+    fn friction_pipeline<'a>(
+        &self,
+        friction: Option<&'a ComputePipeline>,
+    ) -> Option<&'a ComputePipeline> {
+        // The rigid friction kernel cannot reconstruct a deforming surface's motion.
+        if self.rigid { friction } else { None }
+    }
+}
+
 /// Record one sequential contact dispatch per collider for this cloth.
 fn record_contacts(
     pass: &mut ComputePass<'_>,
     normal: &ComputePipeline,
     friction: Option<&ComputePipeline>,
     cloth: &BindGroup,
-    colliders: &[(&BindGroup, ColliderPose)],
+    colliders: &[XpbdCollider<'_>],
     workgroups: u32,
+    trace: &impl TickTrace,
+    substep: Option<u32>,
 ) {
     if colliders.is_empty() {
         return;
     }
 
     pass.set_bind_group(0, cloth, &[]);
-    for &(collider, pose) in colliders {
-        // The rigid friction kernel cannot reconstruct a deforming surface's motion.
-        let pipeline = match pose {
-            ColliderPose::Rigid(_) => friction.unwrap_or(normal),
-            ColliderPose::Skinned(_) => normal,
-        };
-        pass.set_pipeline(pipeline);
-        pass.set_bind_group(1, collider, &[]);
+    for (index, collider) in colliders.iter().enumerate() {
+        let friction = collider.friction_pipeline(friction);
+        trace.bind_contact(
+            pass,
+            friction.unwrap_or(normal),
+            substep,
+            index as u32,
+            friction.is_some(),
+        );
+        pass.set_bind_group(1, collider.binding, &[]);
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }
@@ -203,6 +227,7 @@ pub(crate) fn simulate_cloths(
     refit_pipeline: Res<ColliderRefitPipeline>,
     self_collision_pipeline: Res<SelfCollisionPipeline>,
     colliders: Query<(
+        &MainEntity,
         &ColliderRefit,
         Option<&CollisionGroup>,
         Has<VbdStaticCollider>,
@@ -357,10 +382,10 @@ pub(crate) fn simulate_cloths(
                     };
                     let static_colliders = colliders
                         .iter()
-                        .filter(|(_, group, is_static)| {
+                        .filter(|(_, _, group, is_static)| {
                             *is_static && group.copied().unwrap_or_default() == cloth_group
                         })
-                        .filter_map(|(refit, _, _)| match refit.ready()? {
+                        .filter_map(|(_, refit, _, _)| match refit.ready()? {
                             (binding, ColliderPose::Rigid(_)) => Some(binding),
                             (_, ColliderPose::Skinned(_)) => None,
                         })
@@ -400,15 +425,20 @@ pub(crate) fn simulate_cloths(
         let collider_bindings: Vec<_> = if stabilize.is_some() {
             colliders
                 .iter()
-                .filter(|(_, group, _)| group.copied().unwrap_or_default() == cloth_group)
-                .filter_map(|(refit, _, _)| refit.ready())
+                .filter(|(_, _, group, _)| group.copied().unwrap_or_default() == cloth_group)
+                .filter_map(|(entity, refit, _, _)| {
+                    let (binding, pose) = refit.ready()?;
+                    Some(XpbdCollider {
+                        entity: entity.id(),
+                        binding,
+                        rigid: matches!(pose, ColliderPose::Rigid(_)),
+                    })
+                })
                 .collect()
         } else {
             Vec::new()
         };
-        let has_rigid_contact = collider_bindings
-            .iter()
-            .any(|(_, pose)| matches!(pose, ColliderPose::Rigid(_)));
+        let has_rigid_contact = collider_bindings.iter().any(|collider| collider.rigid);
         let friction = if step_params.external_friction > 0.0 && has_rigid_contact {
             // A delayed cloth cannot use this batch's surface displacement for older ticks.
             tick_cursor = tick_cursor.max(contact_motion.start_tick);
@@ -440,7 +470,17 @@ pub(crate) fn simulate_cloths(
         if tick_cursor < ticks.requested
             && let Some(capture) = capture.as_deref_mut()
             && let Some(ready) = capture.take_ready(entity)
-            && let Some(recorder) = ready.start(context.render_device(), cloth_buffers)
+            && let Some(recorder) = ready.start(
+                context.render_device(),
+                cloth_buffers,
+                collider_bindings
+                    .iter()
+                    .map(|collider| ContactSource {
+                        collider: collider.entity,
+                        friction_enabled: collider.friction_pipeline(friction).is_some(),
+                    })
+                    .collect(),
+            )
         {
             tick.record(&mut context, &recorder);
             tick_cursor += 1;
@@ -456,8 +496,18 @@ pub(crate) fn simulate_cloths(
     }
 }
 
-// The ordinary tick uses the same dispatch sequence without diagnostic work.
+// These are XPBD contact hooks, not a schema for all solvers. The ordinary
+// tick binds the original pipeline and issues no diagnostic dispatches.
 trait TickTrace {
+    fn bind_contact(
+        &self,
+        pass: &mut ComputePass<'_>,
+        stock: &ComputePipeline,
+        substep: Option<u32>,
+        collider: u32,
+        friction: bool,
+    );
+
     fn constraint_positions(&self, pass: &mut ComputePass<'_>, substep: u32, after: bool);
 }
 
@@ -465,10 +515,33 @@ struct NoTrace;
 
 impl TickTrace for NoTrace {
     #[inline(always)]
+    fn bind_contact(
+        &self,
+        pass: &mut ComputePass<'_>,
+        stock: &ComputePipeline,
+        _: Option<u32>,
+        _: u32,
+        _: bool,
+    ) {
+        pass.set_pipeline(stock);
+    }
+
+    #[inline(always)]
     fn constraint_positions(&self, _: &mut ComputePass<'_>, _: u32, _: bool) {}
 }
 
 impl TickTrace for Recorder {
+    fn bind_contact(
+        &self,
+        pass: &mut ComputePass<'_>,
+        _: &ComputePipeline,
+        substep: Option<u32>,
+        collider: u32,
+        friction: bool,
+    ) {
+        Recorder::bind_contact(self, pass, substep, collider, friction);
+    }
+
     fn constraint_positions(&self, pass: &mut ComputePass<'_>, substep: u32, after: bool) {
         Recorder::constraint_positions(self, pass, substep, after);
     }
@@ -485,23 +558,22 @@ struct RecordTick<'a> {
     stabilize: Option<&'a ComputePipeline>,
     friction: Option<&'a ComputePipeline>,
     contact_binding: &'a BindGroup,
-    collider_bindings: &'a [(&'a BindGroup, ColliderPose)],
+    collider_bindings: &'a [XpbdCollider<'a>],
     self_contact: Option<&'a SelfCollisionStep<'a>>,
     sweep: &'a ConstraintSweep<'a>,
 }
 
 impl RecordTick<'_> {
     fn record(&self, context: &mut RenderContext, trace: &impl TickTrace) {
-        // XPBD keeps its tick-start pin update before contact stabilization.
-        if self.stabilize.is_some()
-            && let Some((pins, pipeline)) = self.pins
-        {
+        // XPBD updates dynamic pins before stabilizing contacts.
+        let xpbd_pins = self.pins.filter(|_| self.stabilize.is_some());
+        if let Some((pins, pipeline)) = xpbd_pins {
             pins.record(context, pipeline);
         }
-        if let Some(normal) = self
+        let stabilization = self
             .stabilize
-            .filter(|_| !self.collider_bindings.is_empty())
-        {
+            .filter(|_| !self.collider_bindings.is_empty());
+        if let Some(normal) = stabilization {
             let mut pass = context
                 .command_encoder()
                 .begin_compute_pass(&ComputePassDescriptor {
@@ -515,6 +587,8 @@ impl RecordTick<'_> {
                 self.contact_binding,
                 self.collider_bindings,
                 self.particle_workgroups,
+                trace,
+                None,
             );
         }
 
@@ -523,8 +597,8 @@ impl RecordTick<'_> {
             if let Some(stretch) = &self.buffers.stretch {
                 encoder.clear_buffer(&stretch.lambdas, 0, None);
             }
-            if let Some(bend_buffers) = &self.buffers.bending {
-                encoder.clear_buffer(&bend_buffers.lambdas, 0, None);
+            if let Some(bend) = &self.buffers.bending {
+                encoder.clear_buffer(&bend.lambdas, 0, None);
             }
             if let Some(tethers) = &self.buffers.tethers {
                 encoder.clear_buffer(&tethers.lambdas, 0, None);
@@ -538,15 +612,14 @@ impl RecordTick<'_> {
             pass.set_bind_group(0, self.predict.1, &[]);
             pass.dispatch_workgroups(self.particle_workgroups, 1, 1);
 
-            // VBD prediction saves the old pin positions but does not move
-            // them. Only the first substep sees a newly sampled pin jump.
+            // VBD prediction saves the old pin positions before applying the new ones.
             if self.stabilize.is_none()
                 && substep == 0
                 && let Some((pins, pipeline)) = self.pins
             {
                 pins.record_in_pass(&mut pass, pipeline);
             }
-            if let Some(normal) = self.stabilize {
+            if let Some(normal) = stabilization {
                 record_contacts(
                     &mut pass,
                     normal,
@@ -554,6 +627,8 @@ impl RecordTick<'_> {
                     self.contact_binding,
                     self.collider_bindings,
                     self.particle_workgroups,
+                    trace,
+                    Some(substep),
                 );
             }
             if let Some(contact) = self.self_contact {

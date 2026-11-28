@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use crate::{
     components::{ClothSolver, ClothStepSettings},
     prepare::{ConstraintSchedule, PreparedCloth},
-    solver::{gpu::ClothBuffers, tick::simulate_cloths},
+    solver::{bindings::ContactBindGroupLayout, gpu::ClothBuffers, tick::simulate_cloths},
 };
 
 use readback::Readback;
@@ -28,6 +28,7 @@ pub struct ClothDebugPlugin;
 
 impl Plugin for ClothDebugPlugin {
     fn build(&self, app: &mut App) {
+        embedded_asset!(app, "xpbd/contact_trace.wesl");
         embedded_asset!(app, "xpbd/positions.wesl");
         app.init_resource::<ClothDebug>();
         app.sub_app_mut(RenderApp)
@@ -55,7 +56,7 @@ pub struct ClothCaptureId(u64);
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ClothDiagnostics {
-    Xpbd(xpbd::PositionTrace),
+    Xpbd(xpbd::ContactTrace),
 }
 
 #[derive(Debug)]
@@ -77,6 +78,7 @@ pub enum ClothCaptureError {
     ClothChanged,
     UnsupportedSolver,
     SubstepCount { actual: u32, max: u32 },
+    CaptureTooLarge,
     DeviceLimits,
     Pipeline(String),
     Readback(String),
@@ -205,6 +207,7 @@ fn prepare_capture(
     device: Res<RenderDevice>,
     assets: Res<AssetServer>,
     cache: Res<PipelineCache>,
+    contact_layout: Res<ContactBindGroupLayout>,
     cloths: Query<(&PreparedCloth, &ClothBuffers, &ClothStepSettings)>,
 ) {
     if let Some((entity, recorder)) = &capture.ready {
@@ -254,7 +257,7 @@ fn prepare_capture(
     }
     let pipelines = capture
         .xpbd_pipelines
-        .get_or_insert_with(|| xpbd::Pipelines::queue(&assets, &cache));
+        .get_or_insert_with(|| xpbd::Pipelines::queue(&assets, &cache, &contact_layout));
     match pipelines.ready(&cache) {
         Ok(Some(pipelines)) => {
             capture.ready = Some((
