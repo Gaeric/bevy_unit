@@ -1,5 +1,5 @@
-// One thread per constraint writes its lambda and endpoint corrections. Only
-// apply_jacobi writes positions, after all constraint dispatches have finished.
+// Each phase reads unchanged positions until apply_jacobi writes them back.
+// Stretch uses its own adjacency; bend and tethers share a second phase.
 import super::layout::{Particle, StretchConstraint, BendConstraint, TetherConstraint, StepParams};
 import super::constraint_math::{evaluate_stretch, evaluate_bend, xpbd_delta_lambda, solve_tether};
 

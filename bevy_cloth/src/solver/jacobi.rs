@@ -135,7 +135,8 @@ impl JacobiLayouts {
         cloth: &ClothBuffers,
         schedule: &JacobiSchedule,
     ) -> Option<JacobiBindGroups> {
-        if schedule.slots.is_empty() {
+        let scratch_slots = schedule.stretch.slots.len() + schedule.bend_and_tethers.slots.len();
+        if scratch_slots == 0 {
             return None;
         }
         let upload = |label, data: &[u32]| -> Buffer {
@@ -145,15 +146,31 @@ impl JacobiLayouts {
                 usage: BufferUsages::STORAGE,
             })
         };
-        let offsets = upload("xpbd Jacobi offsets", &schedule.offsets);
-        let slots = upload("xpbd Jacobi endpoint slots", &schedule.slots);
+        // Each phase addresses a separate range of correction slots.
         let corrections = device.create_buffer(&BufferDescriptor {
             label: Some("xpbd Jacobi endpoint corrections"),
-            size: schedule.slots.len() as u64 * 16,
+            size: scratch_slots as u64 * 16,
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
+        let bind_apply = |offsets: &Buffer, slots: &Buffer| {
+            device.create_bind_group(
+                "xpbd Jacobi apply",
+                &cache.get_bind_group_layout(&self.apply),
+                &BindGroupEntries::with_indices((
+                    (0, cloth.step_params.as_entire_binding()),
+                    (2, offsets.as_entire_binding()),
+                    (7, corrections.as_entire_binding()),
+                    (8, cloth.particles.as_entire_binding()),
+                    (9, slots.as_entire_binding()),
+                )),
+            )
+        };
 
+        // Hinges and tethers are built from mesh edges, so a nonempty schedule always has stretch.
+        let stretch_offsets = upload("xpbd Jacobi stretch offsets", &schedule.stretch.offsets);
+        let stretch_slots = upload("xpbd Jacobi stretch slots", &schedule.stretch.slots);
+        let apply_stretch = bind_apply(&stretch_offsets, &stretch_slots);
         let stretch_buffers = cloth.stretch.as_ref().expect("XPBD stretch buffers");
         let stretch = device.create_bind_group(
             "xpbd Jacobi stretch",
@@ -161,62 +178,65 @@ impl JacobiLayouts {
             &BindGroupEntries::with_indices((
                 (0, cloth.step_params.as_entire_binding()),
                 (1, cloth.particles.as_entire_binding()),
-                (2, offsets.as_entire_binding()),
+                (2, stretch_offsets.as_entire_binding()),
                 (3, stretch_buffers.constraints.as_entire_binding()),
                 (4, stretch_buffers.lambdas.as_entire_binding()),
                 (7, corrections.as_entire_binding()),
             )),
         );
-        let bend = cloth.bending.as_ref().map(|buffers| {
-            device.create_bind_group(
-                "xpbd Jacobi bend",
-                &cache.get_bind_group_layout(&self.bend),
-                &BindGroupEntries::with_indices((
-                    (0, cloth.step_params.as_entire_binding()),
-                    (1, cloth.particles.as_entire_binding()),
-                    (2, offsets.as_entire_binding()),
-                    (5, buffers.constraints.as_entire_binding()),
-                    (6, buffers.lambdas.as_entire_binding()),
-                    (7, corrections.as_entire_binding()),
-                )),
-            )
+        let second = &schedule.bend_and_tethers;
+        let bend_and_tethers = (!second.slots.is_empty()).then(|| {
+            let offsets = upload("xpbd Jacobi bend and tether offsets", &second.offsets);
+            let slots = upload("xpbd Jacobi bend and tether slots", &second.slots);
+            let bend = cloth.bending.as_ref().map(|buffers| {
+                device.create_bind_group(
+                    "xpbd Jacobi bend",
+                    &cache.get_bind_group_layout(&self.bend),
+                    &BindGroupEntries::with_indices((
+                        (0, cloth.step_params.as_entire_binding()),
+                        (1, cloth.particles.as_entire_binding()),
+                        (2, offsets.as_entire_binding()),
+                        (5, buffers.constraints.as_entire_binding()),
+                        (6, buffers.lambdas.as_entire_binding()),
+                        (7, corrections.as_entire_binding()),
+                    )),
+                )
+            });
+            let tethers = cloth.tethers.as_ref().map(|buffers| {
+                device.create_bind_group(
+                    "xpbd Jacobi tethers",
+                    &cache.get_bind_group_layout(&self.tethers),
+                    &BindGroupEntries::with_indices((
+                        (0, cloth.step_params.as_entire_binding()),
+                        (1, cloth.particles.as_entire_binding()),
+                        (2, offsets.as_entire_binding()),
+                        (7, corrections.as_entire_binding()),
+                        (10, buffers.constraints.as_entire_binding()),
+                        (11, buffers.lambdas.as_entire_binding()),
+                    )),
+                )
+            });
+            BendAndTetherBindings {
+                bend,
+                tethers,
+                apply: bind_apply(&offsets, &slots),
+            }
         });
-        let tethers = cloth.tethers.as_ref().map(|buffers| {
-            device.create_bind_group(
-                "xpbd Jacobi tethers",
-                &cache.get_bind_group_layout(&self.tethers),
-                &BindGroupEntries::with_indices((
-                    (0, cloth.step_params.as_entire_binding()),
-                    (1, cloth.particles.as_entire_binding()),
-                    (2, offsets.as_entire_binding()),
-                    (7, corrections.as_entire_binding()),
-                    (10, buffers.constraints.as_entire_binding()),
-                    (11, buffers.lambdas.as_entire_binding()),
-                )),
-            )
-        });
-        let apply = device.create_bind_group(
-            "xpbd Jacobi apply",
-            &cache.get_bind_group_layout(&self.apply),
-            &BindGroupEntries::with_indices((
-                (0, cloth.step_params.as_entire_binding()),
-                (2, offsets.as_entire_binding()),
-                (7, corrections.as_entire_binding()),
-                (8, cloth.particles.as_entire_binding()),
-                (9, slots.as_entire_binding()),
-            )),
-        );
         Some(JacobiBindGroups {
             stretch,
-            bend,
-            tethers,
-            apply,
+            apply_stretch,
+            bend_and_tethers,
         })
     }
 }
 
 pub(crate) struct JacobiBindGroups {
     stretch: BindGroup,
+    apply_stretch: BindGroup,
+    bend_and_tethers: Option<BendAndTetherBindings>,
+}
+
+struct BendAndTetherBindings {
     bend: Option<BindGroup>,
     tethers: Option<BindGroup>,
     apply: BindGroup,
@@ -270,6 +290,11 @@ impl Dispatch<'_> {
 
 pub(crate) struct JacobiSweep<'a> {
     stretch: Dispatch<'a>,
+    apply_stretch: Dispatch<'a>,
+    bend_and_tethers: Option<BendAndTetherSweep<'a>>,
+}
+
+struct BendAndTetherSweep<'a> {
     bend: Option<Dispatch<'a>>,
     tethers: Option<Dispatch<'a>>,
     apply: Dispatch<'a>,
@@ -290,30 +315,46 @@ impl<'a> JacobiSweep<'a> {
                 workgroups: count.div_ceil(WORKGROUP_SIZE),
             })
         };
-        let bend = match &bindings.bend {
-            Some(binding) => Some(dispatch(pipelines.bend, binding, step.bend_count)?),
-            None => None,
-        };
-        let tethers = match &bindings.tethers {
-            Some(binding) => Some(dispatch(pipelines.tethers, binding, tether_count)?),
-            None => None,
+        let bend_and_tethers = if let Some(second) = &bindings.bend_and_tethers {
+            let bend = match &second.bend {
+                Some(binding) => Some(dispatch(pipelines.bend, binding, step.bend_count)?),
+                None => None,
+            };
+            let tethers = match &second.tethers {
+                Some(binding) => Some(dispatch(pipelines.tethers, binding, tether_count)?),
+                None => None,
+            };
+            Some(BendAndTetherSweep {
+                bend,
+                tethers,
+                apply: dispatch(pipelines.apply, &second.apply, step.particle_count)?,
+            })
+        } else {
+            None
         };
         Some(Self {
             stretch: dispatch(pipelines.stretch, &bindings.stretch, step.stretch_count)?,
-            bend,
-            tethers,
-            apply: dispatch(pipelines.apply, &bindings.apply, step.particle_count)?,
+            apply_stretch: dispatch(
+                pipelines.apply,
+                &bindings.apply_stretch,
+                step.particle_count,
+            )?,
+            bend_and_tethers,
         })
     }
 
     pub fn record(&self, pass: &mut ComputePass<'_>) {
         self.stretch.record(pass);
-        if let Some(bend) = &self.bend {
-            bend.record(pass);
+        self.apply_stretch.record(pass);
+        // Both passes below read the updated particles and write separate slots.
+        if let Some(second) = &self.bend_and_tethers {
+            if let Some(bend) = &second.bend {
+                bend.record(pass);
+            }
+            if let Some(tethers) = &second.tethers {
+                tethers.record(pass);
+            }
+            second.apply.record(pass);
         }
-        if let Some(tethers) = &self.tethers {
-            tethers.record(pass);
-        }
-        self.apply.record(pass);
     }
 }

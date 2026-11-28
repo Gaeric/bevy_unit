@@ -24,6 +24,8 @@
 
   添加 =Cloth= 时可同时添加 =ClothSolver::Jacobi=；省略则使用 =ClothSolver::ColoredGs=。
   两种策略求解同一套 XPBD 约束；运行时修改不会重建求解数据。
+  Jacobi 每轮先按拉伸邻接表求解并写回，再按独立邻接表求解弯曲和可选 LRA。
+  两个阶段各自使用同一份位置做累加，弯曲和 LRA 不再占用拉伸的度数；第二阶段为空时不再写回。
 
   拉伸和弯曲是基础约束。长距离约束（LRA）默认关闭，可在添加 =Cloth= 时同时添加
   =ClothLongRangeAttachments { compliance: 0.0 }=；零表示刚性距离上限。

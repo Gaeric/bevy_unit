@@ -582,12 +582,11 @@ mod tests {
         let ConstraintSchedule::Jacobi(schedule) = &jacobi.schedule else {
             panic!("expected Jacobi schedule");
         };
-        // Five stretch edges followed by hinge endpoints [2, 3, 0, 1].
-        assert_eq!(schedule.offsets, [0, 4, 8, 11, 14]);
-        assert_eq!(
-            schedule.slots,
-            [0, 2, 4, 12, 1, 6, 8, 13, 3, 7, 10, 5, 9, 11]
-        );
+        // Five stretch edges, then an independent phase with hinge endpoints [2, 3, 0, 1].
+        assert_eq!(schedule.stretch.offsets, [0, 3, 6, 8, 10]);
+        assert_eq!(schedule.stretch.slots, [0, 2, 4, 1, 6, 8, 3, 7, 5, 9]);
+        assert_eq!(schedule.bend_and_tethers.offsets, [0, 1, 2, 3, 4]);
+        assert_eq!(schedule.bend_and_tethers.slots, [12, 13, 10, 11]);
     }
 
     #[test]
@@ -628,11 +627,10 @@ mod tests {
         let ConstraintSchedule::Jacobi(schedule) = &jacobi.schedule else {
             panic!("expected Jacobi schedule");
         };
-        assert_eq!(schedule.offsets, [0, 5, 10, 13, 17]);
-        assert_eq!(
-            schedule.slots,
-            [0, 2, 4, 12, 14, 1, 6, 8, 13, 15, 3, 7, 10, 5, 9, 11, 16]
-        );
+        assert_eq!(schedule.stretch.offsets, [0, 3, 6, 8, 10]);
+        assert_eq!(schedule.stretch.slots, [0, 2, 4, 1, 6, 8, 3, 7, 5, 9]);
+        assert_eq!(schedule.bend_and_tethers.offsets, [0, 2, 4, 5, 7]);
+        assert_eq!(schedule.bend_and_tethers.slots, [12, 14, 13, 15, 10, 11, 16]);
     }
 
     #[test]
