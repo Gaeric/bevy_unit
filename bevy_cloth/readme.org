@@ -50,26 +50,27 @@
   #+end_src
   三个功能开关可独立使用：=--lra= 增加刚性距离上限；=--friction= 打开外部摩擦，若已打开自碰撞也会启用自接触摩擦；
   =--self-collision= 打开自碰撞。准备日志中的 =tethers= 是生成的长距离约束数。
-* Blender 布料参考缓存
-  从 workspace 根目录运行：
+* Blender 外部视觉对照
+  从 workspace 根目录运行（已有缓存时只需最后一条）：
   #+begin_src bash
     mkdir -p output
     blender -b --factory-startup -t 2 --python-exit-code 1 \
       --python bevy_cloth/tools/bake_cloth_comparison.py -- output/cloth-visual.txt
+    cargo run -p bevy_cloth --example cloth-visual-compare -- output/cloth-visual.txt
   #+end_src
 
-  烘焙 =1 m × 0.4 m= 三角网格的短边挂点下落，关闭阻尼和碰撞；第 1 帧对应 tick 0，按 60 Hz 采样。
+  左到右是 Blender 原生 Cloth 缓存、Colored GS、Jacobi、VBD。四列用缓存里的同一张
+  =1 m × 0.4 m= 三角网格、短边挂点、顶点质量和重力；都不开碰撞、自碰撞、摩擦或 LRA。
+  Blender 第 1 帧对应 Bevy tick 0。初始暂停，等 GPU 就绪后，=Space= 播放/暂停、
+  =S= 单步、=R= 重建并回到初始姿态、=V= 切换侧视/斜视。按 60 Hz 采样，机器跟不上时四列一起慢放。
+
+  先在 tick 0 确认四张棋盘格姿态相同，再看第一次下落时的挂边曲率、自由端和左右对称性。
   脚本按 Blender 4.5 Cloth 的内部重力比例换算 Speed，分别烘焙 Quality 32 和 64，再导出 64。
   Blender 4.5.3 LTS 实测两档的自由端平均高度第一次到最低点都是 tick 28（约 0.47 s），
   分别约为 -0.995 m 和 -0.990 m；两档整段最大顶点差约 0.29 m（tick 153）。
   后半段可对照运动形态，不当逐帧真值。
-  =output/= 中的烘焙缓存不提交到 Git。
-
-  用同一份缓存播放：
-  #+begin_src bash
-    cargo run -p bevy_cloth --example cloth-visual-compare -- output/cloth-visual.txt
-  #+end_src
-  初始暂停。=Space= 播放/暂停，=S= 单步，=R= 回到初始姿态，=V= 切换侧视/斜视。
+  三种材料模型的刚度尚未校准，软硬或衰减不同不能单独判为求解错误。
+  =output/= 中的烘焙缓存不提交到 Git；窗口运行需要支持 compute 的 GPU 后端。
 * 求解器诊断
   与 =ClothPlugin= 一起注册 =bevy_cloth::debug::ClothDebugPlugin=（不需要 Cargo feature）。
   在主世界通过 =ResMut<ClothDebug>= 调用 =capture_next_tick(cloth_entity, &[particle_id])=，

@@ -9,6 +9,9 @@ pub struct Reference {
     pub version: String,
     pub quality: u32,
     pub fps: u32,
+    pub vertex_mass: f32,
+    pub gravity: f32,
+    pub pins: Vec<u32>,
     pub indices: Vec<u32>,
     pub frames: Vec<Vec<[f32; 3]>>,
 }
@@ -31,8 +34,8 @@ impl Reference {
         let vertex_count: u32 = read(&mut tokens, "vertex count")?;
         let triangle_count: usize = read(&mut tokens, "triangle count")?;
         let pin_count: usize = read(&mut tokens, "pin count")?;
-        positive(&mut tokens, "vertex mass")?;
-        positive(&mut tokens, "gravity")?;
+        let vertex_mass = positive(&mut tokens, "vertex mass")?;
+        let gravity = positive(&mut tokens, "gravity")?;
         if fps != 60
             || quality == 0
             || frame_count < 2
@@ -86,6 +89,9 @@ impl Reference {
             version,
             quality,
             fps,
+            vertex_mass,
+            gravity,
+            pins,
             indices,
             frames,
         })
@@ -136,6 +142,7 @@ mod tests {
     #[test]
     fn loads_rest_pose_and_sample_at_tick_one() {
         let cache = Reference::parse(CACHE).unwrap();
+        assert_eq!(cache.pins, [0]);
         assert_eq!(cache.indices, [0, 1, 2]);
         assert_eq!(cache.frames[0][1], [1., 0., 0.]);
         assert_eq!(cache.frames[1][1], [1., -0.1, 0.]);
