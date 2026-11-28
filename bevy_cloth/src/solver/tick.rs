@@ -23,6 +23,7 @@ use crate::{
     components::{ClothStepSettings, CollisionGroup, VbdStaticCollider},
     debug::{
         RenderCapture,
+        timing::{RenderTimings, TickTiming, TimingStage},
         xpbd::{ContactSource, Recorder},
     },
     prepare::{ColoredGsSchedule, ConstraintColorRange, ConstraintSchedule, PreparedCloth},
@@ -174,8 +175,22 @@ enum ConstraintSweep<'a> {
     Empty,
 }
 
+// Keep the dispatch sequence the same with or without instrumentation.
+fn record_timed<'pass>(
+    timing: Option<&mut TickTiming>,
+    pass: &mut ComputePass<'pass>,
+    stage: TimingStage,
+    record: impl FnOnce(&mut ComputePass<'pass>),
+) {
+    if let Some(timing) = timing {
+        timing.section(pass, stage, record);
+    } else {
+        record(pass);
+    }
+}
+
 impl ConstraintSweep<'_> {
-    fn record(&self, pass: &mut ComputePass<'_>) {
+    fn record(&self, pass: &mut ComputePass<'_>, mut timing: Option<&mut TickTiming>) {
         match self {
             Self::ColoredGs {
                 schedule,
@@ -201,10 +216,19 @@ impl ConstraintSweep<'_> {
                 workgroups,
             } => {
                 if let Some((reset, gather)) = contact_pipelines {
-                    bindings.record_contacts(pass, reset, gather, colliders, *workgroups);
+                    record_timed(
+                        timing.as_deref_mut(),
+                        pass,
+                        TimingStage::VbdContactRefresh,
+                        |pass| {
+                            bindings.record_contacts(pass, reset, gather, colliders, *workgroups)
+                        },
+                    );
                 }
-                pass.set_pipeline(pipeline);
-                bindings.record_colors(pass, colors);
+                record_timed(timing, pass, TimingStage::VbdVertexSolve, |pass| {
+                    pass.set_pipeline(pipeline);
+                    bindings.record_colors(pass, colors);
+                });
             }
             Self::Empty => {}
         }
@@ -246,7 +270,7 @@ pub(crate) fn simulate_cloths(
         Option<&GpuAttachments>,
         &mut ClothSimulation,
     )>,
-    mut capture: Option<ResMut<RenderCapture>>,
+    (mut capture, mut timings): (Option<ResMut<RenderCapture>>, Option<ResMut<RenderTimings>>),
 ) {
     let mut capture = if capture.as_deref().is_some_and(RenderCapture::is_ready) {
         capture.as_deref_mut()
@@ -482,12 +506,31 @@ pub(crate) fn simulate_cloths(
                     .collect(),
             )
         {
-            tick.record(&mut context, &recorder);
+            if let Some(timings) = timings.as_deref() {
+                timings.skip_traced_tick(entity);
+            }
+            tick.record(&mut context, &recorder, None);
             tick_cursor += 1;
             capture.submit(recorder.finish(context.command_encoder(), tick_cursor));
         }
         while tick_cursor < ticks.requested {
-            tick.record(&mut context, &NoTrace);
+            let mut sample = timings.as_deref_mut().and_then(|timings| {
+                timings.begin_tick(
+                    entity,
+                    tick_cursor + 1,
+                    settings.substeps,
+                    settings.iterations,
+                    stabilize.is_none(),
+                    context.render_device(),
+                )
+            });
+            if let Some(sample) = &mut sample {
+                sample.begin(context.command_encoder());
+            }
+            tick.record(&mut context, &NoTrace, sample.as_mut());
+            if let (Some(timings), Some(sample)) = (timings.as_deref_mut(), sample) {
+                timings.finish_tick(sample, context.command_encoder());
+            }
             // This cursor tracks requests, not GPU completion.
             tick_cursor += 1;
         }
@@ -564,7 +607,12 @@ struct RecordTick<'a> {
 }
 
 impl RecordTick<'_> {
-    fn record(&self, context: &mut RenderContext, trace: &impl TickTrace) {
+    fn record(
+        &self,
+        context: &mut RenderContext,
+        trace: &impl TickTrace,
+        mut timing: Option<&mut TickTiming>,
+    ) {
         // XPBD updates dynamic pins before stabilizing contacts.
         let xpbd_pins = self.pins.filter(|_| self.stabilize.is_some());
         if let Some((pins, pipeline)) = xpbd_pins {
@@ -632,18 +680,27 @@ impl RecordTick<'_> {
                 );
             }
             // Keep XPBD's existing projection order, even without external colliders.
-            if self.stabilize.is_some() && let Some(contact) = self.self_contact {
+            if self.stabilize.is_some()
+                && let Some(contact) = self.self_contact
+            {
                 contact.record(&mut pass);
             }
             trace.constraint_positions(&mut pass, substep, false);
             for _ in 0..self.iterations {
-                self.sweep.record(&mut pass);
+                self.sweep.record(&mut pass, timing.as_deref_mut());
             }
             trace.constraint_positions(&mut pass, substep, true);
 
             // Project VBD's final positions once, outside the elastic color sweeps.
-            if self.stabilize.is_none() && let Some(contact) = self.self_contact {
-                contact.record(&mut pass);
+            if self.stabilize.is_none()
+                && let Some(contact) = self.self_contact
+            {
+                record_timed(
+                    timing.as_deref_mut(),
+                    &mut pass,
+                    TimingStage::ParticleSelfContact,
+                    |pass| contact.record(pass),
+                );
             }
             pass.set_pipeline(self.velocity.0);
             pass.set_bind_group(0, self.velocity.1, &[]);

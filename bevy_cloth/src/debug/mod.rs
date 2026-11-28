@@ -1,6 +1,7 @@
 //! Runtime requests and readback for solver-specific diagnostics.
 
 mod readback;
+pub mod timing;
 pub mod xpbd;
 
 use bevy::{
@@ -31,6 +32,7 @@ impl Plugin for ClothDebugPlugin {
         embedded_asset!(app, "xpbd/contact_trace.wesl");
         embedded_asset!(app, "xpbd/positions.wesl");
         app.init_resource::<ClothDebug>();
+        timing::install(app);
         app.sub_app_mut(RenderApp)
             .init_resource::<RenderCapture>()
             .add_systems(ExtractSchedule, extract_request)

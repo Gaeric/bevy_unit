@@ -21,6 +21,7 @@ pub(crate) mod bindings;
 pub(crate) mod pipeline;
 
 use crate::{
+    debug::timing::{OutputTiming, RenderTimings},
     prepare::PreparedCloth,
     solver::{gpu::ClothBuffers, layout::StepParams, pipeline::WORKGROUP_SIZE},
 };
@@ -248,13 +249,19 @@ pub(crate) fn output_cloths(
     cache: Res<PipelineCache>,
     pipeline: Res<ClothOutputPipeline>,
     allocator: Res<MeshAllocator>,
-    cloths: Query<(&ClothOutputInput, &ClothOutputBindGroup, &StepParams)>,
+    cloths: Query<(
+        Entity,
+        &ClothOutputInput,
+        &ClothOutputBindGroup,
+        &StepParams,
+    )>,
+    mut timings: Option<ResMut<RenderTimings>>,
 ) {
     let Some(output_pipeline) = cache.get_compute_pipeline(pipeline.output_mesh) else {
         return;
     };
 
-    for (input, binding, step) in &cloths {
+    for (entity, input, binding, step) in &cloths {
         let Some(slice) = allocator.mesh_vertex_slice(&input.mesh) else {
             continue;
         };
@@ -262,16 +269,22 @@ pub(crate) fn output_cloths(
             continue;
         }
 
+        let sample = timings
+            .as_deref_mut()
+            .and_then(|timings| timings.begin_output(entity, context.render_device()));
         // Separate passes avoid overlapping writable slab bindings between cloths.
-        let mut pass = context
-            .command_encoder()
-            .begin_compute_pass(&ComputePassDescriptor {
+        let encoder = context.command_encoder();
+        {
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                 label: Some("xpbd cloth mesh output"),
-                timestamp_writes: None,
+                timestamp_writes: sample.as_ref().map(OutputTiming::writes),
             });
-
-        pass.set_pipeline(output_pipeline);
-        pass.set_bind_group(0, &binding.bind_group, &[]);
-        pass.dispatch_workgroups(step.particle_count.div_ceil(WORKGROUP_SIZE), 1, 1);
+            pass.set_pipeline(output_pipeline);
+            pass.set_bind_group(0, &binding.bind_group, &[]);
+            pass.dispatch_workgroups(step.particle_count.div_ceil(WORKGROUP_SIZE), 1, 1);
+        }
+        if let (Some(timings), Some(sample)) = (timings.as_deref_mut(), sample) {
+            timings.finish_output(sample, encoder);
+        }
     }
 }

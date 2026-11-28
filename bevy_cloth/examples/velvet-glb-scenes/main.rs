@@ -28,6 +28,7 @@ use std::{
 
 use bevy_cloth::{
     ClothPlugin, ClothSolver,
+    debug::{ClothDebugPlugin, timing::ClothGpuTimings},
     legacy::demo::{
         LEGACY_FIXED_HZ, LegacyOrbitCamera, LegacyOrbitCameraPlugin, LegacySceneId,
         legacy_scene_params,
@@ -44,6 +45,7 @@ struct Demo {
     playing: bool,
     step: bool,
     tick: u64,
+    timing_enabled: bool,
 }
 
 impl Default for Demo {
@@ -56,12 +58,14 @@ impl Default for Demo {
             playing: false,
             step: false,
             tick: 0,
+            timing_enabled: false,
         }
     }
 }
 
 impl Demo {
-    fn reset(&mut self) {
+    fn reset(&mut self, timings: &mut ClothGpuTimings) {
+        timings.set_target(None);
         self.rebuild = true;
         self.playing = false;
         self.step = false;
@@ -72,6 +76,7 @@ impl Demo {
 #[derive(Clone, Resource, ExtractResource)]
 #[extract_app(RenderApp)]
 struct SceneReady {
+    cloth: Entity,
     mesh: AssetId<Mesh>,
     solver: ClothSolver,
     has_dynamic_pin: bool,
@@ -102,6 +107,7 @@ fn main() -> AppExit {
     )
     .add_plugins((
         ClothPlugin,
+        ClothDebugPlugin,
         LegacyOrbitCameraPlugin,
         ExtractResourcePlugin::<SceneReady>::default(),
     ))
@@ -112,7 +118,7 @@ fn main() -> AppExit {
         brightness: 300.0,
         ..default()
     })
-    .add_systems(Startup, (setup, panel::spawn))
+    .add_systems(Startup, (setup, panel::spawn, panel::spawn_timing_panel))
     .add_systems(First, set_tick_budget.before(TimeSystems))
     .add_systems(
         Update,
@@ -121,6 +127,7 @@ fn main() -> AppExit {
             rebuild_scene,
             update_hud,
             panel::highlight_selection,
+            panel::update_timings,
         )
             .chain(),
     )
@@ -151,9 +158,13 @@ fn setup(
     ));
 }
 
-fn handle_keys(keys: Res<ButtonInput<KeyCode>>, mut demo: ResMut<Demo>) {
+fn handle_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut demo: ResMut<Demo>,
+    mut timings: ResMut<ClothGpuTimings>,
+) {
     if keys.just_pressed(KeyCode::KeyR) {
-        demo.reset();
+        demo.reset(&mut timings);
     } else if keys.just_pressed(KeyCode::Space) {
         demo.playing = !demo.playing;
     } else if keys.just_pressed(KeyCode::KeyS) {
@@ -170,18 +181,20 @@ fn rebuild_scene(
     old_entities: Query<Entity, With<SceneEntity>>,
     previous: Option<Res<SceneReady>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut timings: ResMut<ClothGpuTimings>,
 ) -> Result {
     if !demo.rebuild {
         return Ok(());
     }
     if let Some(previous) = previous {
+        timings.set_target(None);
         for entity in &old_entities {
             commands.entity(entity).despawn();
         }
         meshes.remove(previous.mesh);
         commands.remove_resource::<SceneReady>();
     }
-    if let Some(mesh) = scene::spawn_scene(
+    if let Some((cloth, mesh)) = scene::spawn_scene(
         &mut commands,
         &scene_assets,
         &server,
@@ -191,7 +204,11 @@ fn rebuild_scene(
         demo.vbd_options,
     )? {
         demo.rebuild = false;
+        if demo.timing_enabled {
+            timings.set_target(Some(cloth));
+        }
         commands.insert_resource(SceneReady {
+            cloth,
             mesh,
             solver: demo.solver,
             has_dynamic_pin: demo.scene == LegacySceneId::Swirl,

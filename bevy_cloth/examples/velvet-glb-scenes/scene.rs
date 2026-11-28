@@ -113,7 +113,7 @@ pub(super) struct VbdOptions {
     pub self_contact: bool,
 }
 
-/// Returns `Ok(None)` while the GLBs for this scene are still loading.
+/// Returns the cloth entity and its mesh ID, or `Ok(None)` while GLBs are loading.
 /// Only the new cloth copy is written by the GPU; collider and source meshes are shared.
 pub(super) fn spawn_scene(
     commands: &mut Commands,
@@ -123,7 +123,7 @@ pub(super) fn spawn_scene(
     id: LegacySceneId,
     solver: ClothSolver,
     vbd_options: VbdOptions,
-) -> Result<Option<AssetId<Mesh>>, String> {
+) -> Result<Option<(Entity, AssetId<Mesh>)>, String> {
     let scene = legacy_comparison_scene(id).expect("all seven scenes have fixtures");
     let spec = &scene.cloths[0];
     let source_handle = assets.sheet(spec.resolution);
@@ -261,7 +261,7 @@ pub(super) fn spawn_scene(
             local_offset: Vec3::ZERO,
         }]));
     }
-    Ok(Some(mesh_id))
+    Ok(Some((cloth.id(), mesh_id)))
 }
 
 fn collider_pose(collider: &LegacyColliderSpec, id: LegacySceneId, vbd: bool) -> Transform {
