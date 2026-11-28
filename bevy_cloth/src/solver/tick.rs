@@ -16,7 +16,7 @@ use crate::{
     collision::{
         motion::ContactMotionBatch,
         refit::{ColliderPose, ColliderRefit, ColliderRefitPipeline},
-        self_collision::{SelfCollision, SelfCollisionPipeline},
+        self_collision::{SelfCollision, SelfCollisionPipeline, SelfCollisionStep},
         transform::ColliderTransformPipeline,
     },
     components::{ClothStepSettings, CollisionGroup, VbdStaticCollider},
@@ -413,91 +413,123 @@ pub(crate) fn simulate_cloths(
             None
         };
 
-        let pins = attachments.zip(apply_attachments);
+        let tick = RecordTick {
+            buffers: cloth_buffers,
+            substeps: settings.substeps,
+            iterations: settings.iterations,
+            particle_workgroups,
+            predict: (predict, predict_binding),
+            velocity: (update_velocity, &integration.0),
+            pins: attachments.zip(apply_attachments),
+            stabilize,
+            friction,
+            contact_binding: &contact_bind_group.0,
+            collider_bindings: &collider_bindings,
+            self_contact: self_contact.as_ref(),
+            sweep: &sweep,
+        };
         while tick_cursor < ticks.requested {
-            // XPBD keeps its tick-start pin update before contact stabilization.
-            if stabilize.is_some()
-                && let Some((pins, pipeline)) = pins
-            {
-                pins.record(&mut context, pipeline);
-            }
-            if let Some(stabilize) = stabilize.filter(|_| !collider_bindings.is_empty()) {
-                let mut pass =
-                    context
-                        .command_encoder()
-                        .begin_compute_pass(&ComputePassDescriptor {
-                            label: Some("xpbd cloth contact stabilization"),
-                            timestamp_writes: None,
-                        });
-
-                record_contacts(
-                    &mut pass,
-                    stabilize,
-                    None,
-                    &contact_bind_group.0,
-                    &collider_bindings,
-                    particle_workgroups,
-                );
-            }
-
-            for substep in 0..settings.substeps {
-                let encoder = context.command_encoder();
-                if let Some(stretch) = &cloth_buffers.stretch {
-                    encoder.clear_buffer(&stretch.lambdas, 0, None);
-                }
-                if let Some(bend_buffers) = &cloth_buffers.bending {
-                    encoder.clear_buffer(&bend_buffers.lambdas, 0, None);
-                }
-                if let Some(tethers) = &cloth_buffers.tethers {
-                    encoder.clear_buffer(&tethers.lambdas, 0, None);
-                }
-
-                let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("cloth substep"),
-                    timestamp_writes: None,
-                });
-
-                pass.set_pipeline(predict);
-                pass.set_bind_group(0, predict_binding, &[]);
-                pass.dispatch_workgroups(particle_workgroups, 1, 1);
-
-                // VBD prediction saves the old pin positions but does not move
-                // them. Only the first substep sees a newly sampled pin jump.
-                if stabilize.is_none()
-                    && substep == 0
-                    && let Some((pins, pipeline)) = pins
-                {
-                    pins.record_in_pass(&mut pass, pipeline);
-                }
-
-                if let Some(stabilize) = stabilize {
-                    record_contacts(
-                        &mut pass,
-                        stabilize,
-                        friction,
-                        &contact_bind_group.0,
-                        &collider_bindings,
-                        particle_workgroups,
-                    );
-                }
-
-                if let Some(contact) = &self_contact {
-                    contact.record(&mut pass);
-                }
-
-                for _ in 0..settings.iterations {
-                    sweep.record(&mut pass);
-                }
-
-                pass.set_pipeline(update_velocity);
-                pass.set_bind_group(0, &integration.0, &[]);
-                pass.dispatch_workgroups(particle_workgroups, 1, 1);
-            }
-
+            tick.record(&mut context);
             // Bevy submits the command stream later; no CPU wait or particle readback.
             tick_cursor += 1;
         }
 
         simulation.tick_cursor = Some(tick_cursor);
+    }
+}
+
+struct RecordTick<'a> {
+    buffers: &'a ClothBuffers,
+    substeps: u32,
+    iterations: u32,
+    particle_workgroups: u32,
+    predict: (&'a ComputePipeline, &'a BindGroup),
+    velocity: (&'a ComputePipeline, &'a BindGroup),
+    pins: Option<(&'a GpuAttachments, &'a ComputePipeline)>,
+    stabilize: Option<&'a ComputePipeline>,
+    friction: Option<&'a ComputePipeline>,
+    contact_binding: &'a BindGroup,
+    collider_bindings: &'a [(&'a BindGroup, ColliderPose)],
+    self_contact: Option<&'a SelfCollisionStep<'a>>,
+    sweep: &'a ConstraintSweep<'a>,
+}
+
+impl RecordTick<'_> {
+    fn record(&self, context: &mut RenderContext) {
+        // XPBD keeps its tick-start pin update before contact stabilization.
+        if self.stabilize.is_some()
+            && let Some((pins, pipeline)) = self.pins
+        {
+            pins.record(context, pipeline);
+        }
+        if let Some(normal) = self
+            .stabilize
+            .filter(|_| !self.collider_bindings.is_empty())
+        {
+            let mut pass = context
+                .command_encoder()
+                .begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("xpbd cloth contact stabilization"),
+                    timestamp_writes: None,
+                });
+            record_contacts(
+                &mut pass,
+                normal,
+                None,
+                self.contact_binding,
+                self.collider_bindings,
+                self.particle_workgroups,
+            );
+        }
+
+        for substep in 0..self.substeps {
+            let encoder = context.command_encoder();
+            if let Some(stretch) = &self.buffers.stretch {
+                encoder.clear_buffer(&stretch.lambdas, 0, None);
+            }
+            if let Some(bend_buffers) = &self.buffers.bending {
+                encoder.clear_buffer(&bend_buffers.lambdas, 0, None);
+            }
+            if let Some(tethers) = &self.buffers.tethers {
+                encoder.clear_buffer(&tethers.lambdas, 0, None);
+            }
+
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("cloth substep"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(self.predict.0);
+            pass.set_bind_group(0, self.predict.1, &[]);
+            pass.dispatch_workgroups(self.particle_workgroups, 1, 1);
+
+            // VBD prediction saves the old pin positions but does not move
+            // them. Only the first substep sees a newly sampled pin jump.
+            if self.stabilize.is_none()
+                && substep == 0
+                && let Some((pins, pipeline)) = self.pins
+            {
+                pins.record_in_pass(&mut pass, pipeline);
+            }
+            if let Some(normal) = self.stabilize {
+                record_contacts(
+                    &mut pass,
+                    normal,
+                    self.friction,
+                    self.contact_binding,
+                    self.collider_bindings,
+                    self.particle_workgroups,
+                );
+            }
+            if let Some(contact) = self.self_contact {
+                contact.record(&mut pass);
+            }
+            for _ in 0..self.iterations {
+                self.sweep.record(&mut pass);
+            }
+
+            pass.set_pipeline(self.velocity.0);
+            pass.set_bind_group(0, self.velocity.1, &[]);
+            pass.dispatch_workgroups(self.particle_workgroups, 1, 1);
+        }
     }
 }
