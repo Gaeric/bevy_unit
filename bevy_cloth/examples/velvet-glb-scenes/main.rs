@@ -28,7 +28,10 @@ use std::{
 
 use bevy_cloth::{
     ClothPlugin, ClothSolver,
-    legacy::demo::{LEGACY_FIXED_HZ, LegacyOrbitCamera, LegacyOrbitCameraPlugin, LegacySceneId},
+    legacy::demo::{
+        LEGACY_FIXED_HZ, LegacyOrbitCamera, LegacyOrbitCameraPlugin, LegacySceneId,
+        legacy_scene_params,
+    },
 };
 use scene::{SceneAssets, SceneEntity, SceneMotion};
 
@@ -36,6 +39,7 @@ use scene::{SceneAssets, SceneEntity, SceneMotion};
 struct Demo {
     scene: LegacySceneId,
     solver: ClothSolver,
+    vbd_friction: bool,
     rebuild: bool,
     playing: bool,
     step: bool,
@@ -47,6 +51,7 @@ impl Default for Demo {
         Self {
             scene: LegacySceneId::Attach,
             solver: ClothSolver::ColoredGs,
+            vbd_friction: false,
             rebuild: true,
             playing: false,
             step: false,
@@ -183,6 +188,7 @@ fn rebuild_scene(
         &mut meshes,
         demo.scene,
         demo.solver,
+        demo.vbd_friction,
     )? {
         demo.rebuild = false;
         commands.insert_resource(SceneReady {
@@ -331,6 +337,11 @@ fn update_hud(
         "Paused"
     };
     let features = if demo.solver == ClothSolver::Vbd {
+        let friction = if demo.vbd_friction {
+            legacy_scene_params(demo.scene).friction
+        } else {
+            0.0
+        };
         let frozen = if matches!(
             demo.scene,
             LegacySceneId::Collision | LegacySceneId::Friction
@@ -339,7 +350,7 @@ fn update_hud(
         } else {
             ""
         };
-        format!("VBD: static contact, no friction or self-contact{frozen}")
+        format!("VBD: static contact, friction μ={friction:.2}, no self-contact{frozen}")
     } else {
         "XPBD: mesh contact, friction, particle self-contact".to_owned()
     };

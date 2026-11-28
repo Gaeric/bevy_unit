@@ -12,10 +12,14 @@ use super::Demo;
 #[derive(Component)]
 pub(super) struct Hud;
 
+#[derive(Component)]
+pub(super) struct VbdOptionRow;
+
 #[derive(Clone, Copy, Component)]
 pub(super) enum Choice {
     Scene(LegacySceneId),
     Solver(ClothSolver),
+    VbdFriction(bool),
 }
 
 impl Choice {
@@ -23,6 +27,7 @@ impl Choice {
         match self {
             Self::Scene(scene) => demo.scene == scene,
             Self::Solver(solver) => demo.solver == solver,
+            Self::VbdFriction(enabled) => demo.vbd_friction == enabled,
         }
     }
 }
@@ -45,7 +50,7 @@ pub(super) fn spawn(mut commands: Commands) {
         BackgroundColor(Color::srgba(0.04, 0.06, 0.09, 0.94)),
     ));
     panel.with_children(|panel| {
-        for (heading, choices) in [
+        for (heading, choices, vbd_only) in [
             (
                 "Scene",
                 &[
@@ -57,6 +62,7 @@ pub(super) fn spawn(mut commands: Commands) {
                     ("High Resolution", Choice::Scene(HighResolution)),
                     ("Swirl", Choice::Scene(Swirl)),
                 ][..],
+                false,
             ),
             (
                 "Solver",
@@ -65,45 +71,61 @@ pub(super) fn spawn(mut commands: Commands) {
                     ("Jacobi", Choice::Solver(ClothSolver::Jacobi)),
                     ("VBD", Choice::Solver(ClothSolver::Vbd)),
                 ][..],
+                false,
+            ),
+            (
+                "VBD friction",
+                &[
+                    ("Off", Choice::VbdFriction(false)),
+                    ("On", Choice::VbdFriction(true)),
+                ][..],
+                true,
             ),
         ] {
-            panel
-                .spawn(Node {
-                    flex_wrap: FlexWrap::Wrap,
-                    align_items: AlignItems::Center,
-                    column_gap: px(6),
-                    row_gap: px(4),
-                    ..default()
-                })
-                .with_children(|row| {
+            let mut row = panel.spawn(Node {
+                display: if vbd_only {
+                    Display::None
+                } else {
+                    Display::Flex
+                },
+                flex_wrap: FlexWrap::Wrap,
+                align_items: AlignItems::Center,
+                column_gap: px(6),
+                row_gap: px(4),
+                ..default()
+            });
+            if vbd_only {
+                row.insert(VbdOptionRow);
+            }
+            row.with_children(|row| {
+                row.spawn((
+                    Text::new(heading),
+                    TextFont::from_font_size(14.0),
+                    Node {
+                        width: px(if vbd_only { 120 } else { 50 }),
+                        ..default()
+                    },
+                ));
+                for &(label, choice) in choices {
                     row.spawn((
-                        Text::new(heading),
-                        TextFont::from_font_size(14.0),
+                        Button,
+                        choice,
+                        Hovered::default(),
                         Node {
-                            width: px(50),
+                            padding: UiRect::axes(px(10), px(5)),
+                            border_radius: BorderRadius::all(px(4)),
                             ..default()
                         },
-                    ));
-                    for &(label, choice) in choices {
-                        row.spawn((
-                            Button,
-                            choice,
-                            Hovered::default(),
-                            Node {
-                                padding: UiRect::axes(px(10), px(5)),
-                                border_radius: BorderRadius::all(px(4)),
-                                ..default()
-                            },
-                            BackgroundColor::default(),
-                            children![(
-                                Text::new(label),
-                                TextFont::from_font_size(14.0),
-                                Pickable::IGNORE
-                            )],
-                        ))
-                        .observe(select_choice);
-                    }
-                });
+                        BackgroundColor::default(),
+                        children![(
+                            Text::new(label),
+                            TextFont::from_font_size(14.0),
+                            Pickable::IGNORE
+                        )],
+                    ))
+                    .observe(select_choice);
+                }
+            });
         }
         panel.spawn((
             Hud,
@@ -123,14 +145,29 @@ fn select_choice(event: On<Activate>, choices: Query<&Choice>, mut demo: ResMut<
     match choice {
         Choice::Scene(scene) => demo.scene = scene,
         Choice::Solver(solver) => demo.solver = solver,
+        Choice::VbdFriction(enabled) if demo.solver == ClothSolver::Vbd => {
+            demo.vbd_friction = enabled;
+        }
+        Choice::VbdFriction(_) => return,
     }
     demo.reset();
 }
 
 pub(super) fn highlight_selection(
     demo: Res<Demo>,
+    mut option_rows: Query<&mut Node, With<VbdOptionRow>>,
     mut buttons: Query<(&Choice, &Hovered, &mut BackgroundColor)>,
 ) {
+    let display = if demo.solver == ClothSolver::Vbd {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut row in &mut option_rows {
+        if row.display != display {
+            row.display = display;
+        }
+    }
     for (choice, hovered, mut background) in &mut buttons {
         let color = if choice.is_selected(&demo) {
             Color::srgb(0.10, 0.38, 0.65)

@@ -116,6 +116,7 @@ pub(super) fn spawn_scene(
     meshes: &mut Assets<Mesh>,
     id: LegacySceneId,
     solver: ClothSolver,
+    vbd_friction: bool,
 ) -> Result<Option<AssetId<Mesh>>, String> {
     let scene = legacy_comparison_scene(id).expect("all seven scenes have fixtures");
     let spec = &scene.cloths[0];
@@ -235,7 +236,7 @@ pub(super) fn spawn_scene(
             ClothVbdContact { stiffness: 200.0 },
         ));
     }
-    if !vbd {
+    if !vbd || vbd_friction {
         cloth.insert(ClothExternalFriction {
             coefficient: params.friction,
         });
