@@ -50,16 +50,35 @@
   #+end_src
   三个功能开关可独立使用：=--lra= 增加刚性距离上限；=--friction= 打开外部摩擦，若已打开自碰撞也会启用自接触摩擦；
   =--self-collision= 打开自碰撞。准备日志中的 =tethers= 是生成的长距离约束数。
-* Velvet GLB Attach
-  从 workspace 根目录运行，使用生产路径 =ClothPlugin=：
+* Velvet GLB 七场景
+  从 workspace 根目录运行，走当前 =ClothPlugin=，不使用旧 CPU/GPU 求解器：
   #+begin_src bash
     cargo run -p bevy_cloth --example velvet-glb-scenes
   #+end_src
-  场景是 40 分段的四角固定布片落向静止球。默认 Colored GS，点击 =Solver= 可切换 Jacobi 或 VBD；
-  切换或按 =R= 重建并暂停，再次点击当前选项不会重置。等窗口显示 =Paused, tick 0=，
-  按 =Space= 播放/暂停，按 =S= 单步。中键拖拽环绕，滚轮缩放。步长 1/60 s，每帧最多一步。
-  加载时保留 CPU 可读的位置和索引，关闭坐标转换及顶点压缩。重建时克隆布料 Mesh，不写回源 GLB。
-  碰撞使用三角网格 BVH，不复刻解析 SDF。该示例的 VBD 仅启用静态法向接触。
+  默认 Attach / Colored GS。点击窗口顶部的 =Scene= 和 =Solver= 按钮切换，蓝色表示当前选择。
+  切换或按 =R= 会重建初态并暂停；再次点击当前选项不会重置。等待窗口显示 =Paused, tick 0=。
+  =Space= 播放/暂停，=S= 单步，中键拖拽环绕，滚轮缩放。固定步长 1/60 s，不追赶多 tick，
+  机器跟不上时会慢放；这是接入和形态对照，不是性能基准。
+
+  | # | 场景 | 每边分段 / 布片 | 观察点 |
+  |---+------+---------------+--------|
+  | 1 | attach | 40 / 1 | 四角硬挂点；布面落向静止球 |
+  | 2 | collision | 16 / 1 | 两个顶角挂点；XPBD 的球沿 Z 往复，VBD 的球固定在 z=-0.5 m |
+  | 3 | self-collision | 60 / 1 | 倾斜布落地观察折叠 |
+  | 4 | friction | 64 / 1 | XPBD 的球旋转并横移；VBD 的球静止 |
+  | 5 | multiple | 64 / 3 | 三层不同颜色的布落到方块；可观察层间接触 |
+  | 6 | high-resolution | 200 / 1 | 40,401 顶点布片落向静止球 |
+  | 7 | swirl | 36 / 1 | 球是移动挂点的标记，不是碰撞体 |
+
+  GLB 在 =assets/velvet/scenes/=（相对 crate 目录）；=python3 bevy_cloth/tools/generate_glb.py --scenes=
+  可以重生成。加载时保留 CPU 可读的位置和索引，关闭坐标转换及顶点压缩。每次重建使用新布料 Mesh，
+  不写回源资产。Multiple 把同一个 GLB 的三个实例合成一块索引网格，不焊接；不同层之间没有弹性约束，
+  但属于同一个自碰撞域。它用一份织物贴图加顶点颜色区分各层。
+
+  原场景的姿态、挂点和移动公式来自共享 Velvet fixture。生产网格 BVH 用有限地面和三角球/方块，
+  不复刻解析 SDF、旧版 LRA 或阻尼。本示例的 VBD 仅启用静态法向接触；
+  VBD 的膜、弯曲参数是本示例的起点，与 XPBD 刚度未校准。排查接入时先看 Attach 和 Collision 的
+  =cloth prepared= 日志是否分别为 1,681/4 和 289/2（粒子/固定挂点），再观察 Swirl 顶点是否跟随标记。
 * Blender 外部视觉对照
   从 workspace 根目录运行（已有缓存时只需最后一条）：
   #+begin_src bash

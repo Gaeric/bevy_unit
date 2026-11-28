@@ -1,11 +1,11 @@
-//! Solver selector for the Attach example.
+//! Scene and solver selectors for the GLB example.
 
 use bevy::{
     picking::{Pickable, hover::Hovered},
     prelude::*,
     ui_widgets::{Activate, Button},
 };
-use bevy_cloth::ClothSolver;
+use bevy_cloth::{ClothSolver, legacy::demo::LegacySceneId};
 
 use super::Demo;
 
@@ -13,9 +13,23 @@ use super::Demo;
 pub(super) struct Hud;
 
 #[derive(Clone, Copy, Component)]
-pub(super) struct Choice(ClothSolver);
+pub(super) enum Choice {
+    Scene(LegacySceneId),
+    Solver(ClothSolver),
+}
+
+impl Choice {
+    fn is_selected(self, demo: &Demo) -> bool {
+        match self {
+            Self::Scene(scene) => demo.scene == scene,
+            Self::Solver(solver) => demo.solver == solver,
+        }
+    }
+}
 
 pub(super) fn spawn(mut commands: Commands) {
+    use LegacySceneId::*;
+
     let mut panel = commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -31,47 +45,66 @@ pub(super) fn spawn(mut commands: Commands) {
         BackgroundColor(Color::srgba(0.04, 0.06, 0.09, 0.94)),
     ));
     panel.with_children(|panel| {
-        panel
-            .spawn(Node {
-                flex_wrap: FlexWrap::Wrap,
-                align_items: AlignItems::Center,
-                column_gap: px(6),
-                row_gap: px(4),
-                ..default()
-            })
-            .with_children(|row| {
-                row.spawn((
-                    Text::new("Solver"),
-                    TextFont::from_font_size(14.0),
-                    Node {
-                        width: px(50),
-                        ..default()
-                    },
-                ));
-                for (label, solver) in [
-                    ("Colored GS", ClothSolver::ColoredGs),
-                    ("Jacobi", ClothSolver::Jacobi),
-                    ("VBD", ClothSolver::Vbd),
-                ] {
+        for (heading, choices) in [
+            (
+                "Scene",
+                &[
+                    ("Attach", Choice::Scene(Attach)),
+                    ("Collision", Choice::Scene(Collision)),
+                    ("Self Collision", Choice::Scene(SelfCollision)),
+                    ("Friction", Choice::Scene(Friction)),
+                    ("Multiple", Choice::Scene(Multiple)),
+                    ("High Resolution", Choice::Scene(HighResolution)),
+                    ("Swirl", Choice::Scene(Swirl)),
+                ][..],
+            ),
+            (
+                "Solver",
+                &[
+                    ("Colored GS", Choice::Solver(ClothSolver::ColoredGs)),
+                    ("Jacobi", Choice::Solver(ClothSolver::Jacobi)),
+                    ("VBD", Choice::Solver(ClothSolver::Vbd)),
+                ][..],
+            ),
+        ] {
+            panel
+                .spawn(Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    align_items: AlignItems::Center,
+                    column_gap: px(6),
+                    row_gap: px(4),
+                    ..default()
+                })
+                .with_children(|row| {
                     row.spawn((
-                        Button,
-                        Choice(solver),
-                        Hovered::default(),
+                        Text::new(heading),
+                        TextFont::from_font_size(14.0),
                         Node {
-                            padding: UiRect::axes(px(10), px(5)),
-                            border_radius: BorderRadius::all(px(4)),
+                            width: px(50),
                             ..default()
                         },
-                        BackgroundColor::default(),
-                        children![(
-                            Text::new(label),
-                            TextFont::from_font_size(14.0),
-                            Pickable::IGNORE
-                        )],
-                    ))
-                    .observe(select_choice);
-                }
-            });
+                    ));
+                    for &(label, choice) in choices {
+                        row.spawn((
+                            Button,
+                            choice,
+                            Hovered::default(),
+                            Node {
+                                padding: UiRect::axes(px(10), px(5)),
+                                border_radius: BorderRadius::all(px(4)),
+                                ..default()
+                            },
+                            BackgroundColor::default(),
+                            children![(
+                                Text::new(label),
+                                TextFont::from_font_size(14.0),
+                                Pickable::IGNORE
+                            )],
+                        ))
+                        .observe(select_choice);
+                    }
+                });
+        }
         panel.spawn((
             Hud,
             Text::new("Loading GLBs"),
@@ -84,10 +117,13 @@ fn select_choice(event: On<Activate>, choices: Query<&Choice>, mut demo: ResMut<
     let Ok(&choice) = choices.get(event.entity) else {
         return;
     };
-    if choice.0 == demo.solver {
+    if choice.is_selected(&demo) {
         return;
     }
-    demo.solver = choice.0;
+    match choice {
+        Choice::Scene(scene) => demo.scene = scene,
+        Choice::Solver(solver) => demo.solver = solver,
+    }
     demo.reset();
 }
 
@@ -96,7 +132,7 @@ pub(super) fn highlight_selection(
     mut buttons: Query<(&Choice, &Hovered, &mut BackgroundColor)>,
 ) {
     for (choice, hovered, mut background) in &mut buttons {
-        let color = if choice.0 == demo.solver {
+        let color = if choice.is_selected(&demo) {
             Color::srgb(0.10, 0.38, 0.65)
         } else if hovered.get() {
             Color::srgb(0.26, 0.32, 0.40)

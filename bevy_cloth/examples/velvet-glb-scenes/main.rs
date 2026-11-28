@@ -1,4 +1,4 @@
-//! The Velvet Attach fixture with GLB meshes and the production ClothPlugin.
+//! The seven Velvet fixtures with GLB meshes and the production ClothPlugin.
 
 mod panel;
 mod scene;
@@ -30,10 +30,11 @@ use bevy_cloth::{
     ClothPlugin, ClothSolver,
     legacy::demo::{LEGACY_FIXED_HZ, LegacyOrbitCamera, LegacyOrbitCameraPlugin, LegacySceneId},
 };
-use scene::{SceneAssets, SceneEntity};
+use scene::{SceneAssets, SceneEntity, SceneMotion};
 
 #[derive(Resource)]
 struct Demo {
+    scene: LegacySceneId,
     solver: ClothSolver,
     rebuild: bool,
     playing: bool,
@@ -44,6 +45,7 @@ struct Demo {
 impl Default for Demo {
     fn default() -> Self {
         Self {
+            scene: LegacySceneId::Attach,
             solver: ClothSolver::ColoredGs,
             rebuild: true,
             playing: false,
@@ -67,6 +69,7 @@ impl Demo {
 struct SceneReady {
     mesh: AssetId<Mesh>,
     solver: ClothSolver,
+    has_dynamic_pin: bool,
     has_self_contact: bool,
     ready: Arc<AtomicBool>,
 }
@@ -84,7 +87,7 @@ fn main() -> AppExit {
             })
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "Velvet GLB Attach — ClothPlugin".into(),
+                    title: "Velvet GLB scenes — ClothPlugin".into(),
                     resolution: (1280, 850).into(),
                     ..default()
                 }),
@@ -116,7 +119,7 @@ fn main() -> AppExit {
         )
             .chain(),
     )
-    .add_systems(FixedUpdate, count_tick);
+    .add_systems(FixedUpdate, animate_scene);
     app.world_mut()
         .resource_mut::<Time<Fixed>>()
         .set_timestep_hz(f64::from(LEGACY_FIXED_HZ));
@@ -178,12 +181,14 @@ fn rebuild_scene(
         &scene_assets,
         &server,
         &mut meshes,
+        demo.scene,
         demo.solver,
     )? {
         demo.rebuild = false;
         commands.insert_resource(SceneReady {
             mesh,
             solver: demo.solver,
+            has_dynamic_pin: demo.scene == LegacySceneId::Swirl,
             has_self_contact: demo.solver != ClothSolver::Vbd,
             ready: Arc::new(AtomicBool::new(false)),
         });
@@ -220,8 +225,12 @@ fn set_tick_budget(
     *clock = TimeUpdateStrategy::FixedTimesteps(u32::from(advance));
 }
 
-fn count_tick(mut demo: ResMut<Demo>) {
+fn animate_scene(mut demo: ResMut<Demo>, mut movers: Query<(&SceneMotion, &mut Transform)>) {
     demo.tick += 1;
+    let time = (demo.tick as f64 / LEGACY_FIXED_HZ) as f32;
+    for (motion, mut transform) in &mut movers {
+        *transform = Transform::from_matrix(motion.0.transform_at(time));
+    }
 }
 
 fn check_scene_ready(
@@ -272,7 +281,12 @@ fn check_scene_ready(
             xpbd.into_iter()
                 .filter(|_| scene.solver != ClothSolver::Vbd),
         )
-        .chain(self_contact.into_iter().filter(|_| scene.has_self_contact));
+        .chain(self_contact.into_iter().filter(|_| scene.has_self_contact))
+        .chain(
+            scene
+                .has_dynamic_pin
+                .then_some("xpbd apply attachment targets"),
+        );
     let mut pending = Vec::new();
     for label in required {
         let state = cache.pipelines().find_map(|p| {
@@ -317,13 +331,21 @@ fn update_hud(
         "Paused"
     };
     let features = if demo.solver == ClothSolver::Vbd {
-        "VBD: static contact, no friction or self-contact"
+        let frozen = if matches!(
+            demo.scene,
+            LegacySceneId::Collision | LegacySceneId::Friction
+        ) {
+            "; sphere frozen"
+        } else {
+            ""
+        };
+        format!("VBD: static contact, no friction or self-contact{frozen}")
     } else {
-        "XPBD: mesh contact, friction, particle self-contact"
+        "XPBD: mesh contact, friction, particle self-contact".to_owned()
     };
     hud.0 = format!(
         "{}  |  {:?}  |  {state}, tick {}\n{features}\nSpace play/pause  S step  R reset",
-        LegacySceneId::Attach.label(),
+        demo.scene.label(),
         demo.solver,
         demo.tick
     );

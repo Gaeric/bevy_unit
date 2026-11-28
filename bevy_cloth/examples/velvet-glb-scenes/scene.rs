@@ -1,4 +1,4 @@
-//! Load the baked primitives and assemble the Velvet Attach fixture.
+//! Load the baked primitives, then assemble the original Velvet scene fixtures.
 
 use bevy::{
     asset::{LoadState, RenderAssetUsages},
@@ -7,25 +7,33 @@ use bevy::{
     prelude::*,
 };
 use bevy_cloth::{
-    Cloth, ClothExternalFriction, ClothSelfCollision, ClothSolver, ClothStepSettings,
-    ClothVbdContact, ClothVbdMaterial, FixedAttachment, MeshCollider, VbdStaticCollider,
+    Cloth, ClothDynamicAttachments, ClothExternalFriction, ClothSelfCollision, ClothSolver,
+    ClothStepSettings, ClothVbdContact, ClothVbdMaterial, DynamicAttachment, FixedAttachment,
+    MeshCollider, VbdStaticCollider,
     legacy::{
-        demo::{LegacySceneId, legacy_scene_params, scenes::legacy_comparison_scene},
+        demo::scenes::{LegacyClothSpec, LegacyColliderSpec, legacy_comparison_scene},
+        demo::{LegacyColliderMotion, LegacySceneId, legacy_scene_params},
         sim::collide::LegacyColliderKind,
     },
 };
 
+const RESOLUTIONS: [u32; 6] = [16, 36, 40, 60, 64, 200];
 const SURFACE_DENSITY: f32 = 0.2; // kg/m² for this demo, independent of grid resolution.
 
 #[derive(Component)]
 pub struct SceneEntity;
 
+#[derive(Component)]
+pub struct SceneMotion(pub LegacyColliderSpec);
+
 #[derive(Resource)]
 pub struct SceneAssets {
-    sheet: Handle<Mesh>,
+    sheets: [Handle<Mesh>; RESOLUTIONS.len()],
     ground: Handle<Mesh>,
     sphere: Handle<Mesh>,
-    fabric: Handle<StandardMaterial>,
+    cube: Handle<Mesh>,
+    fabrics: [Handle<StandardMaterial>; 3],
+    layered_fabric: Handle<StandardMaterial>,
     ground_material: Handle<StandardMaterial>,
     collider_material: Handle<StandardMaterial>,
 }
@@ -52,19 +60,24 @@ impl SceneAssets {
                     .from_asset(format!("velvet/scenes/{name}.glb")),
                 )
         };
-        let fabric = materials.add(StandardMaterial {
-            base_color_texture: Some(server.load("velvet/fabric1.jpg")),
+        let fabric = |number| StandardMaterial {
+            base_color_texture: Some(server.load(format!("velvet/fabric{number}.jpg"))),
             base_color: Color::srgb(0.15, 0.64, 0.95),
             cull_mode: None,
             double_sided: true,
             perceptual_roughness: 1.0,
             ..default()
-        });
+        };
         Self {
-            sheet: load_mesh("cloth-40"),
+            sheets: RESOLUTIONS.map(|r| load_mesh(&format!("cloth-{r}"))),
             ground: load_mesh("ground"),
             sphere: load_mesh("sphere"),
-            fabric,
+            cube: load_mesh("cube"),
+            fabrics: [1, 2, 3].map(|number| materials.add(fabric(number))),
+            layered_fabric: materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                ..fabric(1)
+            }),
             ground_material: materials.add(StandardMaterial {
                 base_color: Color::srgb(0.32, 0.28, 0.24),
                 perceptual_roughness: 1.0,
@@ -77,11 +90,19 @@ impl SceneAssets {
         }
     }
 
+    fn sheet(&self, resolution: u32) -> &Handle<Mesh> {
+        let index = RESOLUTIONS
+            .iter()
+            .position(|&r| r == resolution)
+            .expect("a GLB must exist for every Velvet resolution");
+        &self.sheets[index]
+    }
+
     fn collider(&self, kind: LegacyColliderKind) -> (&Handle<Mesh>, &Handle<StandardMaterial>) {
         match kind {
             LegacyColliderKind::Plane => (&self.ground, &self.ground_material),
             LegacyColliderKind::Sphere => (&self.sphere, &self.collider_material),
-            LegacyColliderKind::Cube => unreachable!("the Attach fixture has no cube"),
+            LegacyColliderKind::Cube => (&self.cube, &self.collider_material),
         }
     }
 }
@@ -93,12 +114,12 @@ pub(super) fn spawn_scene(
     assets: &SceneAssets,
     server: &AssetServer,
     meshes: &mut Assets<Mesh>,
+    id: LegacySceneId,
     solver: ClothSolver,
 ) -> Result<Option<AssetId<Mesh>>, String> {
-    let id = LegacySceneId::Attach;
-    let scene = legacy_comparison_scene(id).expect("the Attach fixture exists");
+    let scene = legacy_comparison_scene(id).expect("all seven scenes have fixtures");
     let spec = &scene.cloths[0];
-    let source_handle = &assets.sheet;
+    let source_handle = assets.sheet(spec.resolution);
     let all_meshes = std::iter::once(source_handle)
         .chain(scene.colliders.iter().map(|c| assets.collider(c.kind).0));
     for handle in all_meshes {
@@ -126,21 +147,40 @@ pub(super) fn spawn_scene(
         ));
     }
     let vbd = solver == ClothSolver::Vbd;
+    let dynamic_pin = id == LegacySceneId::Swirl;
+    let layered = scene.cloths.len() > 1;
     let pose = Transform::from_matrix(spec.pose());
-    let attachments = spec
-        .attached
-        .iter()
-        .map(|&particle| FixedAttachment {
-            particle,
-            position: pose.transform_point(Vec3::from(positions[particle as usize])),
-        })
-        .collect();
+    let attachments = if dynamic_pin {
+        Vec::new()
+    } else {
+        spec.attached
+            .iter()
+            .map(|&particle| FixedAttachment {
+                particle,
+                position: pose.transform_point(Vec3::from(positions[particle as usize])),
+            })
+            .collect()
+    };
+    let (mesh, transform, material) = if layered {
+        (
+            merge_layers(source, &scene.cloths)?,
+            Transform::IDENTITY,
+            assets.layered_fabric.clone(),
+        )
+    } else {
+        (
+            source.clone(),
+            pose,
+            assets.fabrics[spec.texture as usize - 1].clone(),
+        )
+    };
     let particle_mass = 4.0 * SURFACE_DENSITY / positions.len() as f32;
-    let mesh = meshes.add(source.clone());
+    let mesh = meshes.add(mesh);
     let mesh_id = mesh.id();
+    let mut target = None;
     for collider in scene.colliders {
         let (geometry, material) = assets.collider(collider.kind);
-        let transform = Transform::from_matrix(collider.initial_transform());
+        let transform = collider_pose(&collider, id, vbd);
         let mut entity = commands.spawn((
             SceneEntity,
             Mesh3d(geometry.clone()),
@@ -154,6 +194,12 @@ pub(super) fn spawn_scene(
                 entity.insert(MeshCollider);
             }
         }
+        if collider.motion == LegacyColliderMotion::SwirlSlot {
+            target = Some(entity.id()); // decorative sphere is the target, not a collider
+        }
+        if collider.motion != LegacyColliderMotion::Static && (!vbd || !collider.enabled) {
+            entity.insert(SceneMotion(collider));
+        }
     }
 
     let params = legacy_scene_params(id);
@@ -161,8 +207,8 @@ pub(super) fn spawn_scene(
         Name::new(id.label()),
         SceneEntity,
         Mesh3d(mesh),
-        MeshMaterial3d(assets.fabric.clone()),
-        pose,
+        MeshMaterial3d(material),
+        transform,
         solver,
         Cloth {
             particle_mass,
@@ -188,15 +234,61 @@ pub(super) fn spawn_scene(
             },
             ClothVbdContact { stiffness: 200.0 },
         ));
-    } else {
+    }
+    if !vbd {
         cloth.insert(ClothExternalFriction {
             coefficient: params.friction,
         });
+    }
+    if !vbd {
         cloth.insert(ClothSelfCollision {
             diameter: 2.0 * params.particle_diameter_scalar / spec.resolution as f32,
             friction: params.friction,
             neighbor_capacity: params.max_num_neighbors,
         });
     }
+    if let Some(target) = target {
+        cloth.insert(ClothDynamicAttachments(vec![DynamicAttachment {
+            particle: spec.attached[0],
+            target,
+            local_offset: Vec3::ZERO,
+        }]));
+    }
     Ok(Some(mesh_id))
+}
+
+fn collider_pose(collider: &LegacyColliderSpec, id: LegacySceneId, vbd: bool) -> Transform {
+    if collider.motion == LegacyColliderMotion::SwirlSlot {
+        return Transform::from_matrix(collider.transform_at(0.0));
+    }
+    let mut pose = Transform::from_matrix(collider.initial_transform());
+    if vbd && id == LegacySceneId::Collision && collider.motion == LegacyColliderMotion::SweepZ {
+        // Freeze the sphere where it can contact the hanging sheet. Its original
+        // z = -1 starting pose leaves a gap until it moves (unsupported by VBD).
+        pose.translation.z = -0.5;
+    }
+    pose
+}
+
+fn merge_layers(source: &Mesh, layers: &[LegacyClothSpec]) -> Result<Mesh, String> {
+    let colors = [
+        [0.25, 0.65, 1.0, 1.0],
+        [1.0, 0.55, 0.25, 1.0],
+        [0.35, 1.0, 0.55, 1.0],
+    ];
+    let transformed = |spec: &LegacyClothSpec, color| {
+        source
+            .clone()
+            .transformed_by(Transform::from_matrix(spec.pose()))
+            .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, vec![color; source.count_vertices()])
+    };
+    // One writable primitive, three disconnected components: no constraints
+    // connect the sheets, but XPBD self-contact can see all three layers.
+    let mut combined = transformed(&layers[0], colors[0]);
+    for (layer, color) in layers[1..].iter().zip(colors[1..].iter().copied()) {
+        combined
+            .merge(&transformed(layer, color))
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(combined)
 }
