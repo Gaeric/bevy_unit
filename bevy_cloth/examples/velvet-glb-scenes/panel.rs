@@ -20,6 +20,7 @@ pub(super) enum Choice {
     Scene(LegacySceneId),
     Solver(ClothSolver),
     VbdFriction(bool),
+    VbdSelfContact(bool),
 }
 
 impl Choice {
@@ -27,7 +28,8 @@ impl Choice {
         match self {
             Self::Scene(scene) => demo.scene == scene,
             Self::Solver(solver) => demo.solver == solver,
-            Self::VbdFriction(enabled) => demo.vbd_friction == enabled,
+            Self::VbdFriction(enabled) => demo.vbd_options.friction == enabled,
+            Self::VbdSelfContact(enabled) => demo.vbd_options.self_contact == enabled,
         }
     }
 }
@@ -78,6 +80,14 @@ pub(super) fn spawn(mut commands: Commands) {
                 &[
                     ("Off", Choice::VbdFriction(false)),
                     ("On", Choice::VbdFriction(true)),
+                ][..],
+                true,
+            ),
+            (
+                "VBD self-contact",
+                &[
+                    ("Off", Choice::VbdSelfContact(false)),
+                    ("On", Choice::VbdSelfContact(true)),
                 ][..],
                 true,
             ),
@@ -146,9 +156,12 @@ fn select_choice(event: On<Activate>, choices: Query<&Choice>, mut demo: ResMut<
         Choice::Scene(scene) => demo.scene = scene,
         Choice::Solver(solver) => demo.solver = solver,
         Choice::VbdFriction(enabled) if demo.solver == ClothSolver::Vbd => {
-            demo.vbd_friction = enabled;
+            demo.vbd_options.friction = enabled;
         }
-        Choice::VbdFriction(_) => return,
+        Choice::VbdSelfContact(enabled) if demo.solver == ClothSolver::Vbd => {
+            demo.vbd_options.self_contact = enabled;
+        }
+        Choice::VbdFriction(_) | Choice::VbdSelfContact(_) => return,
     }
     demo.reset();
 }

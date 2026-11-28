@@ -57,8 +57,9 @@
   #+end_src
   默认 Attach / Colored GS。点击窗口顶部的 =Scene= 和 =Solver= 按钮切换，蓝色表示当前选择。
   切换或按 =R= 会重建初态并暂停；再次点击当前选项不会重置。等待窗口显示 =Paused, tick 0=。
-  选 VBD 后可切换 =VBD friction: Off / On=，默认关闭。
-  外部摩擦沿用当前场景的系数。
+  选 VBD 后可分别切换 =VBD friction: Off / On= 和 =VBD self-contact: Off / On=，两项默认关闭。
+  外部摩擦沿用当前场景的系数；VBD 示例的自接触不加切向摩擦，以便单独比较排斥效果。
+  自碰撞先看 Self Collision 的折叠和 Multiple 的层间穿插，再看 High Resolution。
   =Space= 播放/暂停，=S= 单步，中键拖拽环绕，滚轮缩放。固定步长 1/60 s，不追赶多 tick，
   机器跟不上时会慢放；这是接入和形态对照，不是性能基准。
 
@@ -66,7 +67,7 @@
   |---+------+---------------+--------|
   | 1 | attach | 40 / 1 | 四角硬挂点；布面落向静止球 |
   | 2 | collision | 16 / 1 | 两个顶角挂点；XPBD 的球沿 Z 往复，VBD 的球固定在 z=-0.5 m |
-  | 3 | self-collision | 60 / 1 | 倾斜布落地观察折叠 |
+  | 3 | self-collision | 60 / 1 | 倾斜布落地；用 VBD 自碰撞开关对比折叠 |
   | 4 | friction | 64 / 1 | XPBD 的球旋转并横移；VBD 的球静止，可比较静态摩擦开关 |
   | 5 | multiple | 64 / 3 | 三层不同颜色的布落到方块；可观察层间接触 |
   | 6 | high-resolution | 200 / 1 | 40,401 顶点布片落向静止球 |
@@ -78,7 +79,7 @@
   但属于同一个自碰撞域。它用一份织物贴图加顶点颜色区分各层。
 
   原场景的姿态、挂点和移动公式来自共享 Velvet fixture。生产网格 BVH 用有限地面和三角球/方块，
-  不复刻解析 SDF、旧版 LRA 或阻尼。本示例的 VBD 支持静态接触和可选外部摩擦；
+  不复刻解析 SDF、旧版 LRA 或阻尼。VBD 支持静态接触、可选外部摩擦和粒子自碰撞；
   VBD 的膜、弯曲参数是本示例的起点，与 XPBD 刚度未校准。排查接入时先看 Attach 和 Collision 的
   =cloth prepared= 日志是否分别为 1,681/4 和 289/2（粒子/固定挂点），再观察 Swirl 顶点是否跟随标记。
 * Blender 外部视觉对照

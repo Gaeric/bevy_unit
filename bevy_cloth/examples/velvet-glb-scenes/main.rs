@@ -33,13 +33,13 @@ use bevy_cloth::{
         legacy_scene_params,
     },
 };
-use scene::{SceneAssets, SceneEntity, SceneMotion};
+use scene::{SceneAssets, SceneEntity, SceneMotion, VbdOptions};
 
 #[derive(Resource)]
 struct Demo {
     scene: LegacySceneId,
     solver: ClothSolver,
-    vbd_friction: bool,
+    vbd_options: VbdOptions,
     rebuild: bool,
     playing: bool,
     step: bool,
@@ -51,7 +51,7 @@ impl Default for Demo {
         Self {
             scene: LegacySceneId::Attach,
             solver: ClothSolver::ColoredGs,
-            vbd_friction: false,
+            vbd_options: VbdOptions::default(),
             rebuild: true,
             playing: false,
             step: false,
@@ -188,14 +188,14 @@ fn rebuild_scene(
         &mut meshes,
         demo.scene,
         demo.solver,
-        demo.vbd_friction,
+        demo.vbd_options,
     )? {
         demo.rebuild = false;
         commands.insert_resource(SceneReady {
             mesh,
             solver: demo.solver,
             has_dynamic_pin: demo.scene == LegacySceneId::Swirl,
-            has_self_contact: demo.solver != ClothSolver::Vbd,
+            has_self_contact: demo.solver != ClothSolver::Vbd || demo.vbd_options.self_contact,
             ready: Arc::new(AtomicBool::new(false)),
         });
     }
@@ -337,7 +337,7 @@ fn update_hud(
         "Paused"
     };
     let features = if demo.solver == ClothSolver::Vbd {
-        let friction = if demo.vbd_friction {
+        let friction = if demo.vbd_options.friction {
             legacy_scene_params(demo.scene).friction
         } else {
             0.0
@@ -350,7 +350,14 @@ fn update_hud(
         } else {
             ""
         };
-        format!("VBD: static contact, friction μ={friction:.2}, no self-contact{frozen}")
+        let self_contact = if demo.vbd_options.self_contact {
+            "on"
+        } else {
+            "off"
+        };
+        format!(
+            "VBD: static contact, friction μ={friction:.2}, self-contact {self_contact}{frozen}"
+        )
     } else {
         "XPBD: mesh contact, friction, particle self-contact".to_owned()
     };

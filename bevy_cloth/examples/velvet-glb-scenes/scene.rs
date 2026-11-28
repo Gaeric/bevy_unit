@@ -107,6 +107,12 @@ impl SceneAssets {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub(super) struct VbdOptions {
+    pub friction: bool,
+    pub self_contact: bool,
+}
+
 /// Returns `Ok(None)` while the GLBs for this scene are still loading.
 /// Only the new cloth copy is written by the GPU; collider and source meshes are shared.
 pub(super) fn spawn_scene(
@@ -116,7 +122,7 @@ pub(super) fn spawn_scene(
     meshes: &mut Assets<Mesh>,
     id: LegacySceneId,
     solver: ClothSolver,
-    vbd_friction: bool,
+    vbd_options: VbdOptions,
 ) -> Result<Option<AssetId<Mesh>>, String> {
     let scene = legacy_comparison_scene(id).expect("all seven scenes have fixtures");
     let spec = &scene.cloths[0];
@@ -236,15 +242,15 @@ pub(super) fn spawn_scene(
             ClothVbdContact { stiffness: 200.0 },
         ));
     }
-    if !vbd || vbd_friction {
+    if !vbd || vbd_options.friction {
         cloth.insert(ClothExternalFriction {
             coefficient: params.friction,
         });
     }
-    if !vbd {
+    if !vbd || vbd_options.self_contact {
         cloth.insert(ClothSelfCollision {
             diameter: 2.0 * params.particle_diameter_scalar / spec.resolution as f32,
-            friction: params.friction,
+            friction: if vbd { 0.0 } else { params.friction },
             neighbor_capacity: params.max_num_neighbors,
         });
     }
