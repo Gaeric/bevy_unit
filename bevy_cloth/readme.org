@@ -57,6 +57,9 @@
   #+end_src
   默认 Attach / Colored GS。点击窗口顶部的 =Scene= 和 =Solver= 按钮切换，蓝色表示当前选择。
   切换或按 =R= 会重建初态并暂停；再次点击当前选项不会重置。等待窗口显示 =Paused, tick 0=。
+  =Substeps / tick= 和 =Sweeps / substep= 各可拖动到 1–20。点 =Apply= 才应用新值、重建并清空本轮计时统计；
+  =Active= 显示已应用值。切换求解器或按 =R= 保留已应用值，切换场景恢复新场景的默认值（High Resolution 为 10 × 10）。
+  固定 tick 步长仍为 1/60 s；增加子步会缩短每个子步的步长，增加 sweeps 只改变每子步的迭代轮数。
   选 VBD 后可分别切换 =VBD friction: Off / On= 和 =VBD self-contact: Off / On=，两项默认关闭。
   外部摩擦沿用当前场景的系数；VBD 示例的自接触不加切向摩擦，以便单独比较排斥效果。
   自碰撞先看 Self Collision 的折叠和 Multiple 的层间穿插，再看 High Resolution。

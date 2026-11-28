@@ -1,9 +1,12 @@
-//! Scene and solver selectors and GPU timing controls for the GLB example.
+//! Scene, solver, step-budget and GPU timing controls for the GLB example.
 
 use bevy::{
     picking::{Pickable, hover::Hovered},
     prelude::*,
-    ui_widgets::{Activate, Button},
+    ui_widgets::{
+        Activate, Button, Slider, SliderPrecision, SliderRange, SliderThumb, SliderValue,
+        TrackClick, ValueChange,
+    },
 };
 use bevy_cloth::{
     ClothSolver,
@@ -12,8 +15,10 @@ use bevy_cloth::{
 };
 use std::fmt::Write as _;
 
-use super::{Demo, SceneReady};
+use super::{Demo, SceneReady, StepBudget};
 
+const MAX_STEP_COUNT: u32 = 20;
+const SLIDER_THUMB_SIZE: f32 = 12.0;
 const TIMING_OFF: &str = "GPU Timing: Off";
 const TIMING_ON: &str = "GPU Timing: On";
 
@@ -35,6 +40,38 @@ pub(super) enum TimingAction {
 #[derive(Component)]
 pub(super) struct VbdOptionRow;
 
+#[derive(Clone, Copy)]
+enum BudgetField {
+    Substeps,
+    Sweeps,
+}
+
+impl BudgetField {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Substeps => "Substeps / tick",
+            Self::Sweeps => "Sweeps / substep",
+        }
+    }
+
+    fn value(self, budget: StepBudget) -> u32 {
+        match self {
+            Self::Substeps => budget.substeps,
+            Self::Sweeps => budget.sweeps,
+        }
+    }
+}
+
+#[derive(Component)]
+pub(super) struct BudgetSlider {
+    field: BudgetField,
+    label: Entity,
+    thumb: Entity,
+}
+
+#[derive(Component)]
+pub(super) struct ApplyBudget;
+
 #[derive(Clone, Copy, Component)]
 pub(super) enum Choice {
     Scene(LegacySceneId),
@@ -54,7 +91,7 @@ impl Choice {
     }
 }
 
-pub(super) fn spawn(mut commands: Commands) {
+pub(super) fn spawn(mut commands: Commands, demo: Res<Demo>) {
     use LegacySceneId::*;
 
     let mut panel = commands.spawn((
@@ -157,12 +194,171 @@ pub(super) fn spawn(mut commands: Commands) {
                 }
             });
         }
+        spawn_budget_controls(panel, demo.pending_budget);
         panel.spawn((
             Hud,
             Text::new("Loading GLBs"),
             TextFont::from_font_size(14.0),
         ));
     });
+}
+
+fn spawn_budget_controls(panel: &mut ChildSpawnerCommands, budget: StepBudget) {
+    panel
+        .spawn(Node {
+            flex_wrap: FlexWrap::Wrap,
+            align_items: AlignItems::Center,
+            column_gap: px(12),
+            row_gap: px(4),
+            ..default()
+        })
+        .with_children(|row| {
+            for field in [BudgetField::Substeps, BudgetField::Sweeps] {
+                spawn_budget_slider(row, field, field.value(budget));
+            }
+            row.spawn((
+                Button,
+                ApplyBudget,
+                Hovered::default(),
+                Node {
+                    padding: UiRect::axes(px(10), px(5)),
+                    border_radius: BorderRadius::all(px(4)),
+                    ..default()
+                },
+                button_color(false, false),
+                children![(
+                    Text::new("Apply"),
+                    TextFont::from_font_size(14.0),
+                    Pickable::IGNORE,
+                )],
+            ))
+            .observe(apply_budget);
+        });
+}
+
+fn spawn_budget_slider(row: &mut ChildSpawnerCommands, field: BudgetField, count: u32) {
+    row.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: px(6),
+        ..default()
+    })
+    .with_children(|group| {
+        let label = group
+            .spawn((
+                Text::new(format!("{}: {count}", field.label())),
+                TextFont::from_font_size(14.0),
+            ))
+            .id();
+        let range = SliderRange::new(1.0, MAX_STEP_COUNT as f32);
+        let mut slider = group.spawn((
+            Slider {
+                track_click: TrackClick::Snap,
+                ..default()
+            },
+            SliderValue(count as f32),
+            range,
+            SliderPrecision(0),
+            Node {
+                width: px(140),
+                height: px(18),
+                border_radius: BorderRadius::all(px(4)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.14, 0.19, 0.25)),
+        ));
+        let mut thumb = Entity::PLACEHOLDER;
+        // Position the thumb over the same travel distance the widget uses for dragging.
+        slider.with_children(|track| {
+            track
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(0),
+                        right: px(SLIDER_THUMB_SIZE),
+                        top: px(0),
+                        bottom: px(0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_children(|travel| {
+                    thumb = travel
+                        .spawn((
+                            SliderThumb,
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: percent(range.thumb_position(count as f32) * 100.0),
+                                width: px(SLIDER_THUMB_SIZE),
+                                height: px(18),
+                                border_radius: BorderRadius::all(px(4)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.28, 0.64, 0.95)),
+                        ))
+                        .id();
+                });
+        });
+        slider
+            .insert(BudgetSlider {
+                field,
+                label,
+                thumb,
+            })
+            .observe(edit_budget);
+    });
+}
+
+fn edit_budget(
+    event: On<ValueChange<f32>>,
+    sliders: Query<(&BudgetSlider, &SliderRange)>,
+    mut demo: ResMut<Demo>,
+) {
+    let Ok((slider, range)) = sliders.get(event.source) else {
+        return;
+    };
+    if !event.value.is_finite() {
+        return;
+    }
+    let count = range.clamp(event.value.round()) as u32;
+    match slider.field {
+        BudgetField::Substeps => demo.pending_budget.substeps = count,
+        BudgetField::Sweeps => demo.pending_budget.sweeps = count,
+    }
+}
+
+fn apply_budget(_: On<Activate>, mut demo: ResMut<Demo>, mut timings: ResMut<ClothGpuTimings>) {
+    if demo.budget != demo.pending_budget {
+        demo.budget = demo.pending_budget;
+        demo.reset(&mut timings);
+    }
+}
+
+pub(super) fn update_budget_controls(
+    mut commands: Commands,
+    demo: Res<Demo>,
+    sliders: Query<(Entity, &BudgetSlider, &SliderRange, &SliderValue)>,
+    mut labels: Query<&mut Text>,
+    mut thumbs: Query<&mut Node, With<SliderThumb>>,
+    mut apply: Single<(&Hovered, &mut BackgroundColor), With<ApplyBudget>>,
+) {
+    for (entity, slider, range, value) in &sliders {
+        let count = slider.field.value(demo.pending_budget);
+        if value.0 == count as f32 {
+            continue;
+        }
+        commands.entity(entity).insert(SliderValue(count as f32));
+        if let Ok(mut label) = labels.get_mut(slider.label) {
+            label.0 = format!("{}: {count}", slider.field.label());
+        }
+        if let Ok(mut thumb) = thumbs.get_mut(slider.thumb) {
+            thumb.left = percent(range.thumb_position(count as f32) * 100.0);
+        }
+    }
+    let (hovered, background) = &mut *apply;
+    background.set_if_neq(button_color(
+        demo.budget != demo.pending_budget,
+        hovered.get(),
+    ));
 }
 
 fn select_choice(
@@ -178,7 +374,10 @@ fn select_choice(
         return;
     }
     match choice {
-        Choice::Scene(scene) => demo.scene = scene,
+        Choice::Scene(scene) => {
+            demo.scene = scene;
+            demo.budget = StepBudget::for_scene(scene);
+        }
         Choice::Solver(solver) => demo.solver = solver,
         Choice::VbdFriction(enabled) if demo.solver == ClothSolver::Vbd => {
             demo.vbd_options.friction = enabled;

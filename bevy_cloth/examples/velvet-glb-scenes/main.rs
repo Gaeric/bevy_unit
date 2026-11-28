@@ -36,11 +36,29 @@ use bevy_cloth::{
 };
 use scene::{SceneAssets, SceneEntity, SceneMotion, VbdOptions};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct StepBudget {
+    substeps: u32,
+    sweeps: u32,
+}
+
+impl StepBudget {
+    fn for_scene(scene: LegacySceneId) -> Self {
+        let params = legacy_scene_params(scene);
+        Self {
+            substeps: params.num_substeps,
+            sweeps: params.num_iterations,
+        }
+    }
+}
+
 #[derive(Resource)]
 struct Demo {
     scene: LegacySceneId,
     solver: ClothSolver,
     vbd_options: VbdOptions,
+    budget: StepBudget,
+    pending_budget: StepBudget,
     rebuild: bool,
     playing: bool,
     step: bool,
@@ -50,10 +68,14 @@ struct Demo {
 
 impl Default for Demo {
     fn default() -> Self {
+        let scene = LegacySceneId::Attach;
+        let budget = StepBudget::for_scene(scene);
         Self {
-            scene: LegacySceneId::Attach,
+            scene,
             solver: ClothSolver::ColoredGs,
             vbd_options: VbdOptions::default(),
+            budget,
+            pending_budget: budget,
             rebuild: true,
             playing: false,
             step: false,
@@ -66,6 +88,7 @@ impl Default for Demo {
 impl Demo {
     fn reset(&mut self, timings: &mut ClothGpuTimings) {
         timings.set_target(None);
+        self.pending_budget = self.budget;
         self.rebuild = true;
         self.playing = false;
         self.step = false;
@@ -127,6 +150,7 @@ fn main() -> AppExit {
             rebuild_scene,
             update_hud,
             panel::highlight_selection,
+            panel::update_budget_controls,
             panel::update_timings,
         )
             .chain(),
@@ -202,6 +226,7 @@ fn rebuild_scene(
         demo.scene,
         demo.solver,
         demo.vbd_options,
+        demo.budget,
     )? {
         demo.rebuild = false;
         if demo.timing_enabled {
@@ -249,6 +274,10 @@ fn set_tick_budget(
 }
 
 fn animate_scene(mut demo: ResMut<Demo>, mut movers: Query<(&SceneMotion, &mut Transform)>) {
+    // A UI click can request a rebuild after First has already budgeted a tick.
+    if demo.rebuild {
+        return;
+    }
     demo.tick += 1;
     let time = (demo.tick as f64 / LEGACY_FIXED_HZ) as f32;
     for (motion, mut transform) in &mut movers {
@@ -379,9 +408,11 @@ fn update_hud(
         "XPBD: mesh contact, friction, particle self-contact".to_owned()
     };
     hud.0 = format!(
-        "{}  |  {:?}  |  {state}, tick {}\n{features}\nSpace play/pause  S step  R reset",
+        "{}  |  {:?}  |  {state}, tick {}\nActive: {} substeps/tick × {} sweeps/substep\n{features}\nSpace play/pause  S step  R reset",
         demo.scene.label(),
         demo.solver,
-        demo.tick
+        demo.tick,
+        demo.budget.substeps,
+        demo.budget.sweeps,
     );
 }

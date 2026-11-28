@@ -17,6 +17,8 @@ use bevy_cloth::{
     },
 };
 
+use super::StepBudget;
+
 const RESOLUTIONS: [u32; 6] = [16, 36, 40, 60, 64, 200];
 const SURFACE_DENSITY: f32 = 0.2; // kg/m² for this demo, independent of grid resolution.
 
@@ -123,6 +125,7 @@ pub(super) fn spawn_scene(
     id: LegacySceneId,
     solver: ClothSolver,
     vbd_options: VbdOptions,
+    budget: StepBudget,
 ) -> Result<Option<(Entity, AssetId<Mesh>)>, String> {
     let scene = legacy_comparison_scene(id).expect("all seven scenes have fixtures");
     let spec = &scene.cloths[0];
@@ -227,8 +230,8 @@ pub(super) fn spawn_scene(
         },
         ClothStepSettings {
             gravity: params.gravity,
-            substeps: params.num_substeps,
-            iterations: params.num_iterations,
+            substeps: budget.substeps,
+            iterations: budget.sweeps,
         },
     ));
     if vbd {
