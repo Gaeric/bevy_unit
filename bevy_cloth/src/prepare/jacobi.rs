@@ -11,7 +11,7 @@ pub(crate) struct JacobiSchedule {
 #[derive(Clone, Debug)]
 pub(crate) struct JacobiAdjacency {
     pub offsets: Vec<u32>,
-    /// Slot indices address the shared correction array.
+    /// Correction slot indices start at zero in each phase.
     pub slots: Vec<u32>,
 }
 
@@ -24,7 +24,7 @@ impl JacobiSchedule {
     ) -> Result<Self, String> {
         // Match jacobi.wesl: stretch has two slots per edge. The second phase
         // has four per hinge, then one per tether (only its free endpoint).
-        let mut schedule = Self {
+        Ok(Self {
             stretch: JacobiAdjacency::new(
                 particle_count,
                 2 * stretch.len() as u64,
@@ -37,12 +37,7 @@ impl JacobiSchedule {
                     .flat_map(|hinge| hinge.particles)
                     .chain(tethers.iter().map(|tether| tether.particle)),
             )?,
-        };
-        let stretch_slots = schedule.stretch.slots.len() as u32;
-        for slot in &mut schedule.bend_and_tethers.slots {
-            *slot = slot.checked_add(stretch_slots).ok_or("Jacobi endpoint count exceeds u32")?;
-        }
-        Ok(schedule)
+        })
     }
 }
 

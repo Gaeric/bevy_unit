@@ -135,7 +135,11 @@ impl JacobiLayouts {
         cloth: &ClothBuffers,
         schedule: &JacobiSchedule,
     ) -> Option<JacobiBindGroups> {
-        let scratch_slots = schedule.stretch.slots.len() + schedule.bend_and_tethers.slots.len();
+        let scratch_slots = schedule
+            .stretch
+            .slots
+            .len()
+            .max(schedule.bend_and_tethers.slots.len());
         if scratch_slots == 0 {
             return None;
         }
@@ -146,7 +150,7 @@ impl JacobiLayouts {
                 usage: BufferUsages::STORAGE,
             })
         };
-        // Each phase addresses a separate range of correction slots.
+        // The first gather consumes stretch corrections before the second phase overwrites them.
         let corrections = device.create_buffer(&BufferDescriptor {
             label: Some("xpbd Jacobi endpoint corrections"),
             size: scratch_slots as u64 * 16,

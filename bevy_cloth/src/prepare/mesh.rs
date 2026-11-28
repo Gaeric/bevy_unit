@@ -586,7 +586,7 @@ mod tests {
         assert_eq!(schedule.stretch.offsets, [0, 3, 6, 8, 10]);
         assert_eq!(schedule.stretch.slots, [0, 2, 4, 1, 6, 8, 3, 7, 5, 9]);
         assert_eq!(schedule.bend_and_tethers.offsets, [0, 1, 2, 3, 4]);
-        assert_eq!(schedule.bend_and_tethers.slots, [12, 13, 10, 11]);
+        assert_eq!(schedule.bend_and_tethers.slots, [2, 3, 0, 1]);
     }
 
     #[test]
@@ -630,7 +630,7 @@ mod tests {
         assert_eq!(schedule.stretch.offsets, [0, 3, 6, 8, 10]);
         assert_eq!(schedule.stretch.slots, [0, 2, 4, 1, 6, 8, 3, 7, 5, 9]);
         assert_eq!(schedule.bend_and_tethers.offsets, [0, 2, 4, 5, 7]);
-        assert_eq!(schedule.bend_and_tethers.slots, [12, 14, 13, 15, 10, 11, 16]);
+        assert_eq!(schedule.bend_and_tethers.slots, [2, 4, 3, 5, 0, 1, 6]);
     }
 
     #[test]

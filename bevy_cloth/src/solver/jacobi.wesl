@@ -66,7 +66,7 @@ fn solve_bend_jacobi(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let b = snapshot[ids.y];
     let c = snapshot[ids.z];
     let d = snapshot[ids.w];
-    let slot = 2u * step_params.stretch_count + 4u * index;
+    let slot = 4u * index;
     corrections[slot] = vec4<f32>(0.0);
     corrections[slot + 1u] = vec4<f32>(0.0);
     corrections[slot + 2u] = vec4<f32>(0.0);
@@ -108,7 +108,7 @@ fn solve_tethers_jacobi(@builtin(global_invocation_id) invocation: vec3<u32>) {
         snapshot[tether.particle], snapshot[tether.anchor].position, tether,
         tether_lambdas[index], step_params.substep_dt, degree(tether.particle),
     );
-    let slot = 2u * step_params.stretch_count + 4u * step_params.bend_count + index;
+    let slot = 4u * step_params.bend_count + index;
     tether_lambdas[index] = update.lambda;
     corrections[slot] = vec4<f32>(update.correction, 0.0);
 }
